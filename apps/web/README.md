@@ -1482,6 +1482,23 @@ vibld.com's pricing page is built from the limits in code
 from here. To have it state a plan's new limits, change them in
 `worker/entitlement.ts` as well, then reset the plan here.
 
+## Admin: model access (D133, D135, D136)
+
+Which models each plan includes is set on the admin page, under **Models**:
+one box per model and plan, saved for all three plans at once (`plan_models`,
+migration 0044). Until the first save, `VIBLD_MODEL_POLICY` and the plan rule
+in `worker/model-access.ts` (D66: Free builds with GPT-6 Luna) decide, and the
+boxes show that starting setting. Once saved, the boxes decide and the policy
+is not read; **Go back to the policy** deletes the saved lists. A deployment
+that sells no plans uses the Free column. A model whose provider has no key is
+never offered, ticked or not, and a model added to the catalog later is on no
+saved plan until it is ticked.
+
+An account can be given extra models on top of its plan's from its own page,
+under **Models** (`/api/admin/user/models`, `user_models`). Clearing every box
+returns it to its plan. Every change to either is in the audit log, and both
+apply to builds, looks and chat within 30 seconds.
+
 ## Admin: accounts (D73)
 
 Each account has an admin page in the builder, `/admin/users/<Clerk user
@@ -1497,6 +1514,7 @@ it. The routes are all behind the same admin check as the credit grants
 | `/api/admin/user/detail`               | The account page's contents                                                                                                                                            |
 | `/api/admin/user/gift`, `/gift/revoke` | Give a Build or Ship tier with an optional last day and no Stripe charge, or take it back                                                                              |
 | `/api/admin/user/overrides`            | Set the account's own active-project limit and monthly spend cap, in place of its tier's                                                                               |
+| `/api/admin/user/models`               | Give the account extra models on top of its plan's (D136), or clear them                                                                                               |
 | `/api/admin/user/ban`, `/unban`        | Refuse every request from the account and ban it in Clerk, stopping its builds, previews and share links and holding its sites; or lift the ban (held sites stay held) |
 | `/api/admin/user/delete`               | The account deletion below (L32), asked for by an admin who types the account's email                                                                                  |
 | `/api/admin/audit`                     | The audit log, most recent first                                                                                                                                       |

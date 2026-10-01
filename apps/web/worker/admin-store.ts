@@ -41,6 +41,11 @@ export const AUDIT_ACTIONS = [
   // Setting a plan's limits in the panel, and putting them back (D134).
   'plan-limits',
   'plan-limits-reset',
+  // Setting which models each plan includes, and going back to the
+  // policy (D133); an account's extra models (D136).
+  'model-access',
+  'model-access-reset',
+  'person-models',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -85,6 +90,25 @@ export interface BanRecord {
 export interface OverrideRecord extends UserOverrides {
   updatedBy: string;
   updatedAt: string;
+}
+
+/** The extra models an admin granted one account (D136). */
+export interface PersonModelsRecord {
+  models: string[];
+  updatedBy: string;
+  updatedAt: string;
+}
+
+/** Model ids stored as a JSON array, read back as strings only. */
+export function modelIdsOf(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is string => typeof id === 'string')
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 /** One project as the admin user page shows it. */
@@ -420,6 +444,50 @@ export class AdminStore {
           updatedAt: row.updated_at,
         }
       : null;
+  }
+
+  async personModels(userId: string): Promise<PersonModelsRecord | null> {
+    const row = await this.#db
+      .prepare(`SELECT * FROM user_models WHERE user_id = ?1`)
+      .bind(userId)
+      .first<{ models: string; updated_by: string; updated_at: string }>();
+    return row
+      ? {
+          models: modelIdsOf(row.models),
+          updatedBy: row.updated_by,
+          updatedAt: row.updated_at,
+        }
+      : null;
+  }
+
+  /**
+   * Set the extra models an account has on top of its plan's (D136). An
+   * empty list removes the row, which returns the account to its plan.
+   */
+  async setPersonModels(
+    userId: string,
+    models: readonly string[],
+    by: string,
+    now: string,
+    audit: AuditEntry,
+  ): Promise<void> {
+    await this.#db.batch([
+      models.length === 0
+        ? this.#db
+            .prepare(`DELETE FROM user_models WHERE user_id = ?1`)
+            .bind(userId)
+        : this.#db
+            .prepare(
+              `INSERT INTO user_models (user_id, models, updated_by, updated_at)
+               VALUES (?1, ?2, ?3, ?4)
+               ON CONFLICT(user_id) DO UPDATE SET
+                 models = excluded.models,
+                 updated_by = excluded.updated_by,
+                 updated_at = excluded.updated_at`,
+            )
+            .bind(userId, JSON.stringify(models), by, now),
+      this.#audit(audit),
+    ]);
   }
 
   /** Set both overrides at once. Null clears one back to the plan's. */

@@ -50,6 +50,7 @@ const DETAIL = (over: Record<string, unknown> = {}) => ({
   },
   gifts: [],
   overrides: null,
+  models: { plan: null, extra: null },
   limits: {
     activeProjects: null,
     tierActiveProjects: null,
@@ -103,6 +104,32 @@ const DETAIL = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const MODEL_ACCESS = {
+  catalog: [
+    {
+      id: 'claude-sonnet-5',
+      label: 'Claude Sonnet 5',
+      provider: 'anthropic',
+      deployable: true,
+    },
+    {
+      id: 'gpt-6-luna',
+      label: 'GPT-6 Luna',
+      provider: 'openai',
+      deployable: true,
+    },
+    {
+      id: 'deepseek-flash',
+      label: 'DeepSeek Flash',
+      provider: 'deepseek',
+      deployable: false,
+    },
+  ],
+  plans: { free: ['gpt-6-luna'], build: [], ship: [] },
+  saved: null,
+  policySet: true,
+};
+
 function serving(
   detail: () => unknown,
   answer: (url: string) => unknown = () => ({
@@ -123,6 +150,7 @@ function serving(
       return reply(answer(url));
     }
     if (url.includes('/api/admin/user/detail')) return reply(detail());
+    if (url === '/api/admin/models') return reply(MODEL_ACCESS);
     throw new Error(`nothing is serving ${url}`);
   }) as typeof fetch;
   return posts;
@@ -366,5 +394,62 @@ describe('what the deeper page says', () => {
     assert.equal(user.projects[0]!.site!.url, null);
     assert.deepEqual(user.spendByMonth, []);
     assert.deepEqual(user.github, { connection: null, repositories: [] });
+  });
+});
+
+describe('an account’s extra models (D136)', () => {
+  it('says what the plan includes and posts the ticked extras', async () => {
+    const posts = serving(() =>
+      DETAIL({
+        models: {
+          plan: ['gpt-6-luna'],
+          extra: {
+            models: ['deepseek-flash'],
+            updatedBy: 'admin@example.com',
+            updatedAt: '2026-10-01T05:00:00.000Z',
+          },
+        },
+      }),
+    );
+    const view = await mount();
+    const models = view.group('Models');
+    assert.match(models.textContent ?? '', /plan includes: GPT-6 Luna\./);
+    assert.match(
+      models.textContent ?? '',
+      /DeepSeek Flash \(no key, not offered\)/,
+    );
+    const boxes = [
+      ...models.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ];
+    assert.deepEqual(
+      boxes.map((box) => box.checked),
+      [false, false, true],
+    );
+    await act(async () => {
+      boxes[0]!.click();
+    });
+    await act(async () => {
+      view.button(/^Save models$/).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.deepEqual(posts[0], {
+      url: '/api/admin/user/models',
+      body: {
+        userId: USER,
+        models: ['claude-sonnet-5', 'deepseek-flash'],
+        reason: '',
+      },
+    });
+    view.unmount();
+  });
+
+  it('says the policy decides while no plan models are saved', async () => {
+    serving(() => DETAIL());
+    const view = await mount();
+    assert.match(
+      view.group('Models').textContent ?? '',
+      /VIBLD_MODEL_POLICY decides the Build plan's models/,
+    );
+    view.unmount();
   });
 });

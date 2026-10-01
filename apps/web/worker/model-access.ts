@@ -9,6 +9,7 @@ import {
   parseModelPolicy,
 } from '@vibld/ai';
 import type { ModelChoice } from '@vibld/ai';
+import { TIER_RANK } from './entitlement.ts';
 import type { Tier } from './entitlement.ts';
 
 /**
@@ -67,41 +68,157 @@ export const TIER_MODELS: Readonly<Partial<Record<Tier, readonly string[]>>> = {
 export const FREE_PLAN_MODELS_NOTE =
   'Free builds use GPT-6 Luna. Paid plans unlock the other models.';
 
+/**
+ * Model access saved in the admin panel (D133), as it applies to one
+ * caller. `plans` is null until an admin saves it, and then
+ * `VIBLD_MODEL_POLICY` and `TIER_MODELS` stop deciding. `extras` are the
+ * models an admin granted this account on top of its plan's (D136), which
+ * apply either way. Read by `modelGrantSource` in `model-grants.ts`.
+ */
+export interface ModelGrantSource {
+  plans: Readonly<Record<Tier, readonly string[]>> | null;
+  extras: readonly string[];
+}
+
+/** Nothing saved in the panel: the policy and D66 decide, as before it. */
+export const NO_PANEL: ModelGrantSource = { plans: null, extras: [] };
+
+/** What the deployment can serve at all: a model whose provider has a key. */
+function deployable(env: ModelAccessEnv): ModelChoice[] {
+  return availableModels(configuredProviders(env));
+}
+
 /** What the policy grants and the deployment can serve, before the tier. */
 function policyGrantFor(env: ModelAccessEnv, principal: string): ModelChoice[] {
   return allowedModels(
     parseModelPolicy(env.VIBLD_MODEL_POLICY),
     principal,
-    availableModels(configuredProviders(env)),
+    deployable(env),
   );
 }
 
-/** Everything this principal may use here, after all three filters. */
-export function grantedFor(
+/** The models the plan's own list gives, before this account's extras. */
+function planGrantFor(
   env: ModelAccessEnv,
   principal: string,
   tier: Tier | null,
+  source: ModelGrantSource,
 ): ModelChoice[] {
+  if (source.plans) {
+    // A deployment that sells no plans counts everybody as Free (D135).
+    const listed = source.plans[tier ?? 'free'];
+    return deployable(env).filter((model) => listed.includes(model.id));
+  }
   const granted = policyGrantFor(env, principal);
   const held = tier ? TIER_MODELS[tier] : undefined;
   return held ? granted.filter((model) => held.includes(model.id)) : granted;
 }
 
+/** `models` with this account's extras added, in catalog order. */
+function withExtras(
+  env: ModelAccessEnv,
+  models: readonly ModelChoice[],
+  source: ModelGrantSource,
+): ModelChoice[] {
+  if (source.extras.length === 0) return [...models];
+  const ids = new Set(models.map((model) => model.id));
+  return deployable(env).filter(
+    (model) => ids.has(model.id) || source.extras.includes(model.id),
+  );
+}
+
+/** Everything this principal may use here, after every filter. */
+export function grantedFor(
+  env: ModelAccessEnv,
+  principal: string,
+  tier: Tier | null,
+  source: ModelGrantSource = NO_PANEL,
+): ModelChoice[] {
+  return withExtras(env, planGrantFor(env, principal, tier, source), source);
+}
+
 /**
- * Whether this caller's plan withholds a model the policy would otherwise
- * give them, which is when the builder says what a paid plan unlocks.
- * False for a Free account the policy already holds to Luna: an upgrade
- * would change nothing there, and saying it would is a false promise.
+ * What this caller would have on a better plan: under the policy, what it
+ * grants them whatever the plan; under the panel, what any higher plan
+ * includes. Their own grant is in it either way.
+ */
+function upgradeGrantFor(
+  env: ModelAccessEnv,
+  principal: string,
+  tier: Tier | null,
+  source: ModelGrantSource,
+): ModelChoice[] {
+  if (!source.plans) {
+    return withExtras(env, policyGrantFor(env, principal), source);
+  }
+  // No plans on sale, so none to move to.
+  if (tier === null) return grantedFor(env, principal, tier, source);
+  const plans = source.plans;
+  const higher = (Object.keys(plans) as Tier[]).filter(
+    (other) => TIER_RANK[other] > TIER_RANK[tier],
+  );
+  const ids = new Set([
+    ...grantedFor(env, principal, tier, source).map((model) => model.id),
+    ...higher.flatMap((other) => plans[other]),
+  ]);
+  return deployable(env).filter((model) => ids.has(model.id));
+}
+
+/**
+ * Whether this caller's plan withholds a model they would have on a better
+ * one, which is when the builder says what a paid plan unlocks. False for
+ * a Free account the policy already holds to Luna: an upgrade would change
+ * nothing there, and saying it would is a false promise.
  */
 export function planWithholdsModels(
   env: ModelAccessEnv,
   principal: string,
   tier: Tier | null,
+  source: ModelGrantSource = NO_PANEL,
 ): boolean {
   return (
-    grantedFor(env, principal, tier).length <
-    policyGrantFor(env, principal).length
+    grantedFor(env, principal, tier, source).length <
+    upgradeGrantFor(env, principal, tier, source).length
   );
+}
+
+/** "A", "A and B", "A, B and C", or "N models" past three. */
+function namesOf(models: readonly ModelChoice[]): string {
+  if (models.length > 3) return `${models.length} models`;
+  const labels = models.map((model) => model.label);
+  return labels.length <= 1
+    ? (labels[0] ?? '')
+    : `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}`;
+}
+
+/**
+ * The sentence the builder shows where the picker is when the plan holds
+ * this caller back, and the refusal of a model the plan does not include;
+ * null when it does not. `FREE_PLAN_MODELS_NOTE` until a panel policy is
+ * saved, then one that names what the plan includes.
+ */
+export function planModelsNote(
+  env: ModelAccessEnv,
+  principal: string,
+  tier: Tier | null,
+  source: ModelGrantSource = NO_PANEL,
+): string | null {
+  if (!planWithholdsModels(env, principal, tier, source)) return null;
+  // The D66 sentence only while it is true: no panel lists, and no extra
+  // models an admin gave this account (Codex review of internal PR 344).
+  if (!source.plans && source.extras.length === 0) {
+    return FREE_PLAN_MODELS_NOTE;
+  }
+  const granted = grantedFor(env, principal, tier, source);
+  const has =
+    granted.length === 0
+      ? 'Your plan includes no model this deployment can run.'
+      : source.extras.length > 0
+        ? `You build with ${namesOf(granted)}.`
+        : `Your plan builds with ${namesOf(granted)}.`;
+  return `${has} ${
+    tier === 'free' ? 'Paid plans unlock' : 'The Ship plan unlocks'
+  } more models.`;
 }
 
 /**
@@ -118,15 +235,16 @@ export function decideModel(
   tier: Tier | null,
   chosen: string | null,
   fallback: string,
+  source: ModelGrantSource = NO_PANEL,
 ): ModelDecision {
-  const policyGrant = policyGrantFor(env, principal);
-  const granted = grantedFor(env, principal, tier);
-  const withheld = granted.length < policyGrant.length;
+  const upgradeGrant = upgradeGrantFor(env, principal, tier, source);
+  const granted = grantedFor(env, principal, tier, source);
+  const withheld = granted.length < upgradeGrant.length;
 
   if (granted.length === 0) {
     // The plan's own model is not deployable here (no OpenAI key, for
     // Free), which no edit to the policy would fix.
-    if (withheld) {
+    if (withheld && !source.plans) {
       const names = (tier ? (TIER_MODELS[tier] ?? []) : [])
         .map((id) => findModel(id)?.label ?? id)
         .join(', ');
@@ -134,6 +252,20 @@ export function decideModel(
         ok: false,
         status: 403,
         error: `This plan builds with ${names}, which this deployment cannot serve.`,
+      };
+    }
+    if (withheld) {
+      return {
+        ok: false,
+        status: 403,
+        error: planModelsNote(env, principal, tier, source)!,
+      };
+    }
+    if (source.plans) {
+      return {
+        ok: false,
+        status: 403,
+        error: `No model is available to ${principal} on this deployment. A platform admin can change which models each plan includes in the admin panel.`,
       };
     }
     // Names the identity it matched on. A policy keyed on the wrong address
@@ -162,12 +294,12 @@ export function decideModel(
     // made request, and the sentence says what the plan includes.
     if (!granted.some((model) => model.id === wanted)) {
       const byPlan =
-        withheld && policyGrant.some((model) => model.id === wanted);
+        withheld && upgradeGrant.some((model) => model.id === wanted);
       return {
         ok: false,
         status: 403,
         error: byPlan
-          ? FREE_PLAN_MODELS_NOTE
+          ? planModelsNote(env, principal, tier, source)!
           : `That model is not available to ${principal}.`,
       };
     }
@@ -213,8 +345,9 @@ export function draftModelFor(
   env: ModelAccessEnv,
   principal: string,
   tier: Tier | null,
+  source: ModelGrantSource = NO_PANEL,
 ): string | null {
-  return grantedFor(env, principal, tier).some(
+  return grantedFor(env, principal, tier, source).some(
     (model) => model.id === DRAFT_MODEL,
   )
     ? DRAFT_MODEL

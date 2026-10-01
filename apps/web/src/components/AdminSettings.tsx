@@ -4,6 +4,7 @@ import { AdminPanel } from './AdminPanel.tsx';
 import { DeletionsPanel } from './DeletionsPanel.tsx';
 import { InvitePanel } from './InvitePanel.tsx';
 import { ParkedQueuePanel } from './ParkedQueuePanel.tsx';
+import { ModelAccessPanel } from './ModelAccessPanel.tsx';
 import { PlansPanel } from './PlansPanel.tsx';
 import { ProviderKeysPanel } from './ProviderKeysPanel.tsx';
 import { SiteTakedown } from './SiteTakedown.tsx';
@@ -86,6 +87,7 @@ export function AdminSettings({ isAdmin }: { isAdmin: boolean | null }) {
         <AdminAccounts />
         <ProviderKeysPanel />
         <PlansPanel />
+        <ModelAccessPanel />
         <AdminPanel />
         <InvitePanel />
         <ParkedQueuePanel />

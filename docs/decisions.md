@@ -459,6 +459,12 @@ builder, and whether the repository should move to his account.
 - **D134. Plan limits are editable in the panel.** Active projects and the
   monthly allowance per plan are set in the panel and audited. vibld.com's
   pricing copy is updated by hand to match.
+- **D135. A deployment that sells no plans uses the Free plan's models.**
+  Once model access is saved in the panel, everybody on a deployment with
+  no billing counts as Free, so the panel's Free row decides what they get.
+- **D136. A per-person setting adds models to the plan's.** An account gets
+  its plan's models plus the extras an admin grants it; removing the extras
+  returns it to the plan.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

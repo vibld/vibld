@@ -540,7 +540,7 @@ export class AccountDeletionStore {
    * person's as the ones copied out of it.
    *
    * And what an admin set for the account (docs/decisions.md D73): a gifted
-   * plan, overrides of its limits, and a ban. None of them is money, and
+   * plan, overrides of its limits, extra models (D136), and a ban. None of them is money, and
    * none means anything once the account is gone; what was done, and by
    * whom, stays in the audit log, re-keyed with the credit records below.
    */
@@ -555,13 +555,14 @@ export class AccountDeletionStore {
       `DELETE FROM accounts WHERE user_id = ?1`,
       `DELETE FROM plan_gifts WHERE user_id = ?1`,
       `DELETE FROM user_overrides WHERE user_id = ?1`,
+      `DELETE FROM user_models WHERE user_id = ?1`,
       `DELETE FROM user_bans WHERE user_id = ?1`,
     ]) {
       await this.#db.prepare(sql).bind(userId).run();
     }
   }
 
-  static readonly ACCOUNT_ROW_QUERIES = 10;
+  static readonly ACCOUNT_ROW_QUERIES = 11;
 
   /**
    * The published site's catalogue, for a site that is already down.

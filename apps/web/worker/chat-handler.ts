@@ -9,8 +9,9 @@ import type { RunRefusal } from '@vibld/core';
 
 import { whenClientGone } from './client-gone.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
-import { decideModel } from './model-access.ts';
-import type { ModelAccessEnv } from './model-access.ts';
+import { NO_PANEL, decideModel } from './model-access.ts';
+import type { ModelAccessEnv, ModelGrantSource } from './model-access.ts';
+import { modelGrantSource } from './model-grants.ts';
 import type {
   Principal,
   PrincipalDenied,
@@ -79,6 +80,8 @@ export interface ChatDeps {
   spendable?: (principal: Principal) => Promise<Spendable>;
   /** Defaults to `tierOf`, which reads D1. */
   tier?: (principal: Principal) => Promise<Tier | null>;
+  /** Defaults to `modelGrantSource`, the panel's model access in D1. */
+  access?: (principal: Principal) => Promise<ModelGrantSource>;
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
@@ -139,14 +142,21 @@ export async function handleChat(
     return refuse('request-invalid', chosenModel.error, chosenModel.status);
   }
 
-  // The plan holds a Free account to GPT-6 Luna (D66). Unreadable, the
-  // turn is refused as the reservation below refuses it: guessing a plan
-  // either way is wrong for somebody.
+  // The plan holds a Free account to GPT-6 Luna (D66), or to what the
+  // panel saved for it (D133). Unreadable, the turn is refused as the
+  // reservation below refuses it: guessing a plan either way is wrong for
+  // somebody.
   let tier: Tier | null;
+  let access: ModelGrantSource;
   try {
-    tier = await (deps.tier ?? ((who: Principal) => tierOf(env, who)))(
-      principal,
-    );
+    [tier, access] = await Promise.all([
+      (deps.tier ?? ((who: Principal) => tierOf(env, who)))(principal),
+      (
+        deps.access ??
+        ((who: Principal) =>
+          env.DB ? modelGrantSource(env.DB, who.userId) : NO_PANEL)
+      )(principal),
+    ]);
   } catch (error) {
     console.error('tier unavailable', error);
     return new Response(
@@ -164,6 +174,7 @@ export async function handleChat(
     tier,
     chosenModel.value,
     resolveModel(env),
+    access,
   );
   if (!decision.ok) {
     return refuse('model-not-allowed', decision.error, decision.status);

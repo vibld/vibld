@@ -8,6 +8,8 @@
  *     POST /api/admin/user/gift/revoke    take it back
  *     POST /api/admin/user/overrides      per-account project limit and
  *                                         monthly spend cap
+ *     POST /api/admin/user/models         extra models on top of the
+ *                                         plan's (D136)
  *     POST /api/admin/user/ban            ban: Clerk, every request, running
  *                                         builds and previews, live sites
  *     POST /api/admin/user/unban          lift a ban (held sites stay held)
@@ -47,6 +49,7 @@ import {
 import type { Tier } from './entitlement.ts';
 import type { HoldResult } from './publish-client.ts';
 import { DEFAULT_PUBLISH_HOSTNAME } from './project-handlers.ts';
+import { parseModelIds, savedPlanModels } from './model-grants.ts';
 import { planLimitsFor, savedPlanLimits } from './plan-limits.ts';
 import { planOf } from './spendable.ts';
 
@@ -125,6 +128,7 @@ export const ADMIN_USER_ROUTES = [
   '/api/admin/user/gift',
   '/api/admin/user/gift/revoke',
   '/api/admin/user/overrides',
+  '/api/admin/user/models',
   '/api/admin/user/ban',
   '/api/admin/user/unban',
   '/api/admin/user/delete',
@@ -415,6 +419,21 @@ export async function handleAdminUsers(
     return json({ ok: true, userId, ...overrides });
   }
 
+  if (route === '/api/admin/user/models') {
+    const models = parseModelIds(body.value.models, 'models');
+    if (!models.ok) return json({ error: models.error }, 400);
+    await store.setPersonModels(
+      userId,
+      models.value,
+      by,
+      now.toISOString(),
+      entry(now, by, 'person-models', userId, reason, {
+        models: models.value,
+      }),
+    );
+    return json({ ok: true, userId, models: models.value });
+  }
+
   if (route === '/api/admin/user/ban') {
     if (reason === null) {
       return json({ error: 'Say why this account is being banned.' }, 400);
@@ -700,6 +719,8 @@ async function detail(
     spendByMonth,
     github,
     running,
+    extraModels,
+    savedModels,
   ] = await Promise.all([
     deps.clerkUser(userId),
     planOf(db, userId, now.getTime()),
@@ -715,6 +736,8 @@ async function detail(
     store.spendByMonth(userId, spendSince(now)),
     store.githubOf(userId),
     store.unendedRunsOf(userId),
+    store.personModels(userId),
+    savedPlanModels(db),
   ]);
   let usage: { monthMicroUsd: number; topupMicroUsd: number } | null = null;
   if (deps.usage) {
@@ -753,6 +776,13 @@ async function detail(
     },
     gifts,
     overrides,
+    models: {
+      // The plan's models as saved in the panel, or null where
+      // `VIBLD_MODEL_POLICY` still decides (D133).
+      plan: savedModels ? savedModels.plans[tier] : null,
+      // Granted to this account on top of them (D136).
+      extra: extraModels,
+    },
     limits: {
       activeProjects: activeProjectLimitFor(tier, overrides, planLimits),
       tierActiveProjects: planLimits.activeProjectLimit,

@@ -1322,6 +1322,7 @@ describe('the purge', () => {
       // the tombstone in `tombstoneCreditRows`.
       'plan_gifts.user_id',
       'user_overrides.user_id',
+      'user_models.user_id',
       'user_bans.user_id',
       'admin_audit_log.target_user_id',
     ]);

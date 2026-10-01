@@ -113,6 +113,12 @@ export interface AdminUserDetail {
     updatedBy: string;
     updatedAt: string;
   } | null;
+  models: {
+    /** The plan's models as saved in the panel; null while the policy decides. */
+    plan: string[] | null;
+    /** Extra models on top of the plan's (D136). */
+    extra: { models: string[]; updatedBy: string; updatedAt: string } | null;
+  };
   limits: {
     activeProjects: number | null;
     tierActiveProjects: number | null;
@@ -318,6 +324,12 @@ function readGitHub(value: unknown): AdminGitHub {
   };
 }
 
+function strings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+}
+
 function rows<T>(value: unknown, read: (row: unknown) => T | null): T[] {
   return Array.isArray(value)
     ? value.map(read).filter((row): row is T => row !== null)
@@ -333,6 +345,8 @@ export function readAdminUser(body: unknown): AdminUserDetail | null {
   if (!plan || !limits || tier === null) return null;
   const spend = isRecord(body.spend) ? body.spend : {};
   const overrides = isRecord(body.overrides) ? body.overrides : null;
+  const models = isRecord(body.models) ? body.models : {};
+  const extra = isRecord(models.extra) ? models.extra : null;
   const ban = isRecord(body.ban) ? body.ban : null;
   const deletion = isRecord(body.deletion) ? body.deletion : null;
   return {
@@ -358,6 +372,16 @@ export function readAdminUser(body: unknown): AdminUserDetail | null {
           updatedAt: str(overrides.updatedAt) ?? '',
         }
       : null,
+    models: {
+      plan: Array.isArray(models.plan) ? strings(models.plan) : null,
+      extra: extra
+        ? {
+            models: strings(extra.models),
+            updatedBy: str(extra.updatedBy) ?? '',
+            updatedAt: str(extra.updatedAt) ?? '',
+          }
+        : null,
+    },
     limits: {
       activeProjects: num(limits.activeProjects),
       tierActiveProjects: num(limits.tierActiveProjects),
@@ -453,6 +477,7 @@ export async function postAdminAction(
     | '/api/admin/user/gift'
     | '/api/admin/user/gift/revoke'
     | '/api/admin/user/overrides'
+    | '/api/admin/user/models'
     | '/api/admin/user/ban'
     | '/api/admin/user/unban'
     | '/api/admin/user/delete'
@@ -548,6 +573,9 @@ const ACTION_NAMES: Record<string, string> = {
   'provider-key-remove': 'Removed a provider key',
   'plan-limits': "Set a plan's limits",
   'plan-limits-reset': "Reset a plan's limits to the code's",
+  'model-access': 'Set which models each plan includes',
+  'model-access-reset': 'Went back to the model policy',
+  'person-models': 'Set extra models',
 };
 
 /** One audit row, as a sentence an admin reads down a list. */
@@ -597,6 +625,23 @@ export function describeAuditEntry(entry: AdminAuditEntry): string {
           ? `${detail.activeProjectLimit} active projects`
           : 'no project limit'
       }, ${formatUsd(detail.monthlyAllowanceMicroUsd)} a month`,
+    );
+  }
+  if (entry.action === 'person-models' && Array.isArray(detail.models)) {
+    facts.push(
+      detail.models.length === 0 ? 'none' : strings(detail.models).join(', '),
+    );
+  }
+  if (entry.action === 'model-access') {
+    facts.push(
+      (['free', 'build', 'ship'] as const)
+        .map(
+          (tier) =>
+            `${TIER_NAMES[tier]} ${
+              Array.isArray(detail[tier]) ? detail[tier].length : 0
+            }`,
+        )
+        .join(', ') + ' models',
     );
   }
   if (entry.action === 'topup' && typeof detail.creditUsdCents === 'number') {

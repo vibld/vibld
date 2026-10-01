@@ -17,6 +17,8 @@ import type {
   AdminResult,
   AdminUserDetail,
 } from '../admin/admin-users-client.ts';
+import { fetchModelAccess, labelsOf, toggled } from '../admin/models-client.ts';
+import type { CatalogModel } from '../admin/models-client.ts';
 import { ADMIN_PATH, adminPageView } from '../admin/route.ts';
 import { navigate } from '../admin/use-pathname.ts';
 
@@ -26,7 +28,8 @@ import { navigate } from '../admin/use-pathname.ts';
  * it spent and in which months, its projects and sites, its GitHub
  * sign-in and repositories, its recent and running builds, whether it is
  * banned, and every admin action taken on it. With the controls to give or
- * revoke a plan, set overrides, stop its builds, ban or unban, and delete.
+ * revoke a plan, set overrides and extra models, stop its builds, ban or
+ * unban, and delete.
  *
  * Nothing here is a permission. Every action is a `/api/admin/*` route that
  * checks the caller itself (ADR-0006); this decides what to draw.
@@ -176,6 +179,7 @@ function AccountView({ userId }: { userId: string }) {
           <Overview user={load.user} />
           <PlanControls user={load.user} busy={busy} act={act} />
           <OverrideControls user={load.user} busy={busy} act={act} />
+          <ModelControls user={load.user} busy={busy} act={act} />
           <BuildControls user={load.user} busy={busy} act={act} />
           <BanControls user={load.user} busy={busy} act={act} />
           <DeleteControls user={load.user} busy={busy} act={act} />
@@ -478,6 +482,122 @@ function OverrideControls({
           {problem}
         </p>
       ) : null}
+    </Panel>
+  );
+}
+
+/**
+ * The models this account has on top of its plan's (D136), ticked from
+ * the catalog. Clearing every box returns it to its plan.
+ */
+function ModelControls({
+  user,
+  busy,
+  act,
+}: {
+  user: AdminUserDetail;
+  busy: boolean;
+  act: Act;
+}) {
+  const reasonId = useId();
+  const [catalog, setCatalog] = useState<CatalogModel[] | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [extra, setExtra] = useState<string[]>(user.models.extra?.models ?? []);
+  const [reason, setReason] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    void fetchModelAccess().then((result) => {
+      if (!live) return;
+      if (result.ok) setCatalog(result.value.catalog);
+      else setProblem(result.error);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  return (
+    <Panel title="Models">
+      <p className="pane-note">
+        {user.models.plan
+          ? `The ${TIER_NAMES[user.plan.tier]} plan includes: ${labelsOf(
+              catalog ?? [],
+              user.models.plan,
+            )}.`
+          : `VIBLD_MODEL_POLICY decides the ${TIER_NAMES[user.plan.tier]} plan's models; the platform admin page can set them instead.`}{' '}
+        Ticked models are added for this account only.
+        {user.models.extra
+          ? ` Set ${formatDay(user.models.extra.updatedAt)} by ${user.models.extra.updatedBy}.`
+          : ''}
+      </p>
+      {problem ? (
+        <p className="pane-note pane-note--error" role="alert">
+          {problem}
+        </p>
+      ) : null}
+      {catalog === null && problem === null ? (
+        <p className="pane-note" role="status">
+          Loading the models.
+        </p>
+      ) : null}
+      {catalog ? (
+        <ul className="pane-note" aria-label="Extra models">
+          {catalog.map((model) => (
+            <li key={model.id}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={extra.includes(model.id)}
+                  disabled={busy}
+                  onChange={(event) =>
+                    setExtra(
+                      toggled(catalog, extra, model.id, event.target.checked),
+                    )
+                  }
+                />{' '}
+                {model.label}
+                {model.deployable ? '' : ' (no key, not offered)'}
+              </label>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <label className="prompt__label" htmlFor={reasonId}>
+        Reason
+      </label>
+      <input
+        id={reasonId}
+        type="text"
+        className="prompt__input"
+        value={reason}
+        disabled={busy}
+        onChange={(event) => setReason(event.target.value)}
+      />
+      <div className="prompt__actions">
+        <button
+          type="button"
+          className="button"
+          disabled={busy || catalog === null}
+          onClick={() =>
+            void act(
+              () =>
+                postAdminAction('/api/admin/user/models', {
+                  userId: user.userId,
+                  models: extra,
+                  reason,
+                }),
+              () => [
+                extra.length === 0
+                  ? 'Removed the extra models; the plan decides.'
+                  : 'Saved the extra models.',
+              ],
+            )
+          }
+        >
+          Save models
+        </button>
+      </div>
     </Panel>
   );
 }

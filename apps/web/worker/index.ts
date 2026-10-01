@@ -1,5 +1,6 @@
 import {
   MockupProvider,
+  availableModels,
   configuredProviders,
   createPlanClient,
   resolveModel,
@@ -90,12 +91,18 @@ import {
 import { whenClientGone } from './client-gone.ts';
 import { isPlatformAdmin, platformAdminsFor } from './platform-admins.ts';
 import {
-  FREE_PLAN_MODELS_NOTE,
+  NO_PANEL,
   decideModel,
   draftModelFor,
   grantedFor,
-  planWithholdsModels,
+  planModelsNote,
 } from './model-access.ts';
+import type { ModelGrantSource } from './model-access.ts';
+import {
+  handleModelAccess,
+  isModelRoute,
+  modelGrantSource,
+} from './model-grants.ts';
 import { signupCreditStatus } from './signup-credit.ts';
 import {
   handleReferralClaim,
@@ -545,17 +552,25 @@ function refuse(reason: RunRefusal, error: string, status: number): Response {
 }
 
 /**
- * The caller's tier for `decideModel` (D66), or the refusal to send when it
- * cannot be read. Fails closed, as the reservation does, rather than
- * guessing a plan: guessing Free refuses somebody the model they pay for,
- * and guessing paid hands a Free account what its plan withholds.
+ * The caller's tier (D66) and the model access saved in the panel (D133)
+ * for `decideModel`, or the refusal to send when either cannot be read.
+ * Fails closed, as the reservation does, rather than guessing: guessing
+ * Free refuses somebody the model they pay for, guessing paid hands a Free
+ * account what its plan withholds, and guessing the policy can hand back a
+ * model an admin took away.
  */
 async function tierOrRefusal(
   env: Env,
   principal: Principal,
-): Promise<{ tier: Tier | null } | { refusal: Response }> {
+): Promise<
+  { tier: Tier | null; access: ModelGrantSource } | { refusal: Response }
+> {
   try {
-    return { tier: await tierOf(env, principal) };
+    const [tier, access] = await Promise.all([
+      tierOf(env, principal),
+      env.DB ? modelGrantSource(env.DB, principal.userId) : NO_PANEL,
+    ]);
+    return { tier, access };
   } catch (error) {
     console.error('tier unavailable', error);
     return {
@@ -1162,6 +1177,7 @@ async function handlePlan(
     caller.tier,
     chosenModel.value,
     resolveModel(env),
+    caller.access,
   );
   if (!decision.ok) {
     return refuse('model-not-allowed', decision.error, decision.status);
@@ -1897,7 +1913,7 @@ async function handleMockups(
   const caller = await tierOrRefusal(env, principal);
   if ('refusal' in caller) return caller.refusal;
   const draftModel = parsed.value.draft
-    ? draftModelFor(env, principal.policyIdentity, caller.tier)
+    ? draftModelFor(env, principal.policyIdentity, caller.tier, caller.access)
     : null;
   const decision = decideModel(
     env,
@@ -1905,6 +1921,7 @@ async function handleMockups(
     caller.tier,
     draftModel ?? chosenModel.value,
     resolveModel(env),
+    caller.access,
   );
   if (!decision.ok) {
     return refuse('model-not-allowed', decision.error, decision.status);
@@ -3516,16 +3533,29 @@ async function route(
     // worse than a short one: the shell takes it for a deployment with no
     // model and would run the deterministic fake. The run itself reads the
     // tier again and is the boundary.
+    //
+    // The panel's model access the same way (D133): unreadable, the
+    // picker is filled as if nothing were saved there.
     let tier: Tier | null = 'free';
+    let access: ModelGrantSource = NO_PANEL;
     if (configured) {
       try {
         tier = await tierOf(env, principal);
       } catch (error) {
         console.error('tier unavailable', error);
       }
+      try {
+        // `configured` already means D1 is bound; checked here as well so
+        // the read never depends on that staying true (Codex review of internal PR 344).
+        access = env.DB
+          ? await modelGrantSource(env.DB, principal.userId)
+          : NO_PANEL;
+      } catch (error) {
+        console.error('model access unavailable', error);
+      }
     }
     const models = configured
-      ? grantedFor(env, principal.policyIdentity, tier)
+      ? grantedFor(env, principal.policyIdentity, tier, access)
       : [];
     // The deployment default is only offered if this person may use it.
     const decided = configured
@@ -3535,6 +3565,7 @@ async function route(
           tier,
           null,
           resolveModel(env),
+          access,
         )
       : { ok: false as const, error: 'not configured' };
     return json({
@@ -3549,10 +3580,9 @@ async function route(
       // Said where the picker would be, when the plan is what keeps the
       // other models out of it; null otherwise, including for a Free
       // account the policy already holds to Luna.
-      modelsNote:
-        configured && planWithholdsModels(env, principal.policyIdentity, tier)
-          ? FREE_PLAN_MODELS_NOTE
-          : null,
+      modelsNote: configured
+        ? planModelsNote(env, principal.policyIdentity, tier, access)
+        : null,
       // So the shell knows whether to offer the admin credit tool at all --
       // `/api/admin/*` itself re-checks this independently either way
       // (ADR-0006), the same as every other grant this endpoint reports.
@@ -3899,6 +3929,20 @@ async function route(
       adminEmail: guard.adminEmail,
       audit: (entry) => appendAudit(env.DB!, entry),
       freeAllowanceMicroUsd: freeAllowanceOf(env),
+    });
+  }
+
+  // Model access (D133): which models each plan includes, set in the
+  // panel. Against the environment with the panel's keys, so "can be
+  // served" means what a run would find.
+  if (isModelRoute(pathname)) {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handleModelAccess(request, env.DB!, {
+      adminEmail: guard.adminEmail,
+      audit: (entry) => appendAudit(env.DB!, entry),
+      deployable: availableModels(configuredProviders(env)),
+      policySet: Boolean(env.VIBLD_MODEL_POLICY?.trim()),
     });
   }
 
