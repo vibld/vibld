@@ -41,7 +41,11 @@ export interface AdminProject {
   name: string;
   archived: boolean;
   updatedAt: string;
-  site: { slug: string; state: 'live' | 'down' | 'held' } | null;
+  site: {
+    slug: string;
+    state: 'live' | 'down' | 'held';
+    url: string | null;
+  } | null;
 }
 
 export interface AdminRun {
@@ -53,6 +57,40 @@ export interface AdminRun {
   model: string | null;
   costMicroUsd: number | null;
   elapsedMs: number | null;
+}
+
+/** A build that has not ended: what "Stop builds" would stop. */
+export interface AdminRunningBuild {
+  runId: string;
+  projectName: string;
+  state: string;
+  startedAt: string;
+}
+
+/** One calendar month (UTC) of model spend. */
+export interface AdminMonthSpend {
+  /** YYYY-MM. */
+  month: string;
+  costMicroUsd: number;
+  runs: number;
+}
+
+/** The account's GitHub sign-in and the repositories its projects push to. */
+export interface AdminGitHub {
+  connection: {
+    login: string | null;
+    connectedAt: string;
+    revokedAt: string | null;
+  } | null;
+  repositories: {
+    projectId: string;
+    projectName: string | null;
+    owner: string;
+    repo: string;
+    defaultBranch: string;
+    expiresAt: string;
+    revokedAt: string | null;
+  }[];
 }
 
 export interface AdminUserDetail {
@@ -96,6 +134,11 @@ export interface AdminUserDetail {
   deletion: { requestedAt: string; purgeAfter: string } | null;
   projects: AdminProject[];
   runs: AdminRun[];
+  running: AdminRunningBuild[];
+  /** Whether this deployment can stop a build at all (it has Workflows). */
+  canStopBuilds: boolean;
+  spendByMonth: AdminMonthSpend[];
+  github: AdminGitHub;
   audit: AdminAuditEntry[];
 }
 
@@ -187,7 +230,14 @@ function readProject(value: unknown): AdminProject | null {
       site &&
       typeof site.slug === 'string' &&
       (state === 'live' || state === 'down' || state === 'held')
-        ? { slug: site.slug, state }
+        ? {
+            slug: site.slug,
+            state,
+            url:
+              typeof site.url === 'string' && site.url.startsWith('https://')
+                ? site.url
+                : null,
+          }
         : null,
   };
 }
@@ -206,6 +256,65 @@ function readRun(value: unknown): AdminRun | null {
     model: str(value.model),
     costMicroUsd: num(value.costMicroUsd),
     elapsedMs: num(value.elapsedMs),
+  };
+}
+
+function readRunning(value: unknown): AdminRunningBuild | null {
+  if (!isRecord(value)) return null;
+  const runId = str(value.runId);
+  const state = str(value.state);
+  if (runId === null || state === null) return null;
+  return {
+    runId,
+    projectName: str(value.projectName) ?? '',
+    state,
+    startedAt: str(value.startedAt) ?? '',
+  };
+}
+
+function readMonth(value: unknown): AdminMonthSpend | null {
+  if (!isRecord(value)) return null;
+  const month = str(value.month);
+  if (month === null || !/^\d{4}-\d{2}$/.test(month)) return null;
+  return {
+    month,
+    costMicroUsd: num(value.costMicroUsd) ?? 0,
+    runs: num(value.runs) ?? 0,
+  };
+}
+
+function readRepository(
+  value: unknown,
+): AdminGitHub['repositories'][number] | null {
+  if (!isRecord(value)) return null;
+  const projectId = str(value.projectId);
+  const owner = str(value.owner);
+  const repo = str(value.repo);
+  if (projectId === null || owner === null || repo === null) return null;
+  return {
+    projectId,
+    projectName: str(value.projectName),
+    owner,
+    repo,
+    defaultBranch: str(value.defaultBranch) ?? '',
+    expiresAt: str(value.expiresAt) ?? '',
+    revokedAt: str(value.revokedAt),
+  };
+}
+
+function readGitHub(value: unknown): AdminGitHub {
+  if (!isRecord(value)) return { connection: null, repositories: [] };
+  const connection = isRecord(value.connection) ? value.connection : null;
+  return {
+    connection:
+      connection && typeof connection.connectedAt === 'string'
+        ? {
+            login: str(connection.login),
+            connectedAt: connection.connectedAt,
+            revokedAt: str(connection.revokedAt),
+          }
+        : null,
+    repositories: rows(value.repositories, readRepository),
   };
 }
 
@@ -280,6 +389,10 @@ export function readAdminUser(body: unknown): AdminUserDetail | null {
         : null,
     projects: rows(body.projects, readProject),
     runs: rows(body.runs, readRun),
+    running: rows(body.running, readRunning),
+    canStopBuilds: body.canStopBuilds === true,
+    spendByMonth: rows(body.spendByMonth, readMonth),
+    github: readGitHub(body.github),
     audit: rows(body.audit, readAuditEntry),
   };
 }
@@ -342,7 +455,8 @@ export async function postAdminAction(
     | '/api/admin/user/overrides'
     | '/api/admin/user/ban'
     | '/api/admin/user/unban'
-    | '/api/admin/user/delete',
+    | '/api/admin/user/delete'
+    | '/api/admin/user/stop-builds',
   body: Record<string, unknown>,
   fetchImpl: Fetch = defaultFetch,
   getToken: GetToken = getClerkToken,
@@ -429,6 +543,7 @@ const ACTION_NAMES: Record<string, string> = {
   'share-hold': 'Held a share link',
   'share-release': 'Released a share link',
   'accounts-import': 'Imported accounts from Clerk',
+  'stop-builds': 'Stopped running builds',
 };
 
 /** One audit row, as a sentence an admin reads down a list. */
@@ -452,6 +567,13 @@ export function describeAuditEntry(entry: AdminAuditEntry): string {
       detail.partial === true
         ? `${detail.imported} accounts, stopped part way`
         : `${detail.imported} accounts`,
+    );
+  }
+  if (entry.action === 'stop-builds' && typeof detail.stopped === 'number') {
+    facts.push(
+      typeof detail.stillRunning === 'number' && detail.stillRunning > 0
+        ? `${detail.stopped} stopped, ${detail.stillRunning} still running`
+        : `${detail.stopped} stopped`,
     );
   }
   if (entry.action === 'topup' && typeof detail.creditUsdCents === 'number') {
@@ -479,6 +601,39 @@ export function describeAuditEntry(entry: AdminAuditEntry): string {
   ]
     .filter((part): part is string => part !== null)
     .join(' · ');
+}
+
+/** "Oct 2026", for a YYYY-MM month in UTC. */
+export function formatMonth(month: string): string {
+  const at = new Date(`${month}-01T00:00:00Z`);
+  return Number.isNaN(at.getTime())
+    ? month
+    : at.toLocaleDateString('en-US', {
+        month: 'short',
+        year: 'numeric',
+        timeZone: 'UTC',
+      });
+}
+
+/**
+ * What a stop did, in the lines the page shows: how many stopped, and
+ * which are still running and worth trying again.
+ */
+export function describeStopBuilds(answer: Record<string, unknown>): string[] {
+  const builds = isRecord(answer.builds) ? answer.builds : {};
+  const stopped = Array.isArray(builds.stopped) ? builds.stopped.length : 0;
+  const failed = Array.isArray(builds.failed)
+    ? builds.failed.filter((id): id is string => typeof id === 'string')
+    : [];
+  const lines = [
+    stopped === 0 && failed.length === 0
+      ? 'No builds were running.'
+      : `Stopped ${stopped} build${stopped === 1 ? '' : 's'}.`,
+  ];
+  if (failed.length > 0) {
+    lines.push(`Still running, try again: ${failed.join(', ')}.`);
+  }
+  return lines;
 }
 
 /**

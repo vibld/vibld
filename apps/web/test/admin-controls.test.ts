@@ -995,7 +995,13 @@ describe('the account page', () => {
     assert.deepEqual(page.body.projects[0].site, {
       slug: 'target-site',
       state: 'live',
+      url: 'https://target-site.vibld-preview.dev/',
     });
+    assert.deepEqual(
+      page.body.running.map((run: { runId: string }) => run.runId),
+      ['run_1'],
+    );
+    assert.equal(page.body.canStopBuilds, true);
     assert.equal(page.body.runs[0].runId, 'run_1');
     assert.equal(page.body.runs[0].state, 'planning');
     assert.deepEqual(
@@ -1011,6 +1017,168 @@ describe('the account page', () => {
       '/api/admin/user/detail?email=nobody@example.com',
     );
     assert.equal(page.status, 404);
+  });
+});
+
+describe('the deeper account page (D128)', () => {
+  async function trace(
+    w: World,
+    runId: string,
+    projectId: string,
+    endedAt: string,
+    cost: number,
+  ) {
+    await exec(
+      w.db,
+      `INSERT INTO generation_run_traces
+         (run_id, project_id, stop, model, input_tokens, cached_input_tokens,
+          output_tokens, context_window, cost_micro_usd, elapsed_ms, ended_at)
+       VALUES (?1, ?2, 'applied', 'm', 1, 0, 1, 1000, ?3, 10, ?4)`,
+      runId,
+      projectId,
+      cost,
+      endedAt,
+    );
+  }
+
+  it('adds up spend by month for a year, the account’s own traces included', async () => {
+    const w = world();
+    await seedProject(w, 'proj_a');
+    await seedProject(w, 'proj_other', OTHER);
+    await trace(w, 'r1', 'proj_a', '2026-09-03T00:00:00.000Z', 100_000);
+    await trace(w, 'r2', 'proj_a', '2026-09-20T00:00:00.000Z', 50_000);
+    // Written against the account itself (a chat turn), not a project.
+    await trace(w, 'r3', USER, '2026-08-31T23:59:59.000Z', 7_000);
+    // More than a year back: outside the table.
+    await trace(w, 'r4', 'proj_a', '2025-09-30T00:00:00.000Z', 999);
+    // Somebody else's.
+    await trace(w, 'r5', 'proj_other', '2026-09-03T00:00:00.000Z', 1);
+    const page = await w.call(`/api/admin/user/detail?userId=${USER}`);
+    assert.deepEqual(page.body.spendByMonth, [
+      { month: '2026-09', costMicroUsd: 150_000, runs: 2 },
+      { month: '2026-08', costMicroUsd: 7_000, runs: 1 },
+    ]);
+  });
+
+  it('starts the year on the first of the month eleven months back', async () => {
+    const { spendSince } = await import('../worker/admin-users.ts');
+    assert.equal(
+      spendSince(new Date('2026-09-29T12:00:00.000Z')),
+      '2025-10-01T00:00:00.000Z',
+    );
+    assert.equal(
+      spendSince(new Date('2026-01-01T00:00:00.000Z')),
+      '2025-02-01T00:00:00.000Z',
+    );
+  });
+
+  it('shows the GitHub sign-in and repositories, and never a token', async () => {
+    const w = world();
+    await seedProject(w, 'proj_a');
+    await exec(
+      w.db,
+      `INSERT INTO github_connections
+         (user_id, login, installation_id, connected_at, granted_by_email)
+       VALUES (?1, 'octo', 42, '2026-09-02T00:00:00.000Z', ?2)`,
+      USER,
+      EMAIL,
+    );
+    await exec(
+      w.db,
+      `INSERT INTO github_project_bindings
+         (project_id, user_id, installation_id, owner, repo, default_branch,
+          granted_at, granted_by_email, expires_at)
+       VALUES ('proj_a', ?1, 42, 'octo', 'site', 'main',
+               '2026-09-02T00:00:00.000Z', ?2, '2026-12-02T00:00:00.000Z')`,
+      USER,
+      EMAIL,
+    );
+    const page = await w.call(`/api/admin/user/detail?userId=${USER}`);
+    assert.deepEqual(page.body.github, {
+      connection: {
+        login: 'octo',
+        connectedAt: '2026-09-02T00:00:00.000Z',
+        revokedAt: null,
+      },
+      repositories: [
+        {
+          projectId: 'proj_a',
+          projectName: 'Project proj_a',
+          owner: 'octo',
+          repo: 'site',
+          defaultBranch: 'main',
+          grantedAt: '2026-09-02T00:00:00.000Z',
+          expiresAt: '2026-12-02T00:00:00.000Z',
+          revokedAt: null,
+        },
+      ],
+    });
+    const other = await w.call(`/api/admin/user/detail?userId=${OTHER}`);
+    assert.deepEqual(other.body.github, { connection: null, repositories: [] });
+  });
+
+  it('stops the running builds without banning, and records it', async () => {
+    const w = world();
+    await seedProject(w, 'proj_a');
+    await seedRunningBuild(w, 'proj_a', 'run_live_1');
+    const stopped = await w.call('/api/admin/user/stop-builds', {
+      userId: USER,
+      reason: 'Looping',
+    });
+    assert.equal(stopped.status, 200);
+    assert.deepEqual(stopped.body.builds, {
+      stopped: ['run_live_1'],
+      failed: [],
+    });
+    assert.equal(stopped.body.audited, true);
+    assert.deepEqual(w.calls.terminated, ['run_live_1']);
+    // Not a ban: no Clerk call, no refusal, no previews, no sites.
+    assert.equal(await new AdminStore(w.db).isBanned(USER), false);
+    assert.deepEqual(w.calls.clerk, []);
+    assert.deepEqual(w.calls.previews, []);
+    const [row] = await w.auditRows();
+    assert.equal(row?.action, 'stop-builds');
+    assert.equal(row?.reason, 'Looping');
+    assert.deepEqual(row?.detail, { stopped: 1, stillRunning: 0 });
+    const page = await w.call(`/api/admin/user/detail?userId=${USER}`);
+    assert.deepEqual(page.body.running, []);
+  });
+
+  it('says so where the deployment runs no builds, and records nothing', async () => {
+    const w = world();
+    const refused = await w.call(
+      '/api/admin/user/stop-builds',
+      { userId: USER },
+      { deps: { ...w.deps, stopBuilds: null } },
+    );
+    assert.equal(refused.status, 409);
+    assert.deepEqual(await w.auditRows(), []);
+    const page = await w.call(
+      `/api/admin/user/detail?userId=${USER}`,
+      undefined,
+      {
+        deps: { ...w.deps, stopBuilds: null },
+      },
+    );
+    assert.equal(page.body.canStopBuilds, false);
+  });
+
+  it('answers 502, and records nothing, when the builds cannot be listed', async () => {
+    const w = world();
+    const failed = await w.call(
+      '/api/admin/user/stop-builds',
+      { userId: USER },
+      {
+        deps: {
+          ...w.deps,
+          stopBuilds: async () => {
+            throw new Error('D1 down');
+          },
+        },
+      },
+    );
+    assert.equal(failed.status, 502);
+    assert.deepEqual(await w.auditRows(), []);
   });
 });
 
@@ -1100,11 +1268,12 @@ describe('who may use these routes', () => {
 
   it('is wired to the same check as every other admin route', async () => {
     const index = await readFile(join(WORKER, 'index.ts'), 'utf8');
+    // Routed by the module's own list, so a route added there is routed.
+    assert.match(
+      index,
+      /if \(isAdminUserRoute\(pathname\)\) \{\s*return handleAdminUsers\(/,
+    );
     for (const route of ADMIN_USER_ROUTES) {
-      assert.ok(
-        index.includes(`pathname === '${route}'`),
-        `${route} is not routed`,
-      );
       assert.equal(
         UNGATED_PATHS[route],
         'behind the platform-admin check instead',

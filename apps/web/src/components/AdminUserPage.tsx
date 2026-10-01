@@ -5,8 +5,10 @@ import {
   confirmsEmail,
   describeAuditEntry,
   describePlan,
+  describeStopBuilds,
   fetchAdminUser,
   formatDay,
+  formatMonth,
   formatUsd,
   parseOverrideField,
   postAdminAction,
@@ -21,9 +23,10 @@ import { navigate } from '../admin/use-pathname.ts';
 /**
  * One account, for a platform admin (docs/decisions.md D73): who it is,
  * its plan and whether that is gifted, its limits and any override, what
- * it spent, its projects and recent runs, whether it is banned, and every
- * admin action taken on it. With the controls to give or revoke a plan,
- * set overrides, ban or unban, and delete.
+ * it spent and in which months, its projects and sites, its GitHub
+ * sign-in and repositories, its recent and running builds, whether it is
+ * banned, and every admin action taken on it. With the controls to give or
+ * revoke a plan, set overrides, stop its builds, ban or unban, and delete.
  *
  * Nothing here is a permission. Every action is a `/api/admin/*` route that
  * checks the caller itself (ADR-0006); this decides what to draw.
@@ -173,9 +176,12 @@ function AccountView({ userId }: { userId: string }) {
           <Overview user={load.user} />
           <PlanControls user={load.user} busy={busy} act={act} />
           <OverrideControls user={load.user} busy={busy} act={act} />
+          <BuildControls user={load.user} busy={busy} act={act} />
           <BanControls user={load.user} busy={busy} act={act} />
           <DeleteControls user={load.user} busy={busy} act={act} />
+          <SpendByMonth user={load.user} />
           <Projects user={load.user} />
+          <GitHub user={load.user} />
           <Runs user={load.user} />
           <AuditList user={load.user} />
         </div>
@@ -509,6 +515,71 @@ function describeBan(answer: Record<string, unknown>): string[] {
   return lines;
 }
 
+function BuildControls({
+  user,
+  busy,
+  act,
+}: {
+  user: AdminUserDetail;
+  busy: boolean;
+  act: Act;
+}) {
+  const reasonId = useId();
+  const [reason, setReason] = useState('');
+  if (!user.canStopBuilds) return null;
+  const { running } = user;
+  return (
+    <Panel title={`Running builds (${running.length})`}>
+      {running.length === 0 ? (
+        <p className="pane-note">Nothing is running.</p>
+      ) : (
+        <ul className="pane-note">
+          {running.map((run) => (
+            <li key={run.runId}>
+              {run.projectName} · {run.state} · started{' '}
+              {formatDay(run.startedAt)}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="pane-note">
+        Stops every build the account has running, the stop a ban makes, without
+        banning it. The account can start another.
+      </p>
+      <label className="prompt__label" htmlFor={reasonId}>
+        Reason (optional)
+      </label>
+      <input
+        id={reasonId}
+        type="text"
+        className="prompt__input"
+        value={reason}
+        disabled={busy}
+        onChange={(event) => setReason(event.target.value)}
+      />
+      <div className="prompt__actions">
+        <button
+          type="button"
+          className="button"
+          disabled={busy || running.length === 0}
+          onClick={() =>
+            void act(
+              () =>
+                postAdminAction('/api/admin/user/stop-builds', {
+                  userId: user.userId,
+                  reason,
+                }),
+              describeStopBuilds,
+            )
+          }
+        >
+          Stop builds
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
 function BanControls({
   user,
   busy,
@@ -736,13 +807,83 @@ function Projects({ user }: { user: AdminUserDetail }) {
               {project.name}
               {project.archived ? ' (archived)' : ''} · updated{' '}
               {formatDay(project.updatedAt)}
-              {project.site
-                ? ` · ${project.site.slug} (${project.site.state})`
-                : ''}
+              {project.site ? (
+                <>
+                  {' · '}
+                  {project.site.url && project.site.state === 'live' ? (
+                    <a href={project.site.url} target="_blank" rel="noreferrer">
+                      {project.site.slug}
+                    </a>
+                  ) : (
+                    project.site.slug
+                  )}{' '}
+                  ({project.site.state})
+                </>
+              ) : null}
             </li>
           ))}
         </ul>
       )}
+    </Panel>
+  );
+}
+
+function SpendByMonth({ user }: { user: AdminUserDetail }) {
+  const months = user.spendByMonth;
+  return (
+    <Panel title="Spend by month">
+      {months.length === 0 ? (
+        <p className="pane-note">No model spend in the last 12 months.</p>
+      ) : (
+        <table className="accounts__table">
+          <thead>
+            <tr>
+              <th scope="col">Month (UTC)</th>
+              <th scope="col">Runs</th>
+              <th scope="col">Spend</th>
+            </tr>
+          </thead>
+          <tbody>
+            {months.map((month) => (
+              <tr key={month.month}>
+                <td>{formatMonth(month.month)}</td>
+                <td>{month.runs}</td>
+                <td>{formatUsd(month.costMicroUsd)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Panel>
+  );
+}
+
+function GitHub({ user }: { user: AdminUserDetail }) {
+  const { connection, repositories } = user.github;
+  return (
+    <Panel title="GitHub">
+      <p className="pane-note">
+        {connection === null
+          ? 'Never signed in through GitHub.'
+          : `${connection.login ? `Signed in as ${connection.login}` : 'Signed in'} ${formatDay(connection.connectedAt)}${
+              connection.revokedAt
+                ? `; disconnected ${formatDay(connection.revokedAt)}`
+                : ''
+            }.`}
+      </p>
+      {repositories.length > 0 ? (
+        <ul className="pane-note">
+          {repositories.map((binding) => (
+            <li key={binding.projectId}>
+              {binding.owner}/{binding.repo} ({binding.defaultBranch}) ·{' '}
+              {binding.projectName ?? 'a deleted project'}
+              {binding.revokedAt
+                ? ` · disconnected ${formatDay(binding.revokedAt)}`
+                : ` · access expires ${formatDay(binding.expiresAt)}`}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </Panel>
   );
 }

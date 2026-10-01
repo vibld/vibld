@@ -4,6 +4,12 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 
+import {
+  describeAuditEntry,
+  describeStopBuilds,
+  formatMonth,
+  readAdminUser,
+} from '../src/admin/admin-users-client.ts';
 import { AdminUserPage } from '../src/components/AdminUserPage.tsx';
 
 /**
@@ -60,15 +66,52 @@ const DETAIL = (over: Record<string, unknown> = {}) => ({
       name: 'Bakery',
       archived: false,
       updatedAt: '2026-09-28T00:00:00.000Z',
-      site: { slug: 'bakery', state: 'live' },
+      site: {
+        slug: 'bakery',
+        state: 'live',
+        url: 'https://bakery.vibld-preview.dev/',
+      },
     },
   ],
   runs: [],
+  running: [],
+  canStopBuilds: true,
+  spendByMonth: [
+    { month: '2026-09', costMicroUsd: 1_250_000, runs: 3 },
+    { month: '2026-07', costMicroUsd: 40_000, runs: 1 },
+  ],
+  github: {
+    connection: {
+      login: 'octo',
+      connectedAt: '2026-09-02T00:00:00.000Z',
+      revokedAt: null,
+    },
+    repositories: [
+      {
+        projectId: 'p1',
+        projectName: 'Bakery',
+        owner: 'octo',
+        repo: 'bakery-site',
+        defaultBranch: 'main',
+        grantedAt: '2026-09-02T00:00:00.000Z',
+        expiresAt: '2026-12-02T00:00:00.000Z',
+        revokedAt: null,
+      },
+    ],
+  },
   audit: [],
   ...over,
 });
 
-function serving(detail: () => unknown) {
+function serving(
+  detail: () => unknown,
+  answer: (url: string) => unknown = () => ({
+    ok: true,
+    userId: USER,
+    clerk: { ok: true },
+    heldSites: ['bakery'],
+  }),
+) {
   const posts: { url: string; body: Record<string, unknown> }[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -77,12 +120,7 @@ function serving(detail: () => unknown) {
         url,
         body: JSON.parse(String(init.body)) as Record<string, unknown>,
       });
-      return reply({
-        ok: true,
-        userId: USER,
-        clerk: { ok: true },
-        heldSites: ['bakery'],
-      });
+      return reply(answer(url));
     }
     if (url.includes('/api/admin/user/detail')) return reply(detail());
     throw new Error(`nothing is serving ${url}`);
@@ -141,6 +179,80 @@ describe('the account page', () => {
     assert.match(view.text(), /Build, gifted until Dec 31, 2026/);
     assert.match(view.text(), /Bakery/);
     assert.match(view.text(), /bakery \(live\)/);
+    view.unmount();
+  });
+
+  it('shows spend by month, GitHub, and links a live site', async () => {
+    serving(() => DETAIL());
+    const view = await mount();
+    const spend = view.group('Spend by month');
+    const cells = [...spend.querySelectorAll('tbody tr')].map((row) =>
+      [...row.querySelectorAll('td')].map((cell) => cell.textContent),
+    );
+    assert.deepEqual(cells, [
+      ['Sep 2026', '3', '$1.25'],
+      ['Jul 2026', '1', '$0.04'],
+    ]);
+    const github = view.group('GitHub').textContent ?? '';
+    assert.match(github, /Signed in as octo Sep 2, 2026/);
+    assert.match(
+      github,
+      /octo\/bakery-site \(main\) · Bakery · access expires Dec 2, 2026/,
+    );
+    const link = view.group('Projects (1)').querySelector('a');
+    assert.equal(
+      link?.getAttribute('href'),
+      'https://bakery.vibld-preview.dev/',
+    );
+    view.unmount();
+  });
+
+  it('stops running builds, and only when something is running', async () => {
+    const posts = serving(
+      () =>
+        DETAIL({
+          running: [
+            {
+              runId: 'run_1',
+              projectName: 'Bakery',
+              state: 'building',
+              startedAt: '2026-09-29T00:00:00.000Z',
+            },
+          ],
+        }),
+      () => ({
+        ok: true,
+        userId: USER,
+        builds: { stopped: ['run_1'], failed: [] },
+        audited: true,
+      }),
+    );
+    const view = await mount();
+    assert.match(
+      view.group('Running builds (1)').textContent ?? '',
+      /Bakery · building/,
+    );
+    await act(async () => {
+      view.button(/^Stop builds$/).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.deepEqual(posts[0], {
+      url: '/api/admin/user/stop-builds',
+      body: { userId: USER, reason: '' },
+    });
+    assert.match(view.text(), /Stopped 1 build\./);
+    view.unmount();
+
+    serving(() => DETAIL());
+    const idle = await mount();
+    assert.equal(idle.button(/^Stop builds$/).disabled, true);
+    idle.unmount();
+  });
+
+  it('draws no stop where the deployment runs no builds', async () => {
+    serving(() => DETAIL({ canStopBuilds: false }));
+    const view = await mount();
+    assert.doesNotMatch(view.text(), /Stop builds/);
     view.unmount();
   });
 
@@ -206,5 +318,53 @@ describe('the account page', () => {
     });
     assert.match(view.text(), /Still held, not republished: bakery/);
     view.unmount();
+  });
+});
+
+describe('what the deeper page says', () => {
+  it('names a month, and what a stop did', () => {
+    assert.equal(formatMonth('2026-01'), 'Jan 2026');
+    assert.deepEqual(
+      describeStopBuilds({ builds: { stopped: [], failed: [] } }),
+      ['No builds were running.'],
+    );
+    assert.deepEqual(
+      describeStopBuilds({ builds: { stopped: ['a', 'b'], failed: ['c'] } }),
+      ['Stopped 2 builds.', 'Still running, try again: c.'],
+    );
+    assert.match(
+      describeAuditEntry({
+        id: 1,
+        at: '2026-10-01T00:00:00.000Z',
+        adminEmail: 'admin@example.com',
+        action: 'stop-builds',
+        targetUserId: USER,
+        target: null,
+        reason: 'Looping',
+        detail: { stopped: 2, stillRunning: 1 },
+      }),
+      /^Stopped running builds \(user_2abc123\) · 2 stopped, 1 still running · "Looping" · by admin@example.com$/,
+    );
+  });
+
+  it('drops a site address that is not https, and fields it cannot read', () => {
+    const user = readAdminUser(
+      DETAIL({
+        projects: [
+          {
+            id: 'p1',
+            name: 'Bakery',
+            archived: false,
+            updatedAt: '',
+            site: { slug: 'bakery', state: 'live', url: 'javascript:alert(1)' },
+          },
+        ],
+        spendByMonth: [{ month: 'September', costMicroUsd: 1 }],
+        github: 'nope',
+      }),
+    )!;
+    assert.equal(user.projects[0]!.site!.url, null);
+    assert.deepEqual(user.spendByMonth, []);
+    assert.deepEqual(user.github, { connection: null, repositories: [] });
   });
 });

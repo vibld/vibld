@@ -328,6 +328,7 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   '/api/admin/user/ban': 'behind the platform-admin check instead',
   '/api/admin/user/unban': 'behind the platform-admin check instead',
   '/api/admin/user/delete': 'behind the platform-admin check instead',
+  '/api/admin/user/stop-builds': 'behind the platform-admin check instead',
   '/api/admin/audit': 'behind the platform-admin check instead',
 };
 

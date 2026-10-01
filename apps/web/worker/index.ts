@@ -221,7 +221,12 @@ import {
 } from './account-deletion.ts';
 import { AccountDeletionStore } from './account-deletion-store.ts';
 import { AdminStore, type AuditEntry } from './admin-store.ts';
-import { appendAudit, handleAdminUsers, withAudit } from './admin-users.ts';
+import {
+  appendAudit,
+  handleAdminUsers,
+  isAdminUserRoute,
+  withAudit,
+} from './admin-users.ts';
 import type { AdminUsersDeps } from './admin-users.ts';
 import type { DeletionLookup } from './account-deletion.ts';
 import {
@@ -3889,18 +3894,10 @@ async function route(
   }
 
   // One account (D73): its page, a gifted plan, overrides, a ban, a
-  // deletion, and the audit log. `handleAdminUsers` asks `requireAdmin`
-  // before it reads anything, the same check as every route above.
-  if (
-    pathname === '/api/admin/user/detail' ||
-    pathname === '/api/admin/user/gift' ||
-    pathname === '/api/admin/user/gift/revoke' ||
-    pathname === '/api/admin/user/overrides' ||
-    pathname === '/api/admin/user/ban' ||
-    pathname === '/api/admin/user/unban' ||
-    pathname === '/api/admin/user/delete' ||
-    pathname === '/api/admin/audit'
-  ) {
+  // deletion, stopping its builds, and the audit log. `handleAdminUsers`
+  // asks `requireAdmin` before it reads anything, the same check as every
+  // route above.
+  if (isAdminUserRoute(pathname)) {
     return handleAdminUsers(request, env, adminUsersDeps(env));
   }
 

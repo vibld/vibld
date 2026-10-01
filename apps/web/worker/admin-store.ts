@@ -33,6 +33,8 @@ export const AUDIT_ACTIONS = [
   'share-release',
   // Importing Clerk's directory into the account list (D128).
   'accounts-import',
+  // Stopping an account's running builds from its page (D128).
+  'stop-builds',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -102,6 +104,45 @@ export interface AdminRunView {
   costMicroUsd: number | null;
   elapsedMs: number | null;
   endedAt: string | null;
+}
+
+/** One calendar month (UTC) of model spend, as the admin user page shows it. */
+export interface AdminMonthSpend {
+  /** YYYY-MM. */
+  month: string;
+  costMicroUsd: number;
+  runs: number;
+}
+
+/**
+ * The account's GitHub sign-in and the repositories its projects push to.
+ * Names and dates only: never a token.
+ */
+export interface AdminGitHubView {
+  connection: {
+    login: string | null;
+    connectedAt: string;
+    revokedAt: string | null;
+  } | null;
+  repositories: {
+    projectId: string;
+    projectName: string | null;
+    owner: string;
+    repo: string;
+    defaultBranch: string;
+    grantedAt: string;
+    expiresAt: string;
+    revokedAt: string | null;
+  }[];
+}
+
+/** A build that has not ended, as the admin user page shows it. */
+export interface AdminUnendedRun {
+  runId: string;
+  projectId: string;
+  projectName: string;
+  state: string;
+  startedAt: string;
 }
 
 interface GiftRow {
@@ -660,5 +701,134 @@ export class AdminStore {
       elapsedMs: row.elapsed_ms,
       endedAt: row.ended_at,
     }));
+  }
+
+  /**
+   * Model spend by calendar month (UTC), newest first, for the months
+   * from `since` on that had any. Counted the way the account list counts
+   * it: the traces of the account's projects, and those written against
+   * the account itself.
+   */
+  async spendByMonth(
+    userId: string,
+    since: string,
+  ): Promise<AdminMonthSpend[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT substr(t.ended_at, 1, 7) AS month,
+                SUM(t.cost_micro_usd) AS cost, COUNT(*) AS runs
+           FROM generation_run_traces AS t
+          WHERE (t.project_id = ?1
+                 OR t.project_id IN (SELECT id FROM projects WHERE user_id = ?1))
+            AND t.ended_at >= ?2
+          GROUP BY month
+          ORDER BY month DESC`,
+      )
+      .bind(userId, since)
+      .all<{ month: string; cost: number; runs: number }>();
+    return (result.results ?? []).map((row) => ({
+      month: row.month,
+      costMicroUsd: row.cost,
+      runs: row.runs,
+    }));
+  }
+
+  /** The account's GitHub sign-in and every repository binding it has had. */
+  async githubOf(userId: string): Promise<AdminGitHubView> {
+    const [connection, bindings] = await Promise.all([
+      this.#db
+        .prepare(
+          `SELECT login, connected_at, revoked_at FROM github_connections
+            WHERE user_id = ?1`,
+        )
+        .bind(userId)
+        .first<{
+          login: string | null;
+          connected_at: string;
+          revoked_at: string | null;
+        }>(),
+      this.#db
+        .prepare(
+          `SELECT b.project_id, p.name AS project_name, b.owner, b.repo,
+                  b.default_branch, b.granted_at, b.expires_at, b.revoked_at
+             FROM github_project_bindings AS b
+             LEFT JOIN projects AS p ON p.id = b.project_id
+            WHERE b.user_id = ?1
+            ORDER BY b.granted_at DESC, b.project_id
+            LIMIT 200`,
+        )
+        .bind(userId)
+        .all<{
+          project_id: string;
+          project_name: string | null;
+          owner: string;
+          repo: string;
+          default_branch: string;
+          granted_at: string;
+          expires_at: string;
+          revoked_at: string | null;
+        }>(),
+    ]);
+    return {
+      connection: connection
+        ? {
+            login: connection.login,
+            connectedAt: connection.connected_at,
+            revokedAt: connection.revoked_at,
+          }
+        : null,
+      repositories: (bindings.results ?? []).map((row) => ({
+        projectId: row.project_id,
+        projectName: row.project_name,
+        owner: row.owner,
+        repo: row.repo,
+        defaultBranch: row.default_branch,
+        grantedAt: row.granted_at,
+        expiresAt: row.expires_at,
+        revokedAt: row.revoked_at,
+      })),
+    };
+  }
+
+  /**
+   * The builds the account has that have not ended: the runs "Stop builds"
+   * would stop. The same reading `unendedRuns` in `project-store.ts` makes,
+   * across every project, one row per run.
+   */
+  async unendedRunsOf(userId: string): Promise<AdminUnendedRun[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT s.run_id, s.project_id, p.name AS project_name, s.state,
+                s.created_at
+           FROM generation_stages AS s
+           JOIN projects AS p ON p.id = s.project_id
+          WHERE p.user_id = ?1
+            AND s.state NOT IN ('accepted', 'failed', 'cancelled', 'idle')
+          ORDER BY s.created_at DESC, s.run_id
+          LIMIT 200`,
+      )
+      .bind(userId)
+      .all<{
+        run_id: string;
+        project_id: string;
+        project_name: string;
+        state: string;
+        created_at: string;
+      }>();
+    const seen = new Set<string>();
+    const runs: AdminUnendedRun[] = [];
+    for (const row of result.results ?? []) {
+      const runId = row.run_id.split(':')[0]!;
+      if (seen.has(runId)) continue;
+      seen.add(runId);
+      runs.push({
+        runId,
+        projectId: row.project_id,
+        projectName: row.project_name,
+        state: row.state,
+        startedAt: row.created_at,
+      });
+    }
+    return runs;
   }
 }

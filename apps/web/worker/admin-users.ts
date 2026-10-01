@@ -13,6 +13,8 @@
  *     POST /api/admin/user/unban          lift a ban (held sites stay held)
  *     POST /api/admin/user/delete         the existing account deletion,
  *                                         asked for by an admin
+ *     POST /api/admin/user/stop-builds    stop every build the account has
+ *                                         running, without banning it
  *     GET  /api/admin/audit               the most recent admin actions
  *
  * Every one of them asks `authorize` first and does nothing, not even read
@@ -46,11 +48,14 @@ import {
 } from './entitlement.ts';
 import type { Tier } from './entitlement.ts';
 import type { HoldResult } from './publish-client.ts';
+import { DEFAULT_PUBLISH_HOSTNAME } from './project-handlers.ts';
 import { planOf } from './spendable.ts';
 
 export interface AdminUsersEnv {
   DB?: D1Database;
   VIBLD_FREE_MONTHLY_MICRO_USD?: string;
+  /** The domain published sites are served under (`index.ts` Env). */
+  PUBLISH_HOSTNAME?: string;
 }
 
 /** What `requireAdmin` in `index.ts` answers. */
@@ -124,6 +129,7 @@ export const ADMIN_USER_ROUTES = [
   '/api/admin/user/ban',
   '/api/admin/user/unban',
   '/api/admin/user/delete',
+  '/api/admin/user/stop-builds',
   '/api/admin/audit',
 ] as const;
 
@@ -438,6 +444,10 @@ export async function handleAdminUsers(
     return json({ ok: true, userId, clerk, heldSites });
   }
 
+  if (route === '/api/admin/user/stop-builds') {
+    return stopBuilds(db, deps, userId, by, reason, now);
+  }
+
   // `/api/admin/user/delete`: the only route left.
   return remove(db, deps, userId, by, reason, body.value.confirmEmail, now);
 }
@@ -522,6 +532,45 @@ async function ban(
     }),
   );
   return json({ ok: true, userId, clerk, builds, previews, sites });
+}
+
+/**
+ * Stop every build an account has running, the same stop a ban makes,
+ * without the ban: for a build that is looping or spending faster than it
+ * should. Nothing else changes; the account can start another.
+ *
+ * Audited after the stop rather than before, because the row records what
+ * happened: how many stopped, and how many are still running.
+ */
+async function stopBuilds(
+  db: D1Database,
+  deps: AdminUsersDeps,
+  userId: string,
+  by: string,
+  reason: string | null,
+  now: Date,
+): Promise<Response> {
+  if (!deps.stopBuilds) {
+    return json(
+      { error: 'This deployment runs no builds, so there is nothing to stop.' },
+      409,
+    );
+  }
+  let builds: { stopped: string[]; failed: string[] };
+  try {
+    builds = await deps.stopBuilds(userId);
+  } catch (error) {
+    console.error('stop-builds: could not list builds', error);
+    return json({ error: "Could not reach the account's builds." }, 502);
+  }
+  const audited = await appendAudit(
+    db,
+    entry(now, by, 'stop-builds', userId, reason, {
+      stopped: builds.stopped.length,
+      stillRunning: builds.failed.length,
+    }),
+  );
+  return json({ ok: true, userId, builds, audited });
 }
 
 /**
@@ -649,6 +698,9 @@ async function detail(
     projects,
     runs,
     audit,
+    spendByMonth,
+    github,
+    running,
   ] = await Promise.all([
     deps.clerkUser(userId),
     planOf(db, userId, now.getTime()),
@@ -661,6 +713,9 @@ async function detail(
     store.projectsOf(userId),
     store.recentRuns(userId, 20),
     store.auditFor(userId, 100),
+    store.spendByMonth(userId, spendSince(now)),
+    store.githubOf(userId),
+    store.unendedRunsOf(userId),
   ]);
   let usage: { monthMicroUsd: number; topupMicroUsd: number } | null = null;
   if (deps.usage) {
@@ -713,8 +768,30 @@ async function detail(
     suspended,
     ban: banned,
     deletion,
-    projects,
+    // Each site with its address, the one the project's own view shows.
+    projects: projects.map((project) => ({
+      ...project,
+      site: project.site
+        ? {
+            ...project.site,
+            url: `https://${project.site.slug}.${
+              env.PUBLISH_HOSTNAME || DEFAULT_PUBLISH_HOSTNAME
+            }/`,
+          }
+        : null,
+    })),
     runs,
+    running,
+    canStopBuilds: deps.stopBuilds !== null,
+    spendByMonth,
+    github,
     audit,
   });
+}
+
+/** The first instant of the month eleven months before `now`'s, in UTC: a year of months. */
+export function spendSince(now: Date): string {
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1),
+  ).toISOString();
 }
