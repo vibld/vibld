@@ -47,7 +47,7 @@ export function ProjectsView({ projects }: { projects: ProjectsController }) {
           <h1 className="projectspage__title">Projects</h1>
           {limits && limits.maxActive !== null ? (
             <p className="pane-note">
-              {limits.active} of {limits.maxActive} active projects on the free
+              {limits.active} of {limits.maxActive} active projects on your
               plan. Archived projects do not count.
             </p>
           ) : null}

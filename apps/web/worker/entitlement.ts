@@ -153,22 +153,43 @@ export interface UserOverrides {
   monthlySpendCapMicroUsd: number | null;
 }
 
-/** The active-project limit, with an override taking precedence. */
+/**
+ * A plan's limits as an admin set them in the panel (D134,
+ * `plan-limits.ts`), in place of the ones above. Absent where the plan
+ * keeps the code's.
+ */
+export interface PlanLimitsInForce {
+  activeProjectLimit: number | null;
+  monthlyAllowanceMicroUsd: number;
+}
+
+/**
+ * The active-project limit: an account's override first, then the plan's
+ * as an admin set it, then the code's.
+ */
 export function activeProjectLimitFor(
   tier: Tier,
   overrides: UserOverrides | null,
+  plan?: PlanLimitsInForce,
 ): number | null {
-  return overrides?.activeProjectLimit ?? ACTIVE_PROJECT_LIMIT[tier];
+  const override = overrides?.activeProjectLimit;
+  if (override !== null && override !== undefined) return override;
+  return plan ? plan.activeProjectLimit : ACTIVE_PROJECT_LIMIT[tier];
 }
 
-/** The monthly allowance, with an override taking precedence. */
+/**
+ * The monthly allowance: an account's override first, then the plan's as
+ * an admin set it, then the code's.
+ */
 export function monthlyAllowanceFor(
   tier: Tier,
   freeIncludedMicroUsd: number,
   overrides: UserOverrides | null,
+  plan?: PlanLimitsInForce,
 ): number {
   return (
     overrides?.monthlySpendCapMicroUsd ??
+    plan?.monthlyAllowanceMicroUsd ??
     monthlyAllowanceMicroUsd(tier, freeIncludedMicroUsd)
   );
 }

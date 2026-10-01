@@ -1468,6 +1468,20 @@ goes back to that secret.
 - Each Worker isolate reads the stored keys at most every 30 seconds, so a
   change reaches every request within that time.
 
+## Admin: plan limits (D134)
+
+Each plan's active-project limit and monthly allowance can be set on the
+admin page, under **Plans**, in place of the values in `worker/entitlement.ts`,
+and put back with **Reset to code**. A saved plan is stored in D1
+(`plan_limits`, migration 0043), applies to every account on the plan within
+30 seconds, and every change is in the audit log. An account's own override
+(D73) still comes first.
+
+vibld.com's pricing page is built from the limits in code
+(`apps/marketing/app/plan-sources.ts` reads `worker/entitlement.ts`), not
+from here. To have it state a plan's new limits, change them in
+`worker/entitlement.ts` as well, then reset the plan here.
+
 ## Admin: accounts (D73)
 
 Each account has an admin page in the builder, `/admin/users/<Clerk user

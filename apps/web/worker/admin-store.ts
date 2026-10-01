@@ -38,6 +38,9 @@ export const AUDIT_ACTIONS = [
   // Setting and removing a model provider key in the panel (D127).
   'provider-key-set',
   'provider-key-remove',
+  // Setting a plan's limits in the panel, and putting them back (D134).
+  'plan-limits',
+  'plan-limits-reset',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

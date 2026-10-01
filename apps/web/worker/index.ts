@@ -71,6 +71,7 @@ import { handleShare, handleShareHold } from './share-handlers.ts';
 import { sharePreviewKey, shareTokenFromLink } from './share-link.ts';
 import { MediaStore } from './media-store.ts';
 import {
+  freeAllowanceOf,
   SUSPENDED_MESSAGE,
   planOf,
   spendableFor,
@@ -81,7 +82,6 @@ import { POLL_INTERVAL_MS, phaseFor, stageFor, stepFor } from './run-stage.ts';
 import { isCheckVerdict } from '../src/generation/build-check.ts';
 import { RunProgress } from './run-progress.ts';
 import {
-  positiveInt,
   refusalFor,
   reserveAccount,
   reserveBudget,
@@ -120,7 +120,6 @@ import {
 } from './run-ceiling.ts';
 import type { BuildSize } from './run-ceiling.ts';
 import {
-  DEFAULT_FREE_INCLUDED_MICRO_USD,
   allowancePeriodKey,
   monthlyAllowanceFor,
   tierFor,
@@ -172,6 +171,12 @@ import {
   reconcileSubscriptions,
 } from './billing-handlers.ts';
 import { checkProviderBalances } from './provider-balance.ts';
+import {
+  handlePlanLimits,
+  isPlanRoute,
+  planLimitsFor,
+  savedPlanLimits,
+} from './plan-limits.ts';
 import {
   handleProviderKeys,
   isKeyRoute,
@@ -697,19 +702,18 @@ async function handleBillingStatus(
     // higher (D73), and an admin's spend cap in place of the tier's
     // allowance where one is set: the same readings `spendableFor` makes,
     // so the panel shows what a run is actually held to.
-    const [plan, overrides] = await Promise.all([
+    const [plan, overrides, savedPlans] = await Promise.all([
       planOf(env.DB, principal.userId, now),
       new AdminStore(env.DB).overrides(principal.userId),
+      savedPlanLimits(env.DB),
     ]);
     const { subscription, tier } = plan;
-    const freeAllowance = positiveInt(
-      env.VIBLD_FREE_MONTHLY_MICRO_USD,
-      DEFAULT_FREE_INCLUDED_MICRO_USD,
-    );
+    const freeAllowance = freeAllowanceOf(env);
     const allowanceMicroUsd = monthlyAllowanceFor(
       tier,
       freeAllowance,
       overrides,
+      planLimitsFor(tier, savedPlans, freeAllowance),
     );
     const usage = await env.USER_BUDGET.getByName(principal.userId).usageFor(
       allowancePeriodKey(now),
@@ -3885,6 +3889,17 @@ async function route(
     return pathname === '/api/admin/accounts'
       ? handleAccountList(request, deps)
       : handleAccountImport(request, deps);
+  }
+
+  // Plan limits (D134): what each plan allows, set in the panel.
+  if (isPlanRoute(pathname)) {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handlePlanLimits(request, env.DB!, {
+      adminEmail: guard.adminEmail,
+      audit: (entry) => appendAudit(env.DB!, entry),
+      freeAllowanceMicroUsd: freeAllowanceOf(env),
+    });
   }
 
   // The platform overview (D128): reads only, from tables already written.

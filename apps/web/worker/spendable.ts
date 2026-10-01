@@ -9,6 +9,7 @@ import {
 } from './entitlement.ts';
 import type { EffectiveTier, Tier } from './entitlement.ts';
 import { billingConfigured } from './billing-handlers.ts';
+import { planLimitsFor, savedPlanLimits } from './plan-limits.ts';
 import type { Principal } from './principal.ts';
 
 /** Only what deciding an allowance needs, so a test need not build a router. */
@@ -20,6 +21,14 @@ export interface SpendableEnv {
 function positiveInt(raw: string | undefined, fallback: number): number {
   const value = Number(raw);
   return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+/** Free's monthly allowance in code: `VIBLD_FREE_MONTHLY_MICRO_USD`, else $1. */
+export function freeAllowanceOf(env: SpendableEnv): number {
+  return positiveInt(
+    env.VIBLD_FREE_MONTHLY_MICRO_USD,
+    DEFAULT_FREE_INCLUDED_MICRO_USD,
+  );
 }
 
 export interface Spendable {
@@ -72,20 +81,25 @@ export async function spendableFor(
   if (await billing.isSuspended(principal.userId)) {
     return { monthlyAllowance: 0, topupCeiling: 0, suspended: true };
   }
-  const [plan, overrides] = await Promise.all([
+  const [plan, overrides, saved] = await Promise.all([
     planOf(env.DB!, principal.userId),
     new AdminStore(env.DB!).overrides(principal.userId),
+    savedPlanLimits(env.DB!),
   ]);
-  const freeAllowance = positiveInt(
-    env.VIBLD_FREE_MONTHLY_MICRO_USD,
-    DEFAULT_FREE_INCLUDED_MICRO_USD,
-  );
+  const freeAllowance = freeAllowanceOf(env);
   return {
     // An admin's cap for this account, where one is set, in place of the
     // tier's included amount (D73). Read here, beside the tier, for the
     // reason this function exists: one answer to "what may this account
     // spend" for every route that reserves.
-    monthlyAllowance: monthlyAllowanceFor(plan.tier, freeAllowance, overrides),
+    // Then the plan's, as an admin set it in the panel (D134), else the
+    // code's.
+    monthlyAllowance: monthlyAllowanceFor(
+      plan.tier,
+      freeAllowance,
+      overrides,
+      planLimitsFor(plan.tier, saved, freeAllowance),
+    ),
     // Stripe top-ups and admin-granted credit (L4) combined -- see
     // `totalSpendableCreditMicroUsd`'s own comment.
     topupCeiling: await billing.totalSpendableCreditMicroUsd(principal.userId),
@@ -144,15 +158,22 @@ export async function planOf(
 
 /**
  * How many active projects this account may have: an admin's override
- * where one is set, and the tier's limit otherwise (D73).
+ * where one is set (D73), then the plan's limit as an admin set it in the
+ * panel (D134), then the code's.
  */
 export async function projectLimitOf(
   db: D1Database,
   userId: string,
   tier: Tier,
 ): Promise<number | null> {
+  const [overrides, saved] = await Promise.all([
+    new AdminStore(db).overrides(userId),
+    savedPlanLimits(db),
+  ]);
+  // The allowance is not read here, so Free's is immaterial.
   return activeProjectLimitFor(
     tier,
-    await new AdminStore(db).overrides(userId),
+    overrides,
+    planLimitsFor(tier, saved, DEFAULT_FREE_INCLUDED_MICRO_USD),
   );
 }

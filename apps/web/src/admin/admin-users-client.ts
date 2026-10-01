@@ -546,6 +546,8 @@ const ACTION_NAMES: Record<string, string> = {
   'stop-builds': 'Stopped running builds',
   'provider-key-set': 'Set a provider key',
   'provider-key-remove': 'Removed a provider key',
+  'plan-limits': "Set a plan's limits",
+  'plan-limits-reset': "Reset a plan's limits to the code's",
 };
 
 /** One audit row, as a sentence an admin reads down a list. */
@@ -584,6 +586,18 @@ export function describeAuditEntry(entry: AdminAuditEntry): string {
     typeof detail.last4 === 'string'
   ) {
     facts.push(`ending ${detail.last4.slice(-4)}`);
+  }
+  if (
+    entry.action === 'plan-limits' &&
+    typeof detail.monthlyAllowanceMicroUsd === 'number'
+  ) {
+    facts.push(
+      `${
+        typeof detail.activeProjectLimit === 'number'
+          ? `${detail.activeProjectLimit} active projects`
+          : 'no project limit'
+      }, ${formatUsd(detail.monthlyAllowanceMicroUsd)} a month`,
+    );
   }
   if (entry.action === 'topup' && typeof detail.creditUsdCents === 'number') {
     facts.push(formatUsd(detail.creditUsdCents * 10_000));

@@ -40,15 +40,14 @@ import type {
   ClerkUserSummary,
 } from './clerk-lookup.ts';
 import {
-  ACTIVE_PROJECT_LIMIT,
   DEFAULT_FREE_INCLUDED_MICRO_USD,
   activeProjectLimitFor,
   monthlyAllowanceFor,
-  monthlyAllowanceMicroUsd,
 } from './entitlement.ts';
 import type { Tier } from './entitlement.ts';
 import type { HoldResult } from './publish-client.ts';
 import { DEFAULT_PUBLISH_HOSTNAME } from './project-handlers.ts';
+import { planLimitsFor, savedPlanLimits } from './plan-limits.ts';
 import { planOf } from './spendable.ts';
 
 export interface AdminUsersEnv {
@@ -731,6 +730,13 @@ async function detail(
     DEFAULT_FREE_INCLUDED_MICRO_USD,
   );
   const tier: Tier = plan.tier;
+  // The plan's limits as an admin set them in the panel, else the code's
+  // (D134): what "the plan gives" means beside an override.
+  const planLimits = planLimitsFor(
+    tier,
+    await savedPlanLimits(db),
+    freeAllowance,
+  );
   return json({
     userId,
     email: clerk?.email ?? null,
@@ -748,17 +754,15 @@ async function detail(
     gifts,
     overrides,
     limits: {
-      activeProjects: activeProjectLimitFor(tier, overrides),
-      tierActiveProjects: ACTIVE_PROJECT_LIMIT[tier],
+      activeProjects: activeProjectLimitFor(tier, overrides, planLimits),
+      tierActiveProjects: planLimits.activeProjectLimit,
       monthlyAllowanceMicroUsd: monthlyAllowanceFor(
         tier,
         freeAllowance,
         overrides,
+        planLimits,
       ),
-      tierMonthlyAllowanceMicroUsd: monthlyAllowanceMicroUsd(
-        tier,
-        freeAllowance,
-      ),
+      tierMonthlyAllowanceMicroUsd: planLimits.monthlyAllowanceMicroUsd,
     },
     spend: {
       monthMicroUsd: usage?.monthMicroUsd ?? null,
