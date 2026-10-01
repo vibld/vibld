@@ -428,6 +428,7 @@ const ACTION_NAMES: Record<string, string> = {
   'site-release': 'Released a site',
   'share-hold': 'Held a share link',
   'share-release': 'Released a share link',
+  'accounts-import': 'Imported accounts from Clerk',
 };
 
 /** One audit row, as a sentence an admin reads down a list. */
@@ -441,6 +442,16 @@ export function describeAuditEntry(entry: AdminAuditEntry): string {
       typeof detail.endsAt === 'string'
         ? `${tier} until ${formatDay(detail.endsAt)}`
         : `${tier}, no end date`,
+    );
+  }
+  if (
+    entry.action === 'accounts-import' &&
+    typeof detail.imported === 'number'
+  ) {
+    facts.push(
+      detail.partial === true
+        ? `${detail.imported} accounts, stopped part way`
+        : `${detail.imported} accounts`,
     );
   }
   if (entry.action === 'topup' && typeof detail.creditUsdCents === 'number') {

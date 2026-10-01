@@ -68,12 +68,26 @@ export function adminUserIdFromPath(pathname: string): string | null {
   }
 }
 
+/** Every account, searchable and sortable (D128). */
+export const ADMIN_ACCOUNTS_PATH = `${ADMIN_PATH}/accounts`;
+
+export function isAdminAccountsPath(pathname: string): boolean {
+  return (
+    pathname === ADMIN_ACCOUNTS_PATH || pathname === `${ADMIN_ACCOUNTS_PATH}/`
+  );
+}
+
 /**
- * Whether a path is one of the admin pages, the tools or an account's. The
- * builder steps aside for both, and neither is a project's address.
+ * Whether a path is one of the admin pages: the tools, the account list or
+ * an account's. The builder steps aside for all three, and none is a
+ * project's address.
  */
 export function isAdminArea(pathname: string): boolean {
-  return isAdminPath(pathname) || adminUserIdFromPath(pathname) !== null;
+  return (
+    isAdminPath(pathname) ||
+    isAdminAccountsPath(pathname) ||
+    adminUserIdFromPath(pathname) !== null
+  );
 }
 
 export type AdminPageView = 'checking' | 'denied' | 'admin';

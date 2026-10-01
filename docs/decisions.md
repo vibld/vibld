@@ -428,6 +428,22 @@ builder, and whether the repository should move to his account.
   pull request each: sign-in (D123), Docker, local models (D124), the
   in-browser preview (D125), then the end-to-end check (D122). One-click
   deploy templates for hosts that run containers come after Docker.
+- **D127. Deployment provider keys are managed in the admin panel.** The
+  keys a deployment builds with are set, replaced and removed from the
+  panel, stored encrypted in D1 under a key held as a Worker secret, and
+  shown only by their last four characters. There are no per-user keys;
+  L31 and L45 stand.
+- **D128. Platform admin tools, in four pieces.** A list of every account
+  (search, filters, sort, CSV export), a deeper account page, a platform
+  overview, and model and plan controls. Accounts are recorded in D1 as
+  they sign in (migration 0041, which folds in 0040's `access_accounts`),
+  backfilled from projects and billing, and importable from Clerk's
+  directory by an admin.
+- **D129. The admin list stays read-only.** The panel shows who is an
+  admin; changing it remains a change to the `VIBLD_PLATFORM_ADMINS`
+  secret, which no session can make (L4).
+- **D130. The admin tools come before Docker.** Built now, one pull request
+  per piece, then the D126 order resumes.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

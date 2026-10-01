@@ -714,10 +714,10 @@ describe('the sixth review of #337', async () => {
           bind(value: string) {
             return {
               async first() {
-                if (sql.includes('FROM access_accounts WHERE email')) {
+                if (sql.includes('FROM accounts WHERE email')) {
                   return seen.has(value) ? { user_id: seen.get(value) } : null;
                 }
-                if (sql.includes('FROM access_accounts WHERE user_id')) {
+                if (sql.includes('FROM accounts WHERE user_id')) {
                   for (const [email, id] of seen) {
                     if (id === value) return { email };
                   }

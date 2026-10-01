@@ -31,6 +31,8 @@ export const AUDIT_ACTIONS = [
   'site-release',
   'share-hold',
   'share-release',
+  // Importing Clerk's directory into the account list (D128).
+  'accounts-import',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

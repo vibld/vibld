@@ -532,8 +532,8 @@ export class AccountDeletionStore {
    * Everything else keyed to the person that is not kept: the GitHub
    * connection, every project's binding and the push history (repository
    * names are theirs), their referral code, the invite they redeemed, which
-   * is keyed by their email address, and, behind Cloudflare Access, the row
-   * that maps that address to their account (0040, D123).
+   * is keyed by their email address, and the row that lists the account
+   * with that address (0041, D128).
    *
    * `github_bindings` is still deleted although nothing reads it since D72:
    * 0039 left it in place, and the repository names in it are as much this
@@ -552,7 +552,7 @@ export class AccountDeletionStore {
       `DELETE FROM github_bindings WHERE user_id = ?1`,
       `DELETE FROM referral_codes WHERE user_id = ?1`,
       `DELETE FROM access_invites WHERE redeemed_by_user_id = ?1`,
-      `DELETE FROM access_accounts WHERE user_id = ?1`,
+      `DELETE FROM accounts WHERE user_id = ?1`,
       `DELETE FROM plan_gifts WHERE user_id = ?1`,
       `DELETE FROM user_overrides WHERE user_id = ?1`,
       `DELETE FROM user_bans WHERE user_id = ?1`,

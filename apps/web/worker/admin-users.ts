@@ -187,6 +187,8 @@ export async function appendAudit(
   db: D1Database,
   entry: AuditEntry,
 ): Promise<boolean> {
+  // The account it targets is listed by the audit log's own trigger
+  // (0041), whichever way the row is written.
   try {
     await new AdminStore(db).append(entry);
     return true;

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { AccessStore } from '../worker/access-store.ts';
+import { AccountsStore } from '../worker/accounts-store.ts';
 import {
   decideAccessFor,
   handleAccessStatus,
@@ -148,6 +149,25 @@ describe('handleAccessStatus', () => {
     assert.equal(unverified.allowed, false);
     assert.equal(uninvited.message, unverified.message);
     assert.equal(uninvited.mode, 'invite');
+  });
+
+  it('records each account it lets in, by a verified address only (D128)', async () => {
+    const env = newEnv({ VIBLD_ACCESS_MODE: 'open' });
+    const request = new Request('https://app.vibld.com/api/access/status');
+    await handleAccessStatus(request, env, STRANGER);
+    await handleAccessStatus(request, env, {
+      userId: 'user_4',
+      email: 'claimed@example.com',
+      emailVerified: false,
+      policyIdentity: 'unknown',
+    });
+    const accounts = new AccountsStore(env.DB);
+    assert.equal(
+      await accounts.emailForUserId('user_2'),
+      'stranger@example.com',
+    );
+    assert.equal(await accounts.userIdForEmail('claimed@example.com'), null);
+    assert.equal(await accounts.emailForUserId('user_4'), null);
   });
 
   it('refuses a method that is not GET', async () => {

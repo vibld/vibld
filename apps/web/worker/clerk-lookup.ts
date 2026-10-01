@@ -227,6 +227,19 @@ export async function fetchClerkUser(
     last_sign_in_at?: unknown;
     banned?: unknown;
   };
+  return summarizeClerkUser(user);
+}
+
+interface ClerkUserBody {
+  id?: unknown;
+  primary_email_address_id?: unknown;
+  email_addresses?: unknown;
+  created_at?: unknown;
+  last_sign_in_at?: unknown;
+  banned?: unknown;
+}
+
+function summarizeClerkUser(user: ClerkUserBody): ClerkUserSummary {
   const addresses = Array.isArray(user.email_addresses)
     ? (user.email_addresses as { id?: unknown; email_address?: unknown }[])
     : [];
@@ -242,4 +255,113 @@ export async function fetchClerkUser(
     lastSignInAt: number(user.last_sign_in_at),
     banned: typeof user.banned === 'boolean' ? user.banned : null,
   };
+}
+
+/**
+ * Whether the address `summarizeClerkUser` picks, the primary or else the
+ * first, is one Clerk has verified (`verification.status`).
+ */
+function primaryAddressVerified(user: ClerkUserBody): boolean {
+  const addresses = Array.isArray(user.email_addresses)
+    ? (user.email_addresses as {
+        id?: unknown;
+        verification?: { status?: unknown } | null;
+      }[])
+    : [];
+  const primary =
+    addresses.find((entry) => entry.id === user.primary_email_address_id) ??
+    addresses[0];
+  return primary?.verification?.status === 'verified';
+}
+
+export interface ClerkListedUser extends ClerkUserSummary {
+  userId: string;
+}
+
+export type ClerkUserPage =
+  | {
+      ok: true;
+      users: ClerkListedUser[];
+      /** How many entries Clerk returned, readable or not: the next offset's step. */
+      read: number;
+      /** The newest `created_at` on the page (Unix ms): the next cursor. */
+      lastCreatedAt: number | null;
+    }
+  | { ok: false; error: string };
+
+/**
+ * One page of Clerk's user directory, oldest first (Backend API
+ * `GET /v1/users`), for importing accounts into the admins' list (D128).
+ *
+ * Paged by creation time, not by offset: `after` asks for the accounts
+ * created after that instant, and `before` (when set) for those created
+ * before another (`created_at_after` and `created_at_before`, Unix ms). A
+ * deletion cannot move that cursor the way it moves an offset, and a
+ * sign-up during an import is created after it and read in turn. `offset`
+ * pages within one millisecond, where there is nothing else to order by.
+ */
+export async function listClerkUsers(
+  env: ClerkLookupEnv,
+  query: {
+    after: number | null;
+    before?: number;
+    limit: number;
+    offset?: number;
+  },
+  fetchImpl: typeof fetch = fetch,
+): Promise<ClerkUserPage> {
+  const { after, before, limit, offset } = query;
+  if (!clerkLookupConfigured(env)) {
+    return { ok: false, error: 'CLERK_SECRET_KEY is not set.' };
+  }
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `https://api.clerk.com/v1/users?limit=${limit}&order_by=${encodeURIComponent('+created_at')}${
+        after === null ? '' : `&created_at_after=${after}`
+      }${before === undefined ? '' : `&created_at_before=${before}`}${
+        offset ? `&offset=${offset}` : ''
+      }`,
+      {
+        headers: { authorization: `Bearer ${env.CLERK_SECRET_KEY}` },
+        signal: AbortSignal.timeout(8_000),
+      },
+    );
+  } catch {
+    return { ok: false, error: 'Could not reach Clerk.' };
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: `Clerk refused the listing (${response.status}).`,
+    };
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return { ok: false, error: 'Clerk answered with something unreadable.' };
+  }
+  if (!Array.isArray(body)) {
+    return { ok: false, error: 'Clerk answered with something unreadable.' };
+  }
+  const users: ClerkListedUser[] = [];
+  let lastCreatedAt: number | null = null;
+  for (const entry of body as ClerkUserBody[]) {
+    const created = entry?.created_at;
+    if (typeof created === 'number' && Number.isFinite(created)) {
+      lastCreatedAt = Math.max(lastCreatedAt ?? created, created);
+    }
+    if (typeof entry?.id !== 'string') continue;
+    const summary = summarizeClerkUser(entry);
+    // Only a verified address is imported, as only a verified one is
+    // recorded at sign-in: the list and the lookups that read it must not
+    // name an account by an address it has not proven.
+    users.push({
+      userId: entry.id,
+      ...summary,
+      email: primaryAddressVerified(entry) ? summary.email : null,
+    });
+  }
+  return { ok: true, users, read: body.length, lastCreatedAt };
 }

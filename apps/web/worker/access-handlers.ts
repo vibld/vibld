@@ -19,7 +19,8 @@ import {
 } from './access.ts';
 import type { AccessDecision } from './access.ts';
 import { isPlatformAdmin, platformAdminsFor } from './platform-admins.ts';
-import { signInMode, type Principal, type PrincipalEnv } from './principal.ts';
+import type { Principal, PrincipalEnv } from './principal.ts';
+import { AccountsStore } from './accounts-store.ts';
 import type { RunRefusal } from '@vibld/core';
 
 export interface AccessEnv extends PrincipalEnv {
@@ -131,24 +132,21 @@ export async function handleAccessStatus(
 ): Promise<Response> {
   if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
   const decision = await decideAccessFor(env, principal);
-  // Behind Cloudflare Access there is no directory to find people in but
-  // this one (D123; Codex review of internal PR 337). The builder asks this route on
-  // every load, so everyone it lets in is recorded, invited or not. A
-  // failure to record is not a reason to refuse them.
-  if (
-    decision.allowed &&
-    env.DB &&
-    principal.email &&
-    signInMode(env) === 'access'
-  ) {
-    await new AccessStore(env.DB)
-      .recordAccessAccount(
-        principal.email,
+  // Every account the builder lets in is recorded (0041): the admins'
+  // account list reads it (D128), and behind Cloudflare Access it is the
+  // only directory there is to find people in (D123). The builder asks this
+  // route on every load. A failure to record is not a reason to refuse.
+  // Only a verified address is recorded: the list, and the lookups that
+  // read it, must not name an account by an address it has not proven.
+  if (decision.allowed && env.DB) {
+    await new AccountsStore(env.DB)
+      .recordSeen(
         principal.userId,
-        new Date().toISOString(),
+        principal.emailVerified === true ? principal.email : null,
+        new Date(),
       )
       .catch((error: unknown) =>
-        console.error('could not record the Access account', error),
+        console.error('could not record the account', error),
       );
   }
   return json({

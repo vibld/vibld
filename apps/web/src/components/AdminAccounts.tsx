@@ -6,7 +6,11 @@ import {
   formatDay,
 } from '../admin/admin-users-client.ts';
 import type { AdminAuditEntry } from '../admin/admin-users-client.ts';
-import { adminUserPath } from '../admin/route.ts';
+import {
+  ADMIN_ACCOUNTS_PATH,
+  adminUserIdFromPath,
+  adminUserPath,
+} from '../admin/route.ts';
 import { navigate } from '../admin/use-pathname.ts';
 
 /**
@@ -55,6 +59,19 @@ export function AdminAccounts() {
   return (
     <div className="knowledge" role="group" aria-label="Accounts">
       <p className="knowledge__summary">Accounts</p>
+      <p className="pane-note">
+        <a
+          href={ADMIN_ACCOUNTS_PATH}
+          onClick={(event) => {
+            if (event.metaKey || event.ctrlKey || event.button !== 0) return;
+            event.preventDefault();
+            navigate(ADMIN_ACCOUNTS_PATH);
+          }}
+        >
+          See every account
+        </a>
+        : search, filter, sort and export.
+      </p>
       <form onSubmit={(event) => void find(event)}>
         <label className="prompt__label" htmlFor={emailId}>
           Open an account by email
@@ -99,7 +116,9 @@ export function AdminAccounts() {
           {entries.map((entry) => (
             <li key={entry.id}>
               {formatDay(entry.at)} · {describeAuditEntry(entry)}
-              {entry.targetUserId?.startsWith('user_') ? (
+              {entry.targetUserId !== null &&
+              adminUserIdFromPath(adminUserPath(entry.targetUserId)) !==
+                null ? (
                 <>
                   {' '}
                   <a

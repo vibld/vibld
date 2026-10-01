@@ -15,8 +15,14 @@ import {
   type Principal,
   type PrincipalEnv,
 } from './principal.ts';
-import { handleOwnerSession } from './owner-auth.ts';
+import { handleOwnerSession, ownerIdentity } from './owner-auth.ts';
 import { accountDirectoryFor } from './account-directory.ts';
+import {
+  handleAccountImport,
+  handleAccountList,
+  handleAdminList,
+} from './admin-accounts.ts';
+import { listClerkUsers } from './clerk-lookup.ts';
 import { UserBudget } from './budget.ts';
 import type { Reservation } from './budget.ts';
 import { GenerationWorkflow } from './generation-workflow.ts';
@@ -214,7 +220,7 @@ import {
   runDeletionNight,
 } from './account-deletion.ts';
 import { AccountDeletionStore } from './account-deletion-store.ts';
-import { AdminStore } from './admin-store.ts';
+import { AdminStore, type AuditEntry } from './admin-store.ts';
 import { appendAudit, handleAdminUsers, withAudit } from './admin-users.ts';
 import type { AdminUsersDeps } from './admin-users.ts';
 import type { DeletionLookup } from './account-deletion.ts';
@@ -761,10 +767,11 @@ async function handleBillingStatus(
  * terms: the credit routes refuse, and inviting records the invite here and
  * reports that Clerk was not asked.
  */
-function adminConfigured(env: Env): boolean {
+function adminConfigured(env: Env, needsDatabase = true): boolean {
   // VIBLD_PLATFORM_ADMINS, or the owner of an owner-password copy, who is
-  // an admin without being listed (D123; Codex review of internal PR 337).
-  return platformAdminsFor(env).size > 0 && Boolean(env.DB);
+  // an admin without being listed (D123; Codex review of internal PR 337). Every tool
+  // needs D1 but the read-only admin list, which reads the secret (D129).
+  return platformAdminsFor(env).size > 0 && (!needsDatabase || Boolean(env.DB));
 }
 
 /**
@@ -794,8 +801,9 @@ function creditToolDenial(env: Env): Response | null {
 async function requireAdmin(
   request: Request,
   env: Env,
+  { needsDatabase = true }: { needsDatabase?: boolean } = {},
 ): Promise<{ denied: Response } | { denied: null; adminEmail: string }> {
-  if (!adminConfigured(env)) {
+  if (!adminConfigured(env, needsDatabase)) {
     return {
       denied: json(
         { error: 'Admin access is not configured for this deployment.' },
@@ -3795,6 +3803,49 @@ async function route(
 
   if (pathname === '/api/admin/user') {
     return handleAdminUser(request, env);
+  }
+
+  // The account list, its Clerk import, and who the admins are (D128,
+  // D129). Behind the platform-admin check like every /api/admin route.
+  if (
+    pathname === '/api/admin/accounts' ||
+    pathname === '/api/admin/accounts/import' ||
+    pathname === '/api/admin/admins'
+  ) {
+    // Who the admins are needs no database: it is read from the secret,
+    // and only the account links come from D1 where there is one.
+    const guard = await requireAdmin(request, env, {
+      needsDatabase: pathname !== '/api/admin/admins',
+    });
+    if (guard.denied) return guard.denied;
+    if (pathname === '/api/admin/admins') {
+      return handleAdminList(
+        request,
+        env,
+        signInMode(env),
+        signInMode(env) === 'owner' ? ownerIdentity(env) : null,
+      );
+    }
+    if (!env.DB) {
+      return json({ error: 'Accounts are not configured here.' }, 503);
+    }
+    const deps = {
+      db: env.DB,
+      importPage:
+        signInMode(env) === 'clerk' && env.CLERK_SECRET_KEY
+          ? (query: {
+              after: number | null;
+              before?: number;
+              limit: number;
+              offset?: number;
+            }) => listClerkUsers(env, query)
+          : null,
+      audit: (entry: AuditEntry) => appendAudit(env.DB!, entry),
+      adminEmail: guard.adminEmail,
+    };
+    return pathname === '/api/admin/accounts'
+      ? handleAccountList(request, deps)
+      : handleAccountImport(request, deps);
   }
 
   if (pathname === '/api/admin/invites') {

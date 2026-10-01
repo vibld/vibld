@@ -9,12 +9,13 @@
  *
  * - an owner copy has one account, the owner's;
  * - a copy behind Cloudflare Access knows everyone it has let in, whose
- *   address and Access id it records (0040), and the people who took an
+ *   address and Access id it records (0041), and the people who took an
  *   invite. A ban is recorded here and refuses them here (`principal.ts`
  *   reads it); Access itself is the owner's to change.
  */
 
 import { AccessStore } from './access-store.ts';
+import { AccountsStore } from './accounts-store.ts';
 import {
   clerkLookupConfigured,
   fetchClerkUser,
@@ -75,10 +76,9 @@ export function accountDirectoryFor(
         if (!db) {
           return { ok: false, error: 'User lookup is not configured.' };
         }
-        const store = new AccessStore(db);
-        const seen = await store.accessAccountFor(email);
+        const seen = await new AccountsStore(db).userIdForEmail(email);
         if (seen) return { ok: true, userId: seen };
-        const invite = await store.redeemedUserId(email);
+        const invite = await new AccessStore(db).redeemedUserId(email);
         if (invite.userId) return { ok: true, userId: invite.userId };
         return {
           ok: false,
@@ -89,10 +89,9 @@ export function accountDirectoryFor(
       },
       user: async (userId) => {
         if (!db) return null;
-        const store = new AccessStore(db);
         const email =
-          (await store.accessEmailFor(userId)) ??
-          (await store.emailForUser(userId));
+          (await new AccountsStore(db).emailForUserId(userId)) ??
+          (await new AccessStore(db).emailForUser(userId));
         return { email, createdAt: null, lastSignInAt: null, banned: null };
       },
       setBan: nothingToBan,
