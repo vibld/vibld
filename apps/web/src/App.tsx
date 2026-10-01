@@ -1,12 +1,14 @@
 import { AccessGate } from './components/AccessGate.tsx';
 import { AdminSettings } from './components/AdminSettings.tsx';
 import { AdminAccountList } from './components/AdminAccountList.tsx';
+import { AdminOverview } from './components/AdminOverview.tsx';
 import { AdminUserPage } from './components/AdminUserPage.tsx';
 import { MockupChooser } from './components/MockupChooser.tsx';
 import {
   ADMIN_PATH,
   adminUserIdFromPath,
   isAdminAccountsPath,
+  isAdminOverviewPath,
   isAdminArea,
   isAdminPath,
 } from './admin/route.ts';
@@ -260,6 +262,9 @@ function Builder() {
       >
         {isAdminPath(pathname) ? (
           <AdminSettings isAdmin={state.isAdmin} />
+        ) : null}
+        {isAdminOverviewPath(pathname) ? (
+          <AdminOverview isAdmin={state.isAdmin} />
         ) : null}
         {isAdminAccountsPath(pathname) ? (
           <AdminAccountList isAdmin={state.isAdmin} />

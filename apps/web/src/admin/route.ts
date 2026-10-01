@@ -77,14 +77,24 @@ export function isAdminAccountsPath(pathname: string): boolean {
   );
 }
 
+/** How the platform is doing, day by day (D128). */
+export const ADMIN_OVERVIEW_PATH = `${ADMIN_PATH}/overview`;
+
+export function isAdminOverviewPath(pathname: string): boolean {
+  return (
+    pathname === ADMIN_OVERVIEW_PATH || pathname === `${ADMIN_OVERVIEW_PATH}/`
+  );
+}
+
 /**
- * Whether a path is one of the admin pages: the tools, the account list or
- * an account's. The builder steps aside for all three, and none is a
- * project's address.
+ * Whether a path is one of the admin pages: the tools, the overview, the
+ * account list or an account's. The builder steps aside for all of them,
+ * and none is a project's address.
  */
 export function isAdminArea(pathname: string): boolean {
   return (
     isAdminPath(pathname) ||
+    isAdminOverviewPath(pathname) ||
     isAdminAccountsPath(pathname) ||
     adminUserIdFromPath(pathname) !== null
   );

@@ -1,10 +1,11 @@
 import { AdminAccounts } from './AdminAccounts.tsx';
+import { AdminLink } from './AdminAccountList.tsx';
 import { AdminPanel } from './AdminPanel.tsx';
 import { DeletionsPanel } from './DeletionsPanel.tsx';
 import { InvitePanel } from './InvitePanel.tsx';
 import { ParkedQueuePanel } from './ParkedQueuePanel.tsx';
 import { SiteTakedown } from './SiteTakedown.tsx';
-import { adminPageView } from '../admin/route.ts';
+import { ADMIN_OVERVIEW_PATH, adminPageView } from '../admin/route.ts';
 import { navigate } from '../admin/use-pathname.ts';
 
 /**
@@ -70,6 +71,10 @@ export function AdminSettings({ isAdmin }: { isAdmin: boolean | null }) {
           <p className="pane-note">
             Tools that act on other people&rsquo;s accounts and sites. Every one
             of them is checked again by the server.
+          </p>
+          <p className="pane-note">
+            <AdminLink href={ADMIN_OVERVIEW_PATH}>See the overview</AdminLink>:
+            sign-ups, builds, spend and revenue by day.
           </p>
         </div>
         <BackToBuilder label="Back to the builder" />

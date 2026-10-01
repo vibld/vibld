@@ -521,7 +521,7 @@ export function PlatformAdmins() {
  * A real link that stays in the document on a plain click, so the builder
  * session mounted underneath survives it.
  */
-function AdminLink({
+export function AdminLink({
   href,
   className,
   children,

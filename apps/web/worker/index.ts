@@ -221,6 +221,7 @@ import {
 } from './account-deletion.ts';
 import { AccountDeletionStore } from './account-deletion-store.ts';
 import { AdminStore, type AuditEntry } from './admin-store.ts';
+import { handleOverview, readBalances } from './admin-overview.ts';
 import {
   appendAudit,
   handleAdminUsers,
@@ -3851,6 +3852,13 @@ async function route(
     return pathname === '/api/admin/accounts'
       ? handleAccountList(request, deps)
       : handleAccountImport(request, deps);
+  }
+
+  // The platform overview (D128): reads only, from tables already written.
+  if (pathname === '/api/admin/overview') {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handleOverview(request, env.DB!, () => readBalances(env));
   }
 
   if (pathname === '/api/admin/invites') {
