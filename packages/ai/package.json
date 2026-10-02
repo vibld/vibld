@@ -22,11 +22,13 @@
     "./design-templates": "./src/design-templates.ts",
     "./design-template-index": "./src/design-template-index.ts",
     "./screen-patterns": "./src/screen-patterns.ts",
-    "./backdrops": "./src/backdrops.ts"
+    "./backdrops": "./src/backdrops.ts",
+    "./style-gallery": "./src/style-gallery.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",
     "check": "pnpm run typecheck && pnpm run test",
+    "import:style-gallery": "node --experimental-strip-types bin/import-style-gallery.ts",
     "mockups": "node --experimental-strip-types bin/mockups.ts",
     "plan": "node --experimental-strip-types bin/plan.ts",
     "test": "node --test --experimental-strip-types test/*.test.ts",

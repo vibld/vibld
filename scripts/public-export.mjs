@@ -61,12 +61,17 @@ import { pathToFileURL } from 'node:url';
  * updates are made here and reach the public copy in the next export, so a
  * public Dependabot pull request could only be merged by diverging from
  * this repository. Dependabot's security alerts do not need the file.
+ *
+ * The style gallery's data stays here until Chris decides whether it is
+ * exported (docs/decisions.md, D143). The public copy builds and runs
+ * without it: the gallery is empty there.
  */
 export const EXCLUDE = [
   'docs/social-launch.md',
   'docs/pricing-routine.md',
   'docs/launch-email.md',
   '.github/dependabot.yml',
+  'packages/ai/data/style-gallery.json',
 ];
 
 // Both names: the public repository (whose past numbers are the private

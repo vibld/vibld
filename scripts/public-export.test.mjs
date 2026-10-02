@@ -309,12 +309,13 @@ describe('isText', () => {
 });
 
 describe('the export', () => {
-  it('leaves out the ops notes Chris chose to keep internal', () => {
+  it('leaves out what Chris chose to keep internal', () => {
     assert.deepEqual(EXCLUDE, [
       'docs/social-launch.md',
       'docs/pricing-routine.md',
       'docs/launch-email.md',
       '.github/dependabot.yml',
+      'packages/ai/data/style-gallery.json',
     ]);
   });
 
