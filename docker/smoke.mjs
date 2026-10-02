@@ -12,12 +12,18 @@
  * Starting a preview is not checked here: the end-to-end check does that
  * with a real build (D122).
  *
- * With VIBLD_SANDBOX=off (D141) only the builder runs, on PORT.
+ * With VIBLD_SANDBOX=off (D141) only the builder runs, on PORT. With
+ * VIBLD_DOMAIN and VIBLD_PREVIEW_DOMAIN (D141) it is checked directly, not
+ * through the proxy.
  */
-import { PORTS, sandboxOn } from '../scripts/docker-config.mjs';
+import { PORTS, sandboxOn, vpsDomains } from '../scripts/docker-config.mjs';
 import { builderPort } from './start.mjs';
 
 const BUILDER = `http://localhost:${builderPort(process.env)}`;
+// On a server behind deploy/vps's proxy the builder takes itself to be
+// `https://<VIBLD_DOMAIN>` and refuses any other origin.
+const domains = sandboxOn(process.env) ? vpsDomains(process.env) : null;
+const ORIGIN = domains ? `https://${domains.builder}` : BUILDER;
 const RUNNING = sandboxOn(process.env)
   ? Object.entries(PORTS)
   : [['web', builderPort(process.env)]];
@@ -53,7 +59,7 @@ async function main(seconds = 600) {
 
   const wrong = await fetch(`${BUILDER}/api/owner/session`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', origin: BUILDER },
+    headers: { 'content-type': 'application/json', origin: ORIGIN },
     body: JSON.stringify({ password: `${password}-wrong` }),
   });
   if (wrong.status !== 401) {
@@ -62,7 +68,7 @@ async function main(seconds = 600) {
 
   const signIn = await fetch(`${BUILDER}/api/owner/session`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', origin: BUILDER },
+    headers: { 'content-type': 'application/json', origin: ORIGIN },
     body: JSON.stringify({ password }),
   });
   const cookie = signIn.headers.get('set-cookie')?.split(';')[0];

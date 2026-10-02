@@ -171,6 +171,70 @@ jobs:
         if: always()
         run: docker logs vibld-one-port 2>&1 | tail -n 200 || true
 
+      # As infrastructure/vps runs it on a server (D141): the proxy ends TLS
+      # and the Workers listen on 127.0.0.1 only. The domains are made up,
+      # so no certificate is issued and the proxy's own one is accepted.
+      - name: Start it behind the server's proxy
+        run: |
+          docker rm --force vibld-one-port
+          printf 'VIBLD_DOMAIN=build.vibld.test\nVIBLD_PREVIEW_DOMAIN=vibld-preview.test\nCF_DNS_API_TOKEN=not-a-real-token\n' >> .env
+          docker compose -f docker-compose.yml -f infrastructure/vps/compose.yml up --detach
+          # The server's firewall rules apply, and applying them twice adds
+          # nothing.
+          sudo infrastructure/vps/firewall.sh
+          sudo infrastructure/vps/firewall.sh
+          sudo iptables -S DOCKER-USER
+          sudo ip6tables -S DOCKER-USER
+          [ "$(sudo iptables -S DOCKER-USER | grep -c DROP)" = 2 ]
+          [ "$(sudo ip6tables -S DOCKER-USER | grep -c DROP)" = 2 ]
+
+      - name: Sign in behind the server's proxy
+        env:
+          VIBLD_OWNER_PASSWORD: ci-owner-password-123
+          VIBLD_DOMAIN: build.vibld.test
+          VIBLD_PREVIEW_DOMAIN: vibld-preview.test
+        run: |
+          node docker/smoke.mjs 900
+          # Through the proxy, as a browser would: https, the builder's own
+          # origin, and a session cookie marked Secure.
+          resolve='--resolve build.vibld.test:443:127.0.0.1 --resolve 8080-x-y.vibld-preview.test:443:127.0.0.1'
+          curl --silent --show-error --insecure $resolve --dump-header headers.txt --output /dev/null \
+            --request POST https://build.vibld.test/api/owner/session \
+            --header 'content-type: application/json' --header 'origin: https://build.vibld.test' \
+            --data "{\"password\":\"$VIBLD_OWNER_PASSWORD\"}"
+          grep -i '^HTTP/.* 200' headers.txt
+          grep -i '^set-cookie:.*; Secure' headers.txt > /dev/null
+          echo 'the owner signs in through the proxy'
+          # Any other host goes to the preview Worker, which knows no such
+          # preview.
+          status=$(curl --silent --insecure $resolve --output /dev/null --write-out '%{http_code}' https://8080-x-y.vibld-preview.test/)
+          echo "an unknown preview answers $status"
+          [ "$status" -ge 400 ] && [ "$status" -lt 500 ]
+          # And nothing answers on the Workers' ports from outside the server.
+          ip=$(hostname -I | awk '{ print $1 }')
+          for port in 8787 8788 8789; do
+            if curl --silent --max-time 5 "http://$ip:$port/" > /dev/null; then
+              echo "a Worker answers on $ip:$port"; exit 1
+            fi
+          done
+          echo "the Workers' ports are closed to $ip"
+          # A client cannot pick its own address: wrong passwords, each with a
+          # different forged CF-Connecting-IP, still run into the limit.
+          limited=no
+          for n in $(seq 1 30); do
+            status=$(curl --silent --insecure $resolve --output /dev/null --write-out '%{http_code}' \
+              --request POST https://build.vibld.test/api/owner/session \
+              --header 'content-type: application/json' --header 'origin: https://build.vibld.test' \
+              --header "cf-connecting-ip: 198.51.100.$n" --data '{"password":"wrong"}')
+            if [ "$status" = 429 ]; then limited=yes; break; fi
+          done
+          [ "$limited" = yes ]
+          echo "forged addresses are throttled after $n attempts"
+
+      - name: Logs behind the server's proxy
+        if: always()
+        run: docker compose -f docker-compose.yml -f infrastructure/vps/compose.yml logs --no-color | tail -n 300
+
   # The marketing template is deliberately outside the pnpm workspace: it has
   # to install and build on its own, with npm and no Vibld packages, because
   # that is what a user who exports it will do. Building it here is the only

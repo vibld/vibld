@@ -370,6 +370,21 @@ A host that runs one container on one port, such as Render, can run the same ima
 - **It listens on `PORT`**, which the host sets.
 - **Checked so far:** CI starts the image this way and signs in. Nobody has deployed it to Render yet.
 
+### Run it on a server
+
+On a server of your own on the internet, vibld runs as it does under Docker, sandbox previews and publishing included, with a proxy in front that ends TLS (docs/decisions.md D141). [`infrastructure/vps/cloud-init.yaml`](infrastructure/vps/cloud-init.yaml) sets up a new Ubuntu 24.04 server in one paste. A server with 4 GB of memory or more is a reasonable start: it builds the image and runs each preview's sandbox.
+
+1. **Two domains.** One for the builder, such as `build.example.com`, and one of its own for previews and published sites, such as `example-preview.dev`. Previews run code nobody has reviewed, so they never share the builder's domain (L8). The previews' domain needs its DNS on Cloudflare, which issues its wildcard certificate.
+2. **A Cloudflare token** at https://dash.cloudflare.com/profile/api-tokens: "Create Custom Token", permissions `Zone / DNS / Edit` and `Zone / Zone / Read`, zone resources: the previews' domain.
+3. **The server.** Fill in the settings at the top of `cloud-init.yaml` and paste the whole file as user data: https://cloud.digitalocean.com/droplets/new ("Advanced options", "Add Initialization scripts") or https://console.hetzner.cloud ("Cloud config").
+4. **DNS**, with the server's address: an `A` record for the builder's domain, and `A` records for the previews' domain and `*.` the previews' domain (on Cloudflare, "DNS only", not proxied).
+
+Then open `https://<builder domain>` and sign in with the password you set. The first start builds the image, which takes a few minutes.
+
+- **Only 22, 80 and 443 are open.** The Workers listen on 127.0.0.1 behind the proxy, and [`firewall.sh`](infrastructure/vps/firewall.sh) keeps the internet out of the preview containers and keeps them away from the cloud's metadata service, which holds the user data and the keys in it.
+- **Updating:** `cd /opt/vibld && git pull && docker compose -f docker-compose.yml -f infrastructure/vps/compose.yml up --build --detach`.
+- **Checked so far:** CI starts it behind the proxy with made-up domains, signs in through the proxy and checks the Workers' ports are closed. Nobody has run `cloud-init.yaml` on a real server yet.
+
 Read next: [what self-hosting involves](https://vibld.com/docs/self-hosting), [every setting and secret](https://vibld.com/docs/configuration), [deploying your own copy](https://vibld.com/docs/deploying) and [hosted or self-hosted](https://vibld.com/docs/hosted-vs-self-hosted). The exact commands are in [`apps/web/README.md`](apps/web/README.md), [`apps/preview/README.md`](apps/preview/README.md) and [`apps/publish/README.md`](apps/publish/README.md), beside the code they deploy. The workflows that deploy vibld's own hosted service run only in the maintainers' working repository, since a copy has none of their secrets.
 
 ## Documentation

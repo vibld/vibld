@@ -17,6 +17,7 @@ import {
   type PrincipalEnv,
 } from './principal.ts';
 import { handleOwnerSession, ownerIdentity } from './owner-auth.ts';
+import { withClientAddress } from './client-address.ts';
 import { accountDirectoryFor } from './account-directory.ts';
 import {
   handleAccountImport,
@@ -280,6 +281,8 @@ export interface Env extends PrincipalEnv {
   VIBLD_LOCAL_API_KEY?: string;
   /** "browser" when the sandbox cannot serve previews; see `previewMode`. */
   VIBLD_PREVIEW?: string;
+  /** The proxy's client-address header, behind one; see client-address.ts. */
+  VIBLD_CLIENT_IP_HEADER?: string;
   /** "anthropic", "deepseek", "openai" or "local". Explicit beats inferred; see selectProvider. */
   VIBLD_PROVIDER?: string;
   /**
@@ -3452,10 +3455,12 @@ export default {
 };
 
 async function route(
-  request: Request,
+  incoming: Request,
   env: Env,
   ctx: ExecutionContext,
 ): Promise<Response> {
+  // Behind a server's proxy, the address every limit below is keyed on.
+  const request = withClientAddress(incoming, env);
   // A project's routes carry its id, so they are named by pattern
   // (`/api/projects/:id`) before anything compares against them. Every
   // other path is its own name and comes through unchanged.

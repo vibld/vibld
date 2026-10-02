@@ -1,0 +1,56 @@
+#cloud-config
+# vibld on a new Ubuntu 24.04 server (docs/decisions.md D141). Fill in the
+# values under "Your settings", then paste this whole file as the server's
+# user data: on DigitalOcean, "Advanced options", "Add Initialization
+# scripts"; on Hetzner, "Cloud config". README.md, "Run it on a server",
+# has the domains and the token to make first.
+#
+# It installs Docker, opens only SSH, HTTP and HTTPS, fetches vibld and
+# starts it with infrastructure/vps/compose.yml. The first start builds the
+# image, which takes a few minutes; then open https://<VIBLD_DOMAIN>.
+write_files:
+  - path: /root/vibld.env
+    permissions: '0600'
+    content: |
+      # Your settings.
+      # The builder's address, such as build.example.com.
+      VIBLD_DOMAIN=
+      # Previews and published sites, a domain of its own whose DNS is on
+      # Cloudflare, such as example-preview.dev (not under VIBLD_DOMAIN).
+      VIBLD_PREVIEW_DOMAIN=
+      # A Cloudflare API token with Zone, DNS, Edit and Zone, Zone, Read
+      # on VIBLD_PREVIEW_DOMAIN.
+      CF_DNS_API_TOKEN=
+      # The password you sign in with, 12 characters or more.
+      VIBLD_OWNER_PASSWORD=
+      # One model key is enough; leave the others blank.
+      OPENAI_API_KEY=
+      ANTHROPIC_API_KEY=
+      DEEPSEEK_API_KEY=
+  - path: /etc/systemd/system/vibld-firewall.service
+    content: |
+      [Unit]
+      Description=vibld's firewall rules in Docker's chain
+      After=docker.service
+      Requires=docker.service
+      PartOf=docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/opt/vibld/infrastructure/vps/firewall.sh
+
+      [Install]
+      WantedBy=docker.service
+
+runcmd:
+  - curl -fsSL https://get.docker.com | sh
+  - ufw allow 22/tcp
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw --force enable
+  - git clone --depth 1 https://github.com/vibld/vibld /opt/vibld
+  - install -m 600 /root/vibld.env /opt/vibld/.env
+  - systemctl daemon-reload
+  - systemctl enable --now vibld-firewall
+  - cd /opt/vibld && docker compose -f docker-compose.yml -f infrastructure/vps/compose.yml up --build --detach

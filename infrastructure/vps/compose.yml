@@ -1,0 +1,74 @@
+# vibld on a server of its own, on the internet (docs/decisions.md D141).
+# With docker-compose.yml, from the repository's root:
+#
+#   docker compose -f docker-compose.yml -f infrastructure/vps/compose.yml up --build --detach
+#
+# cloud-init.yaml does that on a new server. .env then also sets
+# VIBLD_DOMAIN (the builder), VIBLD_PREVIEW_DOMAIN (previews and published
+# sites, a domain of its own: L8) and CF_DNS_API_TOKEN (the previews'
+# wildcard certificate). README.md, "Run it on a server", has the rest.
+services:
+  vibld:
+    environment:
+      # Nothing but this proxy reaches the Workers (scripts/docker-config.mjs).
+      VIBLD_DOMAIN: ${VIBLD_DOMAIN:?set VIBLD_DOMAIN in .env}
+      VIBLD_PREVIEW_DOMAIN: ${VIBLD_PREVIEW_DOMAIN:?set VIBLD_PREVIEW_DOMAIN in .env}
+
+  # Ends TLS on 443 and passes each host to its Worker on 127.0.0.1. The
+  # builder's certificate comes over HTTP from Let's Encrypt; the previews'
+  # is one wildcard, which only a DNS challenge can get, hence the token.
+  proxy:
+    image: docker.io/library/traefik:v3
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN:?set CF_DNS_API_TOKEN in .env}
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --providers.file.filename=/etc/traefik/vibld.yml
+      - --certificatesresolvers.http.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.http.acme.storage=/certs/http.json
+      - --certificatesresolvers.dns.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.dns.acme.storage=/certs/dns.json
+    configs:
+      - source: routes
+        target: /etc/traefik/vibld.yml
+    volumes:
+      - proxy-certs:/certs
+
+configs:
+  routes:
+    content: |
+      http:
+        routers:
+          builder:
+            rule: Host(`${VIBLD_DOMAIN}`)
+            entryPoints: [websecure]
+            service: builder
+            tls:
+              certResolver: http
+          # Every other host is a preview, a share link or a published
+          # site: the preview Worker answers 404 for anything else.
+          previews:
+            rule: HostRegexp(`.+`)
+            priority: 1
+            entryPoints: [websecure]
+            service: previews
+            tls:
+              certResolver: dns
+              domains:
+                - main: ${VIBLD_PREVIEW_DOMAIN}
+                  sans: ['*.${VIBLD_PREVIEW_DOMAIN}']
+        services:
+          builder:
+            loadBalancer:
+              servers: [{ url: 'http://127.0.0.1:8787' }]
+          previews:
+            loadBalancer:
+              servers: [{ url: 'http://127.0.0.1:8788' }]
+
+volumes:
+  proxy-certs:

@@ -21,7 +21,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { PORTS, sandboxOn } from '../scripts/docker-config.mjs';
+import { PORTS, sandboxOn, vpsDomains } from '../scripts/docker-config.mjs';
 import { ROOT } from '../scripts/self-host.mjs';
 
 /** Where the state lives: the compose file mounts a volume here. */
@@ -148,7 +148,7 @@ export function builderPort(env) {
 export function startPlan(
   data = DATA,
   wrangler = WRANGLER,
-  { sandbox = true, port = PORTS.web } = {},
+  { sandbox = true, port = PORTS.web, ip = '0.0.0.0' } = {},
 ) {
   const state = join(data, 'state');
   const config = (app) => join(ROOT, 'apps', app, 'wrangler.docker.jsonc');
@@ -177,7 +177,7 @@ export function startPlan(
         '--persist-to',
         state,
         '--ip',
-        '0.0.0.0',
+        ip,
         '--port',
         String(app === 'web' ? port : PORTS[app]),
         // Each its own debugger port: all three default to the same one.
@@ -214,7 +214,10 @@ function main() {
 
   const sandbox = sandboxOn(process.env);
   const port = builderPort(process.env);
-  const plan = startPlan(DATA, WRANGLER, { sandbox, port });
+  // Behind infrastructure/vps's proxy on a server, only the proxy reaches the Workers
+  // (D141).
+  const ip = sandbox && vpsDomains(process.env) ? '127.0.0.1' : '0.0.0.0';
+  const plan = startPlan(DATA, WRANGLER, { sandbox, port, ip });
   const [cmd, ...args] = plan.migrate;
   const migrated = spawnSync(cmd, args, {
     stdio: 'inherit',

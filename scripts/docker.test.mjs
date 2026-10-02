@@ -13,7 +13,12 @@ import {
   sharedSecrets,
   startPlan,
 } from '../docker/start.mjs';
-import { PORTS, dockerConfig, sandboxOn } from './docker-config.mjs';
+import {
+  PORTS,
+  dockerConfig,
+  sandboxOn,
+  vpsDomains,
+} from './docker-config.mjs';
 import { APPS, VIBLD_OWN, parseJsonc } from './self-host.mjs';
 
 /** vibld under docker compose, with no Cloudflare account (D126, D137). */
@@ -251,5 +256,92 @@ describe('starting vibld in its container', () => {
     assert.equal(web.vars.PUBLISH_HOSTNAME, undefined);
     assert.ok(configs.web.services.some((b) => b.binding === 'PREVIEW'));
     assert.equal(configs.web.vars.VIBLD_PREVIEW, undefined);
+  });
+
+  it('answers on two domains of its own behind the proxy on a server (D141)', () => {
+    assert.equal(vpsDomains({}), null);
+    const domains = vpsDomains({
+      VIBLD_DOMAIN: ' Build.Example.com ',
+      VIBLD_PREVIEW_DOMAIN: 'example-preview.dev',
+    });
+    assert.deepEqual(domains, {
+      builder: 'build.example.com',
+      preview: 'example-preview.dev',
+    });
+    // Both or neither, bare host names, and previews never under the
+    // builder's domain or the other way round (L8).
+    for (const env of [
+      { VIBLD_DOMAIN: 'build.example.com' },
+      { VIBLD_PREVIEW_DOMAIN: 'example-preview.dev' },
+      {
+        VIBLD_DOMAIN: 'https://build.example.com',
+        VIBLD_PREVIEW_DOMAIN: 'p.dev',
+      },
+      {
+        VIBLD_DOMAIN: 'example.com',
+        VIBLD_PREVIEW_DOMAIN: 'preview.example.com',
+      },
+      {
+        VIBLD_DOMAIN: 'build.example.com',
+        VIBLD_PREVIEW_DOMAIN: 'example.com',
+      },
+      { VIBLD_DOMAIN: 'example.com', VIBLD_PREVIEW_DOMAIN: 'example.com' },
+      // Beside it: either can set cookies for example.com.
+      {
+        VIBLD_DOMAIN: 'build.example.com',
+        VIBLD_PREVIEW_DOMAIN: 'preview.example.com',
+      },
+      {
+        VIBLD_DOMAIN: 'build.example.co.uk',
+        VIBLD_PREVIEW_DOMAIN: 'p.example.co.uk',
+      },
+      // Short country and generic top-level domains are no suffix of two.
+      { VIBLD_DOMAIN: 'build.foo.de', VIBLD_PREVIEW_DOMAIN: 'preview.foo.de' },
+      { VIBLD_DOMAIN: 'build.foo.io', VIBLD_PREVIEW_DOMAIN: 'preview.foo.io' },
+      { VIBLD_DOMAIN: 'a.foo.dev', VIBLD_PREVIEW_DOMAIN: 'b.foo.dev' },
+    ]) {
+      assert.throws(() => vpsDomains(env), JSON.stringify(env));
+    }
+
+    // Different registered domains, a country's second level included.
+    assert.ok(
+      vpsDomains({
+        VIBLD_DOMAIN: 'build.example.co.uk',
+        VIBLD_PREVIEW_DOMAIN: 'example-preview.co.uk',
+      }),
+    );
+    const on = Object.fromEntries(
+      APPS.map((app) => [app, dockerConfig(app, base[app], { domains })]),
+    );
+    for (const app of APPS) {
+      // Only the proxy reaches the Workers.
+      assert.deepEqual(
+        { ip: on[app].dev.ip, port: on[app].dev.port },
+        { ip: '127.0.0.1', port: PORTS[app] },
+      );
+    }
+    // The builder takes itself to be the https address the browser uses, so
+    // its origin checks pass behind a proxy that ends TLS.
+    assert.equal(on.web.dev.host, 'build.example.com');
+    assert.equal(on.web.dev.upstream_protocol, 'https');
+    // The proxy names the client; a client-sent CF-Connecting-IP does not.
+    assert.equal(on.web.vars.VIBLD_CLIENT_IP_HEADER, 'X-Real-Ip');
+    assert.equal(configs.web.vars.VIBLD_CLIENT_IP_HEADER, undefined);
+    // Previews keep the host they were asked for: it says which preview.
+    assert.equal(on.preview.dev.host, undefined);
+    assert.equal(on.preview.vars.PREVIEW_HOSTNAME, 'example-preview.dev');
+    assert.equal(on.web.vars.PUBLISH_HOSTNAME, 'example-preview.dev');
+    assert.equal(on.publish.vars.PUBLISH_HOSTNAME, 'example-preview.dev');
+    assert.equal(configs.web.dev.host, undefined);
+    // `wrangler dev` is told the address on its command line too, which
+    // wins over the config.
+    for (const { command } of startPlan('/data', 'wrangler', {
+      ip: '127.0.0.1',
+    }).workers) {
+      assert.equal(command[command.indexOf('--ip') + 1], '127.0.0.1');
+    }
+    for (const { command } of startPlan('/data', 'wrangler').workers) {
+      assert.equal(command[command.indexOf('--ip') + 1], '0.0.0.0');
+    }
   });
 });
