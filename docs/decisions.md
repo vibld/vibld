@@ -299,6 +299,18 @@ a contrast guard on color edits.
   the Worker before a build writes them into the tokens file, so a request
   that skips the builder is refused the same way. Exempt pairs (the
   catalog's decorative fills) are not measured.
+- **D148. A design template can be chosen as inspiration in the builder
+  (Chris, 2026-10-02).** The composer gets a Templates option: the template
+  catalog vibld.com shows (the entries not merged into another), filtered
+  by kind and use case and searched by name and summary. Adding one puts
+  its brief in the message as text, filling an empty message or following
+  what is there, exactly as "Start from this template" on vibld.com does
+  (D106), so what a build is asked for stays in view and can be edited.
+  The names load when the panel opens (`@vibld/ai/design-template-index`);
+  each brief is a file the build writes (`_templates/briefs/<id>.json`)
+  and the Worker serves one at a time through the gated
+  `/api/templates/brief`, because the catalog is far too large for the
+  builder's bundle or the Worker's.
 
 ### Resolved 2026-09-30 (afternoon)
 

@@ -3,10 +3,12 @@ import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 
 import { writeStyleGalleryAssets } from './scripts/style-gallery-assets.ts';
+import { writeTemplateAssets } from './scripts/template-assets.ts';
 
 /**
- * Writes the style gallery's files into the build output for the Worker to
- * read (D142, D144). After the bundle, so they are never part of it.
+ * Writes the style gallery's files and the templates' briefs into the
+ * build output for the Worker to read (D142, D144, D148). After the bundle,
+ * so they are never part of it.
  */
 function styleGallery(): Plugin {
   let outDir = 'dist';
@@ -19,6 +21,8 @@ function styleGallery(): Plugin {
     closeBundle() {
       const count = writeStyleGalleryAssets(outDir);
       this.info?.(`style gallery: ${count} styles`);
+      const briefs = writeTemplateAssets(outDir);
+      this.info?.(`templates: ${briefs} briefs`);
     },
   };
 }

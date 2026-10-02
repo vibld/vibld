@@ -53,6 +53,7 @@ import { fetchReferenceContext } from './reference-fetch.ts';
 import { handleMedia, handleMediaFile } from './media-handlers.ts';
 import { handleStyleGallery, readGalleryStyle } from './style-gallery.ts';
 import type { StyleGalleryEnv } from './style-gallery.ts';
+import { handleTemplateBrief } from './template-briefs.ts';
 import { handleChat } from './chat-handler.ts';
 import {
   DEFAULT_PUBLISH_HOSTNAME,
@@ -3729,6 +3730,12 @@ async function route(
   // The style gallery's picker cards (D142, D144).
   if (pathname === '/api/style-gallery') {
     return handleStyleGallery(request, env, (req) =>
+      resolvePrincipal(req, env),
+    );
+  }
+  // One design template's brief, for the builder's Templates option (D148).
+  if (pathname === '/api/templates/brief') {
+    return handleTemplateBrief(request, env, (req) =>
       resolvePrincipal(req, env),
     );
   }

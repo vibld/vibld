@@ -51,25 +51,33 @@ const json = (body: unknown, status = 200): Response =>
   });
 
 /**
- * One of the files, or null when the build wrote none. The assets binding
- * answers a missing file with the single-page app's `index.html` and a 200
+ * A JSON file the build wrote beside the builder's assets, by its absolute
+ * path, or null when the build wrote none. The assets binding answers a
+ * missing file with the single-page app's `index.html` and a 200
  * (`not_found_handling`), so a response is only the file if it is JSON.
  */
-export async function readStyleGalleryAsset(
+export async function readJsonAsset(
   env: StyleGalleryEnv,
   origin: string,
-  file: string,
+  path: string,
 ): Promise<Response | null> {
   if (!env.ASSETS) return null;
-  const response = await env.ASSETS.fetch(
-    new Request(new URL(`${STYLE_GALLERY_ASSETS}${file}`, origin)),
-  );
+  const response = await env.ASSETS.fetch(new Request(new URL(path, origin)));
   const type = response.headers.get('content-type') ?? '';
   if (!response.ok || !type.includes('json')) {
     await response.body?.cancel();
     return null;
   }
   return response;
+}
+
+/** One of the gallery's files, or null when the build wrote none. */
+export function readStyleGalleryAsset(
+  env: StyleGalleryEnv,
+  origin: string,
+  file: string,
+): Promise<Response | null> {
+  return readJsonAsset(env, origin, `${STYLE_GALLERY_ASSETS}${file}`);
 }
 
 export async function handleStyleGallery(

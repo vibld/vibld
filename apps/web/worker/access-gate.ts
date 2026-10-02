@@ -141,6 +141,9 @@ export const GATED_PATHS: readonly string[] = [
   // The style gallery (D142): part of what an invite buys, and its data is
   // not public (D143). It spends nothing.
   '/api/style-gallery',
+  // A design template's brief for the builder (D148). The briefs are public
+  // on vibld.com already; this is gated as the builder is. It spends nothing.
+  '/api/templates/brief',
 ];
 
 /**

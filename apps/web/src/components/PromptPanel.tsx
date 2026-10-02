@@ -13,6 +13,7 @@ import { ModelPicker } from './ModelPicker.tsx';
 import { StyleDnaPanel } from './StyleDnaPanel.tsx';
 import { ScreenPicker } from './ScreenPicker.tsx';
 import { StyleGalleryPicker } from './StyleGalleryPicker.tsx';
+import { TemplatePicker } from './TemplatePicker.tsx';
 import { StylePicker } from './StylePicker.tsx';
 import {
   MAX_BRIEF_CHARS,
@@ -40,7 +41,13 @@ const EXAMPLES = [
 ];
 
 type OptionId =
-  'style' | 'gallery' | 'reference' | 'screens' | 'media' | 'preferences';
+  | 'style'
+  | 'gallery'
+  | 'reference'
+  | 'templates'
+  | 'screens'
+  | 'media'
+  | 'preferences';
 
 export interface PromptPanelProps {
   state: BuilderState;
@@ -382,6 +389,28 @@ export function PromptPanel({
             disabled={disabled}
           />
         </>
+      ),
+    },
+    {
+      id: 'templates',
+      label: 'Templates',
+      value: null,
+      about:
+        "A design from vibld's template catalog as a starting point. Its brief is added to your message, to edit or send.",
+      body: (
+        <TemplatePicker
+          active={open === 'templates'}
+          disabled={disabled}
+          message={prompt}
+          room={MAX_BRIEF_CHARS - prompt.trimEnd().length}
+          onAdd={(text) =>
+            setPrompt((current) =>
+              current.trim().length > 0
+                ? `${current.trimEnd()}\n\n${text}`
+                : text,
+            )
+          }
+        />
       ),
     },
     {
