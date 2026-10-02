@@ -213,6 +213,30 @@ async function build(
   return { result, hooks, client };
 }
 
+describe('a build in a gallery style (D145)', () => {
+  it('carries the tokens file into the patch, which writes and imports it', async () => {
+    const client = createScriptedBuildClient(companySite());
+    const tokens = '@theme {\n  --color-canvas: #f9f6f2;\n}\n';
+    const builder = new BoundedBuilder(client, {
+      model: MODEL,
+      styleTokens: tokens,
+    });
+    const { patch } = await runBoundedBuild(
+      builder,
+      { prompt: 'A full website for North Star Systems.', budget: BUDGET },
+      inProcess(),
+    );
+    assert.equal(patch!.scaffold!.styleTokens, tokens);
+    const plan = applyBoundedPatch(patch!, undefined);
+    const files = new Map(plan.files.map((file) => [file.path, file.content]));
+    assert.equal(files.get('src/vibld-gallery-style.css'), tokens);
+    assert.match(
+      files.get('src/styles.css')!,
+      /@import "\.\/vibld-gallery-style\.css";/,
+    );
+  });
+});
+
 describe('the prompts a bounded build sends', () => {
   it('names every required file in the rules every build is held to', () => {
     const section = PLAN_SYSTEM_PROMPT.slice(

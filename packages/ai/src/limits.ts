@@ -85,7 +85,9 @@ export const MAX_REFERENCE_MEASURE_CHARS = 1_500;
  *
  * 3,200 since the directions carry the `@theme inline` block that maps
  * their tokens into Tailwind (ADR-0014): about 900 characters, which took
- * the longest (cinematic) to 2,919.
+ * the longest (cinematic) to 2,919. A gallery style's direction
+ * (`styleGalleryDirection`, D146) is held to the same bound, and its
+ * longest is about 1,500.
  */
 export const MAX_MOCKUP_DIRECTION_CHARS = 3_200;
 
@@ -180,9 +182,12 @@ export const MAX_CHOSEN_MOCKUP_SECTION_CHARS = 28_500;
  * Raised from 32,000 when the Motion typing rules (D66 follow-up) took the
  * longest system prompt plus guidance to about 32,200, and from 34,000 when
  * the animated backgrounds' guidance (D75, up to about 2,050 characters with
- * all four offered) took it to about 34,900.
+ * all four offered) took it to about 34,900. Raised to 48,000 for the
+ * style gallery (D146): a gallery style's guidance, the gallery's baseline
+ * rules plus the style's build prompt, stands in for a preset's and took
+ * the longest to about 46,700 (orchardlough).
  */
-export const MAX_BUILD_FIXED_PROMPT_CHARS = 36_000;
+export const MAX_BUILD_FIXED_PROMPT_CHARS = 48_000;
 
 /**
  * The longest reference URL a request may carry (internal PR 189 review).

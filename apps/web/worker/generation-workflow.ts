@@ -507,6 +507,14 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
                 onUsage: (usage: PlanUsage) => onUsage(usage),
                 onSteps: (steps: RunStepTrace[]) => onSteps?.(steps),
                 ...(params.style ? { style: params.style } : {}),
+                ...(params.styleTokens
+                  ? { styleTokens: params.styleTokens }
+                  : {}),
+                // The gallery style's rules and prompt too (D146), so a
+                // repair keeps to the style the tokens file is for.
+                ...(params.galleryGuidance
+                  ? { galleryGuidance: params.galleryGuidance }
+                  : {}),
                 ...(params.knowledge ? { knowledge: params.knowledge } : {}),
                 ...(params.media ? { media: params.media } : {}),
                 onUnexpectedError: (error) => {

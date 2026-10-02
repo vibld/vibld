@@ -213,7 +213,26 @@ describe('what a project remembers about how it is built', () => {
       model: 'project-model',
       knowledge: 'Keep it warm.',
       styleDna: { corners: 'sharp' },
+      galleryStyle: null,
     });
+  });
+
+  it('holds a gallery style or a style preset, never both', async () => {
+    const session = createSession({ projectIds: [], bases: [] });
+    await session.restore(project());
+    session.setStyle('minimalist');
+    session.setGalleryStyle('vinepool');
+    assert.equal(session.getState().style, null);
+    assert.equal(session.getState().galleryStyle, 'vinepool');
+    session.setStyle('brutalism');
+    assert.equal(session.getState().galleryStyle, null);
+    assert.equal(session.settings().style, 'brutalism');
+  });
+
+  it('puts back the gallery style a project saved', async () => {
+    const session = createSession({ projectIds: [], bases: [] });
+    await session.restore(project({ galleryStyle: 'vinepool' }));
+    assert.equal(session.getState().galleryStyle, 'vinepool');
   });
 
   it('keeps the reference a reply is holding for the next build', async () => {

@@ -56,6 +56,7 @@ export function settingsToRestore(
     model,
     knowledge: saved.knowledge ?? defaults.knowledge,
     styleDna: saved.styleDna ?? defaults.styleDna,
+    galleryStyle: saved.galleryStyle ?? null,
   };
 }
 
@@ -109,6 +110,7 @@ export function wireSettings(settings: SessionSettings): ProjectSettings {
     model: settings.model,
     knowledge: settings.knowledge,
     styleDna: settings.styleDna,
+    galleryStyle: settings.galleryStyle,
   };
 }
 
@@ -124,6 +126,7 @@ export function settingsMark(settings: ProjectSettings): string {
     settings.model,
     settings.knowledge,
     settings.styleDna,
+    settings.galleryStyle ?? null,
   ]);
 }
 

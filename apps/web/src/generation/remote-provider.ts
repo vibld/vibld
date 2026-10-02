@@ -158,6 +158,8 @@ export interface RemoteModelProviderOptions {
    */
   style?: StylePresetId | null;
   styleDna?: StyleDna | null;
+  /** The gallery style, by id (D145): the Worker writes its tokens file. */
+  galleryStyle?: string | null;
   /** Standing instructions for the project, sent with every turn. */
   knowledge?: string | null;
   /**
@@ -205,6 +207,7 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #onCheck?: RemoteModelProviderOptions['onCheck'];
   readonly #style: StylePresetId | null;
   readonly #styleDna: StyleDna | null;
+  readonly #galleryStyle: string | null;
   readonly #knowledge: string | null;
   readonly #referenceUrl: string | null;
   readonly #model: string | null;
@@ -223,6 +226,7 @@ export class RemoteModelProvider implements ModelProvider {
     this.#onCheck = options.onCheck;
     this.#style = options.style ?? null;
     this.#styleDna = options.styleDna ?? null;
+    this.#galleryStyle = options.galleryStyle ?? null;
     this.#knowledge = options.knowledge ?? null;
     this.#referenceUrl = options.referenceUrl ?? null;
     this.#model = options.model ?? null;
@@ -255,6 +259,7 @@ export class RemoteModelProvider implements ModelProvider {
         ...(this.#styleDna && Object.keys(this.#styleDna).length > 0
           ? { styleDna: this.#styleDna }
           : {}),
+        ...(this.#galleryStyle ? { galleryStyle: this.#galleryStyle } : {}),
         ...(this.#knowledge ? { knowledge: this.#knowledge } : {}),
         ...(this.#referenceUrl ? { referenceUrl: this.#referenceUrl } : {}),
         ...(this.#model ? { model: this.#model } : {}),

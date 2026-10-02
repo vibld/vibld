@@ -779,6 +779,16 @@ export type BoundedBuilderOptions = Pick<
    */
   writeEffort?: PlanEffort;
   /**
+   * A gallery style's tokens file (`styleTokensFile`, D145), which every
+   * patch this builder makes writes to `STYLE_TOKENS_PATH` and imports.
+   */
+  styleTokens?: string;
+  /**
+   * What a build in a gallery style is told (`styleGalleryGuidance`, D146),
+   * in place of the color, preference and preset guidance.
+   */
+  galleryGuidance?: string;
+  /**
    * Told about an error that is not this package's own, before it is
    * replaced by a generic sentence. The Worker logs it; nothing else sees
    * it, because an upstream message can quote the request back.
@@ -805,6 +815,11 @@ export class BoundedBuilder {
     this.id = `${client.id}:${this.model}`;
   }
 
+  /** The gallery style's tokens file, for the patch's scaffold (D145). */
+  get styleTokens(): string | undefined {
+    return this.#options.styleTokens;
+  }
+
   /**
    * The request and everything that stands beside it on every call: the
    * reference page, standing instructions, the chosen direction, the media
@@ -822,6 +837,7 @@ export class BoundedBuilder {
       o.palette,
       o.chosenMockup,
       o.media,
+      o.galleryGuidance,
     );
   }
 
@@ -1793,6 +1809,9 @@ export async function runBoundedBuild(
         // index.html in place; a repair never does.
         ...(input.baseRevision && !plan.keepSpec
           ? { retitle: plan.given }
+          : {}),
+        ...(builder.styleTokens !== undefined
+          ? { styleTokens: builder.styleTokens }
           : {}),
       },
       files: [...planned, ...extra],

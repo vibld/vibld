@@ -478,6 +478,37 @@ describe('what a project remembers', () => {
     assert.equal(later.body.project.settings.knowledge, 'Keep it dark.');
   });
 
+  it('keeps a preset or a gallery style, never both (D144)', async () => {
+    const w = world();
+    const made = await create(w, ALICE, {});
+    const path = `/api/projects/${made.id}`;
+    const settingsNow = async () =>
+      (await w.call(ALICE, 'GET', path)).body.project.settings;
+
+    await w.call(ALICE, 'PATCH', path, {
+      settings: { galleryStyle: 'harbor' },
+    });
+    assert.equal((await settingsNow()).galleryStyle, 'harbor');
+
+    // A builder older than the gallery saves only the preset.
+    await w.call(ALICE, 'PATCH', path, { settings: { style: 'brutalism' } });
+    let settings = await settingsNow();
+    assert.equal(settings.style, 'brutalism');
+    assert.equal(settings.galleryStyle, null);
+
+    await w.call(ALICE, 'PATCH', path, {
+      settings: { galleryStyle: 'harbor' },
+    });
+    settings = await settingsNow();
+    assert.equal(settings.style, null);
+    assert.equal(settings.galleryStyle, 'harbor');
+
+    const both = await w.call(ALICE, 'PATCH', path, {
+      settings: { style: 'brutalism', galleryStyle: 'harbor' },
+    });
+    assert.equal(both.status, 400);
+  });
+
   it('refuses a malformed conversation rather than saving part of it', async () => {
     const w = world();
     const made = await create(w, ALICE);

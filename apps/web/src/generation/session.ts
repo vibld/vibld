@@ -183,6 +183,12 @@ export interface BuilderState {
   style: StylePresetId | null;
   referenceUrl: string;
   /**
+   * The style gallery style the project builds in, by its stable id, or
+   * null for none (D142, D144). Choosing one clears the style preset and
+   * the other way round: each is a whole design direction.
+   */
+  galleryStyle: string | null;
+  /**
    * A project is being opened. The composer waits for it, so nothing typed
    * in the moment before is sent against the project being left.
    */
@@ -262,6 +268,7 @@ export interface RestoredProject {
   model: string | null;
   knowledge: string;
   styleDna: StyleDna;
+  galleryStyle?: string | null;
   /**
    * A build the Worker is still running in this project, from opening it
    * (`GET /api/projects/:id`), or null for none. It carried on after the
@@ -278,6 +285,7 @@ export interface SessionSettings {
   model: string | null;
   knowledge: string;
   styleDna: StyleDna;
+  galleryStyle: string | null;
 }
 
 /**
@@ -364,6 +372,8 @@ export interface SessionOptions {
     onRun?: (runId: string) => void,
     // And what its check says as it goes (D69).
     checks?: BuildCheckHooks,
+    // The gallery style, by id (D145): last, as above.
+    galleryStyle?: string | null,
   ) => Promise<ModelProvider>;
 }
 
@@ -427,6 +437,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     projectId: null,
     style: null,
     referenceUrl: '',
+    galleryStyle: null,
     opening: false,
     draft: null,
     serverRunId: null,
@@ -470,6 +481,7 @@ async function defaultResolveProvider(
   projectId?: string | null,
   onRun?: (runId: string) => void,
   checks?: BuildCheckHooks,
+  galleryStyle?: string | null,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
@@ -485,6 +497,7 @@ async function defaultResolveProvider(
         ...(referenceUrl ? { referenceUrl } : {}),
         ...(styleDna && Object.keys(styleDna).length > 0 ? { styleDna } : {}),
         ...(mockup ? { mockup } : {}),
+        ...(galleryStyle ? { galleryStyle } : {}),
       })
     : // The deterministic fake has no visual vocabulary at all, so a preset
       // cannot change what it produces. Nothing here pretends otherwise.
@@ -546,6 +559,8 @@ export class BuilderSession {
   #mockupContext: {
     prompt: string;
     style: StylePresetId | null;
+    /** The gallery style the set was drawn in (D146). */
+    galleryStyle: string | null;
     referenceUrl: string | null;
   } | null = null;
   /**
@@ -575,6 +590,7 @@ export class BuilderSession {
     projectId?: string | null,
     onRun?: (runId: string) => void,
     checks?: BuildCheckHooks,
+    galleryStyle?: string | null,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
   readonly #fetchBuild: (
@@ -712,10 +728,35 @@ export class BuilderSession {
     this.#emit();
   }
 
-  /** The composer's style preset, or null for none. */
+  /** The composer's style preset, or null for none. Clears a gallery style. */
   setStyle(style: StylePresetId | null): void {
     if (this.#disposed || style === this.#state.style) return;
-    this.#state = { ...this.#state, style };
+    this.#state = {
+      ...this.#state,
+      style,
+      galleryStyle: style ? null : this.#state.galleryStyle,
+    };
+    this.#emit();
+  }
+
+  /**
+   * The style gallery style, by id, or null for none (D144). Clears the
+   * style preset: a gallery style is a whole design system of its own.
+   */
+  setGalleryStyle(galleryStyle: string | null): void {
+    if (this.#disposed || galleryStyle === this.#state.galleryStyle) return;
+    // A preset held over from a replied turn would come back on the next
+    // message, and the draft would be drawn in it while the build is not.
+    if (galleryStyle && this.#pendingBuildOptions) {
+      this.#pendingBuildOptions = this.#pendingBuildOptions.referenceUrl
+        ? { ...this.#pendingBuildOptions, style: null }
+        : null;
+    }
+    this.#state = {
+      ...this.#state,
+      galleryStyle,
+      style: galleryStyle ? null : this.#state.style,
+    };
     this.#emit();
   }
 
@@ -755,6 +796,7 @@ export class BuilderSession {
       model: this.#state.model,
       knowledge: this.#state.knowledge,
       styleDna: this.#state.styleDna,
+      galleryStyle: this.#state.galleryStyle,
     };
   }
 
@@ -841,6 +883,7 @@ export class BuilderSession {
       model: project.model,
       knowledge: project.knowledge,
       styleDna: project.styleDna,
+      galleryStyle: project.galleryStyle ?? null,
       ...(watching
         ? {
             status: 'planning' as const,
@@ -1159,7 +1202,13 @@ export class BuilderSession {
     const epoch = this.#epoch;
     const controller = new AbortController();
     this.#exploreAbort = controller;
-    this.#mockupContext = { prompt: trimmed, style, referenceUrl };
+    const galleryStyle = style ? null : this.#state.galleryStyle;
+    this.#mockupContext = {
+      prompt: trimmed,
+      style,
+      galleryStyle,
+      referenceUrl,
+    };
     this.#patch(epoch, (state) => ({
       ...state,
       exploring: true,
@@ -1172,6 +1221,8 @@ export class BuilderSession {
       const mockups = await this.#requestMockups({
         prompt: trimmed,
         style,
+        // The project's gallery style (D146), so the three are drawn in it.
+        galleryStyle,
         model: this.#state.model,
         signal: controller.signal,
         onProgress: (progress) => {
@@ -1248,7 +1299,14 @@ export class BuilderSession {
     if (this.#disposed || this.#state.running) return;
     const context = this.#mockupContext;
     if (!context) return;
-    this.#state = { ...this.#state, mockups: [] };
+    // Built in the style the set was drawn in, a gallery style (D146) or a
+    // preset, even if the picker was changed while the set was on screen.
+    this.#state = {
+      ...this.#state,
+      mockups: [],
+      galleryStyle: context.galleryStyle,
+      style: context.galleryStyle ? null : context.style,
+    };
     this.#emit();
     void this.submit(
       context.prompt,
@@ -1701,6 +1759,7 @@ export class BuilderSession {
             checked.verdict = verdict;
           },
         },
+        this.#state.galleryStyle,
       );
     } catch (error) {
       reservation.release();
@@ -2066,6 +2125,7 @@ export class BuilderSession {
     this.#requestMockups({
       prompt,
       style,
+      galleryStyle: style ? null : this.#state.galleryStyle,
       model: this.#state.model,
       signal: controller.signal,
       draft: true,

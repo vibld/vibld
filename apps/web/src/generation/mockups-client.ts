@@ -21,6 +21,8 @@ import type { GenerationProgress } from './session.ts';
 export interface MockupRunOptions {
   prompt: string;
   style?: StylePresetId | null;
+  /** A gallery style's id (D146), drawn in place of a preset. */
+  galleryStyle?: string | null;
   model?: string | null;
   signal?: AbortSignal;
   onProgress?: (progress: GenerationProgress) => void;
@@ -52,6 +54,7 @@ export async function requestMockups(
     body: JSON.stringify({
       prompt: options.prompt,
       ...(options.style ? { style: options.style } : {}),
+      ...(options.galleryStyle ? { galleryStyle: options.galleryStyle } : {}),
       ...(options.model ? { model: options.model } : {}),
       ...(options.draft ? { draft: true } : {}),
     }),

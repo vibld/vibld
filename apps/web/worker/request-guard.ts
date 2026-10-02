@@ -14,6 +14,7 @@ import {
 } from '@vibld/ai/limits';
 import { canonicalModelId, findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
+import { isStyleGalleryId } from '@vibld/ai/style-gallery';
 // The one bound, from the schema that produces the labels this guard reads
 // back, rather than a second copy of 60 with a comment asserting they
 // agree (internal PR 189 review).
@@ -571,6 +572,25 @@ export function parseStylePreset(
     return fail(400, 'Unknown "style" preset.');
   }
   return { ok: true, value: style };
+}
+
+/**
+ * The style gallery style a build is in, by id (docs/decisions.md, D145),
+ * or null. Rejected when it is not an id at all, like a style preset; an
+ * id the gallery does not hold is refused once its file is looked for.
+ */
+export function parseGalleryStyle(body: unknown): GuardResult<string | null> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { galleryStyle } = body as { galleryStyle?: unknown };
+  if (galleryStyle === undefined || galleryStyle === null) {
+    return { ok: true, value: null };
+  }
+  if (!isStyleGalleryId(galleryStyle)) {
+    return fail(400, 'Unknown "galleryStyle".');
+  }
+  return { ok: true, value: galleryStyle };
 }
 
 /**

@@ -95,6 +95,23 @@ describe('RemoteModelProvider', () => {
     assert.equal(JSON.parse(String(init?.body)).prompt, 'a landing page');
   });
 
+  it('sends the gallery style by id, and nothing when there is none (D145)', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return sseResponse([PLAN_FRAME]);
+    }) as unknown as typeof fetch;
+    for (const galleryStyle of ['amberbrae', null]) {
+      await new RemoteModelProvider({
+        fetchImpl,
+        getToken: async () => null,
+        galleryStyle,
+      }).generate({ prompt: 'a landing page' });
+    }
+    assert.equal(bodies[0]!.galleryStyle, 'amberbrae');
+    assert.equal('galleryStyle' in bodies[1]!, false);
+  });
+
   it('omits the Authorization header when signed out', async () => {
     const calls: Array<RequestInit | undefined> = [];
     const provider = new RemoteModelProvider({

@@ -738,6 +738,10 @@ export function buildUserPrompt(
   // re-points every existing positional caller at the wrong argument.
   chosenMockup?: { label: string; html: string } | null,
   media?: readonly MediaManifestEntry[] | null,
+  // A style gallery style (D146, `styleGalleryGuidance`): the whole design
+  // system, so it stands in for the color, standing preference and preset
+  // guidance below, and comes last.
+  gallery?: string | null,
 ): string {
   const base = request.base;
   const parts = [request.prompt];
@@ -886,7 +890,7 @@ Preserve anything the request does not ask you to change.`,
   // Dropping the whole catalogue block when a reference palette arrives took
   // all of that away as a side effect, so the non-colour half is emitted
   // either way.
-  if (!style) {
+  if (!style && !gallery) {
     if (palette) {
       parts.push(referencePaletteGuidance(palette));
       const feel = productFeelGuidance(request.prompt);
@@ -901,6 +905,11 @@ Preserve anything the request does not ask you to change.`,
   // before the preset, for the same reason the palette does: a named
   // direction chosen for this run should be the last word before the
   // request itself.
+  if (gallery) {
+    parts.push(gallery);
+    return parts.join('\n\n');
+  }
+
   const dna = styleDna ? styleDnaGuidance(styleDna) : null;
   if (dna) parts.push(dna);
 

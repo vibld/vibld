@@ -109,6 +109,25 @@ describe('talking to the agent', () => {
     ]);
   });
 
+  it('drops a held preset when a gallery style is chosen (D146)', async () => {
+    const { session, built } = createSession([
+      reply('Should the menu be a page of its own?'),
+      build('Adding it.', 'A bakery site with a separate menu page.'),
+    ]);
+    await session.send(
+      'a bakery site',
+      'succeed',
+      'editorial' as StylePresetId,
+      'https://example.com',
+    );
+    session.setGalleryStyle('amberbrae');
+    await session.send('yes');
+
+    assert.deepEqual(built, [
+      { style: null, referenceUrl: 'https://example.com' },
+    ]);
+  });
+
   it('tells the agent what happened so far, in words', async () => {
     const { session, asked } = createSession([
       build('Building it.', 'A bakery landing page.'),

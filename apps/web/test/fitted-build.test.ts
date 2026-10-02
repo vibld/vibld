@@ -180,8 +180,8 @@ describe('a Free account on the default model', () => {
     );
     assert.equal(refusal.reason, 'account-ceiling');
     assert.doesNotMatch(refusal.error, /used up/);
-    assert.match(refusal.error, /this month's allowance has \$0\.85 left/);
-    assert.match(refusal.error, /needs at least \$0\.86 set aside/);
+    assert.match(refusal.error, /this month's allowance has \$0\.86 left/);
+    assert.match(refusal.error, /needs at least \$0\.87 set aside/);
     assert.match(refusal.error, /cheaper model/);
     assert.match(refusal.error, /top-up/);
   });

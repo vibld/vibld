@@ -162,6 +162,7 @@ describe('what opening a project puts back', () => {
       // Emptied on purpose is kept empty: the browser's does not return.
       knowledge: '',
       styleDna: {},
+      galleryStyle: null,
     });
   });
 
@@ -202,6 +203,7 @@ describe('what counts as a change worth saving', () => {
     model: 'm',
     knowledge: '',
     styleDna: {},
+    galleryStyle: null,
   };
 
   it('is nothing, for a project exactly as it was opened', () => {
@@ -222,6 +224,7 @@ describe('what counts as a change worth saving', () => {
         model: 'm',
         knowledge: '',
         styleDna: {},
+        galleryStyle: null,
       },
     });
     assert.equal(changedSince(first!.marks, settings, []), null);

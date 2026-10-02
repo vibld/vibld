@@ -14,12 +14,21 @@ import {
   STYLE_GALLERY_GROUPS,
   checkStyleEntry,
   checkStyleGallery,
+  filterStyleCards,
+  isStyleGalleryId,
   isDecorativeRole,
   parseStyleGallery,
   serializeStyleGallery,
   styleCardOf,
+  styleGalleryCss,
+  fontsourceWeight,
+  styleGalleryFamilies,
+  styleGalleryFontImports,
+  styleGalleryFontWeights,
   upsertStyleGallery,
+  styleTokensFile,
 } from '../src/style-gallery.ts';
+import { FONTSOURCE_WEIGHTS } from '../src/fontsource-weights.ts';
 import type {
   StyleGalleryCatalog,
   StyleGalleryEntry,
@@ -432,6 +441,270 @@ describe('the import from designs-v1', { skip: !hasSource }, () => {
         entry.contrast_checks.map((c) => [c.fg, c.bg, c.ratio, c.target]),
       );
       assert.deepEqual(Object.keys(kept), Object.keys(entry));
+    }
+  });
+});
+
+describe('filterStyleCards', () => {
+  const cards = [
+    styleCardOf(
+      sample('alpha', { kind: 'Dark editorial serif site', theme: 'dark' }),
+    ),
+    styleCardOf(
+      sample('beta', { group: 'fintech', style_tags: ['pill corners'] }),
+    ),
+    styleCardOf(
+      sample('gamma', {
+        category: 'bold-graphic',
+        signature: ['heavy 900 display'],
+      }),
+    ),
+  ];
+  const ids = (filter: Parameters<typeof filterStyleCards>[1]) =>
+    filterStyleCards(cards, filter).map((card) => card.id);
+
+  it('filters by theme, category and group', () => {
+    assert.deepEqual(ids({ theme: 'dark' }), ['alpha']);
+    assert.deepEqual(ids({ group: 'fintech' }), ['beta']);
+    assert.deepEqual(ids({ category: 'bold-graphic' }), ['gamma']);
+    assert.deepEqual(ids({ theme: '', category: '', group: '' }), [
+      'alpha',
+      'beta',
+      'gamma',
+    ]);
+  });
+
+  it('searches name, kind, tags and signature, every word', () => {
+    assert.deepEqual(ids({ query: 'GAMMA' }), ['gamma']);
+    assert.deepEqual(ids({ query: 'editorial serif' }), ['alpha']);
+    assert.deepEqual(ids({ query: 'pill' }), ['beta']);
+    assert.deepEqual(ids({ query: 'heavy display' }), ['gamma']);
+    assert.deepEqual(ids({ query: 'serif pill' }), []);
+  });
+
+  it('knows a stored id', () => {
+    assert.equal(isStyleGalleryId('tealcairn'), true);
+    assert.equal(isStyleGalleryId('Teal Cairn'), false);
+    assert.equal(isStyleGalleryId('a'.repeat(65)), false);
+    assert.equal(isStyleGalleryId(null), false);
+  });
+});
+
+/** The `@theme` declarations of emitted CSS, read back. */
+function themeOf(css: string): Map<string, string> {
+  const block = /@theme \{\n([\s\S]*?)\n\}/.exec(css)![1]!;
+  return new Map(
+    block.split('\n').map((line) => {
+      const match = /^\s*(--[\w-]+): (.*);$/.exec(line)!;
+      return [match[1]!, match[2]!];
+    }),
+  );
+}
+
+/** What the tokens say each declaration should be, straight from the catalog. */
+function expectedTheme(tokens: StyleGalleryEntry['design_tokens']) {
+  const want = new Map<string, string>();
+  for (const color of tokens.colors) want.set(color.token, color.hex);
+  want.set('--font-display', `'${tokens.fonts.display}'`);
+  want.set('--font-body', `'${tokens.fonts.body}'`);
+  if (tokens.fonts.mono) want.set('--font-mono', `'${tokens.fonts.mono}'`);
+  const declared = [tokens.fonts.display, tokens.fonts.body, tokens.fonts.mono];
+  for (const step of tokens.type_scale) {
+    if (!declared.includes(step.font)) {
+      want.set(
+        `--font-${step.font.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+        `'${step.font}'`,
+      );
+    }
+  }
+  for (const step of tokens.type_scale) {
+    want.set(step.token, step.size);
+    want.set(`${step.token}--line-height`, String(step.line_height));
+    want.set(`${step.token}--letter-spacing`, step.tracking);
+    want.set(`${step.token}--font-weight`, String(step.weight));
+  }
+  for (const [element, value] of Object.entries(tokens.radius)) {
+    want.set(
+      `--radius-${element.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      value,
+    );
+  }
+  (tokens.shadows ?? []).forEach((shadow, i) =>
+    want.set(`--shadow-${i + 1}`, shadow),
+  );
+  return want;
+}
+
+describe('applying a style (D145)', () => {
+  it("emits exactly the tokens, under Tailwind's namespaces", () => {
+    const tokens = {
+      theme: 'light',
+      colors: [
+        { token: '--color-canvas', role: 'canvas', hex: '#f9f6f2' },
+        { token: '--color-text', role: 'text', hex: '#0e0e0e' },
+      ],
+      fonts: { display: 'Raleway', body: 'Poppins' },
+      type_scale: [
+        {
+          token: '--text-16',
+          size: '16px',
+          font: 'Poppins',
+          weight: 500,
+          line_height: 1.5,
+          tracking: '0',
+        },
+        {
+          token: '--text-62',
+          size: '62px',
+          font: 'Raleway',
+          weight: 700,
+          line_height: 1.15,
+          tracking: '0.154em',
+        },
+      ],
+      spacing: { base_unit: '4px', density: 'comfortable', scale: [] },
+      radius: { cards: '0px', 'hero panels': '30px' },
+      shadows: ['rgba(0, 0, 0, 0.1) 0px 4px 8px 0px'],
+    } as StyleGalleryEntry['design_tokens'];
+    const css = styleGalleryCss(tokens);
+    assert.deepEqual(
+      [...themeOf(css)],
+      [
+        ['--color-canvas', '#f9f6f2'],
+        ['--color-text', '#0e0e0e'],
+        ['--font-display', "'Raleway'"],
+        ['--font-body', "'Poppins'"],
+        ['--text-16', '16px'],
+        ['--text-16--line-height', '1.5'],
+        ['--text-16--letter-spacing', '0'],
+        ['--text-16--font-weight', '500'],
+        ['--text-62', '62px'],
+        ['--text-62--line-height', '1.15'],
+        ['--text-62--letter-spacing', '0.154em'],
+        ['--text-62--font-weight', '700'],
+        ['--radius-cards', '0px'],
+        ['--radius-hero-panels', '30px'],
+        ['--shadow-1', 'rgba(0, 0, 0, 0.1) 0px 4px 8px 0px'],
+      ],
+    );
+    assert.match(
+      css,
+      /body \{ font-family: var\(--font-body\); font-size: 16px; \}/,
+    );
+    assert.deepEqual(styleGalleryFontImports(tokens), [
+      '@fontsource/raleway/700.css',
+      '@fontsource/poppins/500.css',
+    ]);
+  });
+
+  it('snaps a weight to the nearest one Fontsource ships', () => {
+    assert.equal(fontsourceWeight('Bebas Neue', 600), 400);
+    assert.equal(fontsourceWeight('Inter', 850), 900);
+    assert.equal(fontsourceWeight('Inter', 600), 600);
+    assert.equal(fontsourceWeight('Space Grotesk', 200), 300);
+    assert.equal(fontsourceWeight('Not A Gallery Font', 650), 650);
+  });
+
+  it('imports a family only a type step sets', () => {
+    const tokens = {
+      fonts: { display: 'Anton', body: 'Space Grotesk' },
+      type_scale: [
+        {
+          token: '--text-16',
+          size: '16px',
+          font: 'Space Grotesk',
+          weight: 400,
+        },
+        { token: '--text-12', size: '12px', font: 'Archivo', weight: 600 },
+        {
+          token: '--text-64',
+          size: '64px',
+          font: 'Archivo Black',
+          weight: 400,
+        },
+      ],
+    } as unknown as StyleGalleryEntry['design_tokens'];
+    assert.deepEqual(styleGalleryFontImports(tokens), [
+      '@fontsource/anton/400.css',
+      '@fontsource/space-grotesk/400.css',
+      '@fontsource/archivo/600.css',
+      '@fontsource/archivo-black/400.css',
+    ]);
+  });
+
+  it('gives a face no step uses its regular weight', () => {
+    const tokens = {
+      fonts: { display: 'Inter', body: 'Inter', mono: 'Roboto Mono' },
+      type_scale: [
+        { token: '--text-16', size: '16px', font: 'Inter', weight: 400 },
+        { token: '--text-40', size: '40px', font: 'Inter', weight: 600 },
+      ],
+    } as unknown as StyleGalleryEntry['design_tokens'];
+    assert.deepEqual(styleGalleryFontImports(tokens), [
+      '@fontsource/inter/400.css',
+      '@fontsource/inter/600.css',
+      '@fontsource/roboto-mono/400.css',
+    ]);
+  });
+});
+
+describe('applying the imported styles (D145)', { skip: !stored }, () => {
+  const catalog = stored
+    ? parseStyleGallery(readFileSync(STYLE_GALLERY_FILE, 'utf8'))
+    : null;
+  const byId = (id: string) => catalog!.entries.find((e) => e.id === id)!;
+
+  it('imports only weights Fontsource ships', () => {
+    for (const family of styleGalleryFamilies(catalog!.entries)) {
+      assert.ok(FONTSOURCE_WEIGHTS[family], `no weights for ${family}`);
+    }
+    for (const entry of catalog!.entries) {
+      const imported = new Set(
+        styleGalleryFontWeights(entry.design_tokens).map((f) => f.family),
+      );
+      for (const step of entry.design_tokens.type_scale) {
+        assert.ok(imported.has(step.font), `${entry.id}: ${step.font}`);
+      }
+      for (const { family, weights } of styleGalleryFontWeights(
+        entry.design_tokens,
+      )) {
+        for (const weight of weights) {
+          assert.ok(
+            FONTSOURCE_WEIGHTS[family]!.includes(weight),
+            `${entry.id}: ${family} ${weight}`,
+          );
+        }
+      }
+    }
+    assert.ok(
+      styleTokensFile(byId('cedarpool')).includes(
+        "@import '@fontsource/inter/900.css';",
+      ),
+    );
+    assert.ok(!styleTokensFile(byId('cedarpool')).includes('/850.css'));
+    assert.ok(
+      styleTokensFile(byId('bramblemore')).includes(
+        "@import '@fontsource/bebas-neue/400.css';",
+      ),
+    );
+    assert.ok(!styleTokensFile(byId('bramblemore')).includes('bebas-neue/600'));
+  });
+
+  for (const id of ['amberbrae', 'vinepool', 'mireby', 'tansyhaven']) {
+    it(`matches design_tokens for ${id}`, () => {
+      const tokens = byId(id).design_tokens;
+      assert.deepEqual(themeOf(styleGalleryCss(tokens)), expectedTheme(tokens));
+    });
+  }
+
+  it('matches design_tokens for every style', () => {
+    for (const entry of catalog!.entries) {
+      const tokens = entry.design_tokens;
+      assert.deepEqual(
+        themeOf(styleGalleryCss(tokens)),
+        expectedTheme(tokens),
+        entry.id,
+      );
     }
   });
 });

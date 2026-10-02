@@ -2,6 +2,7 @@ import { parseTranscript } from '@vibld/core';
 import type { ProjectSnapshot, TranscriptTurn } from '@vibld/core';
 import { sanitizeStyleDna } from '@vibld/ai/style-dna';
 import type { StyleDna } from '@vibld/ai/style-dna';
+import { isStyleGalleryId } from '@vibld/ai/style-gallery';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
@@ -40,6 +41,8 @@ export interface ProjectSettings {
   knowledge: string | null;
   /** Visual preferences: null for "never set", `{}` for "set to none". */
   styleDna: StyleDna | null;
+  /** The style gallery style, by its stable id; null for none (D144). */
+  galleryStyle: string | null;
 }
 
 export const EMPTY_SETTINGS: ProjectSettings = {
@@ -48,6 +51,7 @@ export const EMPTY_SETTINGS: ProjectSettings = {
   model: null,
   knowledge: null,
   styleDna: null,
+  galleryStyle: null,
 };
 
 export interface ProjectRecord {
@@ -120,6 +124,7 @@ interface ProjectRow {
   model: string | null;
   knowledge: string | null;
   style_dna: string | null;
+  style_gallery: string | null;
   transcript_key: string | null;
   transcript_turns: number;
   version: number;
@@ -147,7 +152,7 @@ interface ProjectRow {
  */
 const SELECT = `SELECT p.id, p.user_id, p.name, p.archived_at, p.created_at,
        p.updated_at, p.last_opened_at, p.style_preset, p.reference_url,
-       p.model, p.knowledge, p.style_dna, p.transcript_key,
+       p.model, p.knowledge, p.style_dna, p.style_gallery, p.transcript_key,
        p.transcript_turns, p.version, p.version_writer, p.share_token,
        p.shared_at, p.share_held_at,
        g.accepted_revision,
@@ -198,6 +203,9 @@ function recordOf(row: ProjectRow): ProjectRecord {
       model: row.model,
       knowledge: row.knowledge,
       styleDna: styleDnaOf(row.style_dna),
+      galleryStyle: isStyleGalleryId(row.style_gallery)
+        ? row.style_gallery
+        : null,
     },
     transcriptKey: row.transcript_key,
     transcriptTurns: row.transcript_turns,
@@ -405,8 +413,9 @@ export class ProjectStore {
       .prepare(
         `INSERT INTO projects
            (id, user_id, name, created_at, updated_at, last_opened_at,
-            style_preset, reference_url, model, knowledge, style_dna)
-         SELECT ?1, ?2, ?3, ?4, ?4, ?4, ?5, ?6, ?7, ?8, ?9
+            style_preset, reference_url, model, knowledge, style_dna,
+            style_gallery)
+         SELECT ?1, ?2, ?3, ?4, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?11
           WHERE ?10 IS NULL
              OR (SELECT COUNT(*) FROM projects
                   WHERE user_id = ?2 AND archived_at IS NULL) < ?10`,
@@ -422,6 +431,7 @@ export class ProjectStore {
         settings.knowledge,
         settings.styleDna ? JSON.stringify(settings.styleDna) : null,
         limit,
+        settings.galleryStyle,
       )
       .run();
     return (result.meta?.changes ?? 0) > 0;
@@ -546,6 +556,7 @@ export class ProjectStore {
       ['model', 'model'],
       ['knowledge', 'knowledge'],
       ['styleDna', 'style_dna'],
+      ['galleryStyle', 'style_gallery'],
     ];
     const settings = content.settings ?? {};
     const present = columns.filter(([field]) => field in settings);

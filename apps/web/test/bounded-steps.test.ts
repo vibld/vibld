@@ -611,7 +611,15 @@ describe('what a bounded build may spend', () => {
       ...site,
       files: [
         ...site.files,
-        ...['About', 'Team', 'Careers', 'Blog', 'Press', 'Legal'].map((name) =>
+        ...[
+          'About',
+          'Team',
+          'Careers',
+          'Blog',
+          'Press',
+          'Legal',
+          'Investors',
+        ].map((name) =>
           file(`src/pages/${name}Page.tsx`, 30_000, 'large', [
             'src/components/SiteLayout.tsx',
           ]),

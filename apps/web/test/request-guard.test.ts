@@ -14,6 +14,7 @@ import {
   parseModel,
   parsePreviewRequest,
   parseReferenceUrl,
+  parseGalleryStyle,
   parseStylePreset,
 } from '../worker/request-guard.ts';
 import { MAX_BRIEF_CHARS } from '../src/templates/template-brief.ts';
@@ -264,6 +265,25 @@ describe('generation request validation', () => {
       true,
       'a follow-up was refused for the size of a project it no longer sends',
     );
+  });
+});
+
+describe('parseGalleryStyle (D145)', () => {
+  it('is none when the request names none', () => {
+    for (const body of [{ prompt: 'x' }, { prompt: 'x', galleryStyle: null }]) {
+      const result = parseGalleryStyle(body);
+      assert.deepEqual(result, { ok: true, value: null });
+    }
+  });
+
+  it('takes an id, and refuses anything that is not one', () => {
+    assert.deepEqual(parseGalleryStyle({ galleryStyle: 'amberbrae' }), {
+      ok: true,
+      value: 'amberbrae',
+    });
+    for (const galleryStyle of ['../cards', 'Amber Brae', 7, '']) {
+      assert.equal(parseGalleryStyle({ galleryStyle }).ok, false);
+    }
   });
 });
 

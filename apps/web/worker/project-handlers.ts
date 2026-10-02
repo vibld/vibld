@@ -1,5 +1,6 @@
 import { canonicalModelId, isKnownModel } from '@vibld/ai';
 import { sanitizeStyleDna } from '@vibld/ai/style-dna';
+import { isStyleGalleryId } from '@vibld/ai/style-gallery';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 import {
   DEFAULT_PROJECT_NAME,
@@ -269,6 +270,19 @@ export function parseProjectSettings(
         ? null
         : sanitizeStyleDna(raw.styleDna);
   }
+  if ('galleryStyle' in raw) {
+    settings.galleryStyle = isStyleGalleryId(raw.galleryStyle)
+      ? raw.galleryStyle
+      : null;
+  }
+  // A project builds in a preset or a gallery style, never both (D144).
+  // Choosing one clears the other here too, so a builder older than the
+  // gallery, which saves only `style`, cannot leave both stored.
+  if (settings.style && settings.galleryStyle) {
+    return fail(400, 'Choose a style or a gallery style, not both.');
+  }
+  if (settings.style) settings.galleryStyle = null;
+  if (settings.galleryStyle) settings.style = null;
   return { ok: true, value: settings };
 }
 
@@ -469,6 +483,7 @@ export async function handleProjects(
         model: null,
         knowledge: null,
         styleDna: null,
+        galleryStyle: null,
         ...parsed.value,
       };
     }

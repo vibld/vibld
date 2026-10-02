@@ -105,6 +105,11 @@ export interface MockupProviderOptions {
   onPromptChars?: (characters: number) => void;
   style?: StylePresetId;
   /**
+   * A gallery style's direction (`styleGalleryDirection`, D146), sent in
+   * place of a preset's. A project has one or the other, never both.
+   */
+  direction?: string;
+  /**
    * One direction rather than three, shown as a draft while a build runs
    * (docs/decisions.md, 2026-09-28, the draft preview).
    *
@@ -158,6 +163,7 @@ export class MockupProvider {
   readonly #onProgress?: (progress: PlanProgress) => void;
   readonly #onPromptChars?: (characters: number) => void;
   readonly #style?: StylePresetId;
+  readonly #direction?: string;
   readonly #ask: MockupAsk;
 
   constructor(client: PlanClient, options: MockupProviderOptions = {}) {
@@ -171,6 +177,7 @@ export class MockupProvider {
     this.#signal = options.signal;
     this.#onProgress = options.onProgress;
     this.#style = options.style;
+    this.#direction = options.direction;
     this.#onPromptChars = options.onPromptChars;
     this.#ask = options.draft ? ONE_DRAFT : THREE_DIRECTIONS;
     this.id = `${client.id}:${this.#model}`;
@@ -314,7 +321,8 @@ export class MockupProvider {
 
   /** One attempt, with nothing reported and nothing validated. */
   async #send(request: MockupRequest): Promise<PlanCompletion> {
-    const direction = this.#style ? styleDirection(this.#style) : null;
+    const direction =
+      this.#direction ?? (this.#style ? styleDirection(this.#style) : null);
     return this.#client.createPlan({
       system: this.#ask.system,
       prompt: mockupUserPrompt(request.prompt, direction, this.#ask.preamble),

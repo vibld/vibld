@@ -104,6 +104,17 @@ describe('asking for three directions', () => {
     assert.match(String(fake.seen[0]?.prompt), /within this visual direction/i);
   });
 
+  it('carries a gallery style in place of a preset (D146)', async () => {
+    const fake = client();
+    await new MockupProvider(fake, {
+      direction: 'Draw it in one style from the style gallery, Amberbrae.',
+    }).generate({ prompt: 'a bakery' });
+    const prompt = String(fake.seen[0]?.prompt);
+    assert.match(prompt, /^a bakery/);
+    assert.match(prompt, /within this visual direction/i);
+    assert.match(prompt, /style gallery, Amberbrae\.$/);
+  });
+
   it('asks for nothing about style when none was chosen', async () => {
     const fake = client();
     await new MockupProvider(fake).generate({ prompt: 'a bakery' });

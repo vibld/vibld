@@ -11,6 +11,7 @@ import { MediaLibrary } from './MediaLibrary.tsx';
 import { ModelPicker } from './ModelPicker.tsx';
 import { StyleDnaPanel } from './StyleDnaPanel.tsx';
 import { ScreenPicker } from './ScreenPicker.tsx';
+import { StyleGalleryPicker } from './StyleGalleryPicker.tsx';
 import { StylePicker } from './StylePicker.tsx';
 import {
   MAX_BRIEF_CHARS,
@@ -37,7 +38,8 @@ const EXAMPLES = [
   },
 ];
 
-type OptionId = 'style' | 'reference' | 'screens' | 'media' | 'preferences';
+type OptionId =
+  'style' | 'gallery' | 'reference' | 'screens' | 'media' | 'preferences';
 
 export interface PromptPanelProps {
   state: BuilderState;
@@ -86,6 +88,12 @@ export interface PromptPanelProps {
   referenceUrl?: string;
   onReferenceUrlChange?: (value: string) => void;
   /**
+   * The style gallery style, by id (D144). Offered only where something
+   * above holds it, since it is a project setting.
+   */
+  galleryStyle?: string | null;
+  onGalleryStyleChange?: (id: string | null) => void;
+  /**
    * What the button beside the label says. "Start over" discards the
    * conversation in place; where the conversation is a saved project, the
    * same place offers a new project instead, which leaves this one intact.
@@ -127,6 +135,8 @@ export function PromptPanel({
   onStyleChange,
   referenceUrl: heldReferenceUrl,
   onReferenceUrlChange,
+  galleryStyle = null,
+  onGalleryStyleChange,
   resetLabel = 'Start over',
 }: PromptPanelProps) {
   // A template's brief, when vibld.com sent one (D106): filled once, to be
@@ -312,6 +322,25 @@ export function PromptPanel({
         />
       ),
     },
+    ...(onGalleryStyleChange
+      ? [
+          {
+            id: 'gallery' as const,
+            label: 'Gallery',
+            value: galleryStyle ? 'set' : null,
+            about:
+              'Builds in one complete style: its colors, fonts, type scale, shapes and guardrails. Choosing one replaces the style above.',
+            body: (
+              <StyleGalleryPicker
+                active={open === 'gallery'}
+                value={galleryStyle}
+                onChange={onGalleryStyleChange}
+                disabled={disabled}
+              />
+            ),
+          },
+        ]
+      : []),
     {
       id: 'reference',
       label: 'Reference',

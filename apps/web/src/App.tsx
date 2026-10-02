@@ -321,6 +321,8 @@ function Builder() {
               }
               style={state.style}
               onStyleChange={(style) => session.setStyle(style)}
+              galleryStyle={state.galleryStyle}
+              onGalleryStyleChange={(id) => session.setGalleryStyle(id)}
               referenceUrl={state.referenceUrl}
               onReferenceUrlChange={(value) => session.setReferenceUrl(value)}
               onCancel={() => void session.cancel()}

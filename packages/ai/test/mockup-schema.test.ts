@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import {
@@ -23,6 +24,11 @@ import {
   MAX_MOCKUP_DIRECTION_CHARS,
 } from '../src/limits.ts';
 import { STYLE_PRESETS, styleDirection } from '../src/style-presets.ts';
+import {
+  parseStyleGallery,
+  styleGalleryDirection,
+} from '../src/style-gallery.ts';
+import { STYLE_GALLERY_FILE } from '../bin/import-style-gallery.ts';
 import { maxTokensFor } from '../src/plan-provider.ts';
 
 /**
@@ -191,6 +197,18 @@ describe('what a mockup prompt may carry', () => {
       assert.ok(
         direction.length <= MAX_MOCKUP_DIRECTION_CHARS,
         `${preset.id}: ${direction.length} chars exceeds the ${MAX_MOCKUP_DIRECTION_CHARS} the reservation covers`,
+      );
+    }
+  });
+
+  it('keeps every gallery style direction inside the same bound', () => {
+    if (!existsSync(STYLE_GALLERY_FILE)) return;
+    const catalog = parseStyleGallery(readFileSync(STYLE_GALLERY_FILE, 'utf8'));
+    for (const entry of catalog.entries) {
+      const direction = styleGalleryDirection(entry);
+      assert.ok(
+        direction.length <= MAX_MOCKUP_DIRECTION_CHARS,
+        `${entry.id}: ${direction.length} chars exceeds the ${MAX_MOCKUP_DIRECTION_CHARS} the reservation covers`,
       );
     }
   });

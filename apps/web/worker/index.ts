@@ -44,11 +44,14 @@ import {
   parseProjectId,
   parseAdminTopupRequest,
   parseReferenceUrl,
+  parseGalleryStyle,
   parseStyleDna,
   parseStylePreset,
 } from './request-guard.ts';
 import { fetchReferenceContext } from './reference-fetch.ts';
 import { handleMedia, handleMediaFile } from './media-handlers.ts';
+import { handleStyleGallery, readGalleryStyle } from './style-gallery.ts';
+import type { StyleGalleryEnv } from './style-gallery.ts';
 import { handleChat } from './chat-handler.ts';
 import {
   DEFAULT_PUBLISH_HOSTNAME,
@@ -265,7 +268,7 @@ import {
   refusal,
 } from './access-handlers.ts';
 
-export interface Env extends PrincipalEnv {
+export interface Env extends PrincipalEnv, StyleGalleryEnv {
   /** Worker secret. Never reaches the browser. */
   ANTHROPIC_API_KEY?: string;
   /** Worker secret. Never reaches the browser. */
@@ -1103,6 +1106,28 @@ async function handlePlan(
     return refuse('request-invalid', styleDna.error, styleDna.status);
   }
 
+  // A gallery style's tokens file (D145), read now so a style this copy
+  // does not hold is refused before anything is reserved.
+  const galleryStyle = parseGalleryStyle(body);
+  if (!galleryStyle.ok) {
+    return refuse('request-invalid', galleryStyle.error, galleryStyle.status);
+  }
+  const gallery = galleryStyle.value
+    ? await readGalleryStyle(
+        env,
+        new URL(request.url).origin,
+        galleryStyle.value,
+      )
+    : null;
+  if (galleryStyle.value && gallery === null) {
+    // A style a later import removed (migration 0045): say what to do.
+    return refuse(
+      'request-invalid',
+      'This style is no longer in the gallery. Choose another in Gallery, or clear it.',
+      400,
+    );
+  }
+
   const knowledge = parseKnowledge(body);
   if (!knowledge.ok) {
     return refuse('request-invalid', knowledge.error, knowledge.status);
@@ -1489,6 +1514,9 @@ async function handlePlan(
         ...(style.value ? { style: style.value } : {}),
         ...(Object.keys(styleDna.value).length > 0
           ? { styleDna: styleDna.value }
+          : {}),
+        ...(gallery
+          ? { styleTokens: gallery.tokens, galleryGuidance: gallery.guidance }
           : {}),
         ...(knowledge.value ? { knowledge: knowledge.value } : {}),
         ...(chosenMockup.value ? { chosenMockup: chosenMockup.value } : {}),
@@ -1914,6 +1942,27 @@ async function handleMockups(
     return refuse('request-invalid', style.error, style.status);
   }
 
+  // A gallery style's direction (D146), in place of a preset's, so the
+  // three directions and the draft are drawn in the style the build uses.
+  const galleryStyle = parseGalleryStyle(body);
+  if (!galleryStyle.ok) {
+    return refuse('request-invalid', galleryStyle.error, galleryStyle.status);
+  }
+  const gallery = galleryStyle.value
+    ? await readGalleryStyle(
+        env,
+        new URL(request.url).origin,
+        galleryStyle.value,
+      )
+    : null;
+  if (galleryStyle.value && gallery === null) {
+    return refuse(
+      'request-invalid',
+      'This style is no longer in the gallery. Choose another in Gallery, or clear it.',
+      400,
+    );
+  }
+
   const chosenModel = parseModel(body, configuredProviders(env));
   if (!chosenModel.ok) {
     return refuse('request-invalid', chosenModel.error, chosenModel.status);
@@ -2218,6 +2267,7 @@ async function handleMockups(
             return retryHold.verdict.allow;
           },
           ...(style.value ? { style: style.value } : {}),
+          ...(gallery ? { direction: gallery.direction } : {}),
           // One direction, shown while a build runs (docs/decisions.md,
           // 2026-09-28, the draft preview). The same run in every other
           // respect: this route's reservation, ceiling, retry and
@@ -3648,6 +3698,12 @@ async function route(
 
   if (pathname === '/api/media') {
     return handleMedia(request, env, (req) => resolvePrincipal(req, env));
+  }
+  // The style gallery's picker cards (D142, D144).
+  if (pathname === '/api/style-gallery') {
+    return handleStyleGallery(request, env, (req) =>
+      resolvePrincipal(req, env),
+    );
   }
   if (pathname === '/api/media/file') {
     return handleMediaFile(request, env, (req) => resolvePrincipal(req, env));

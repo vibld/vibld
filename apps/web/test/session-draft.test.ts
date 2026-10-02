@@ -162,6 +162,64 @@ describe('the draft a first build shows', () => {
     assert.equal(session.getState().draft?.label, 'Warm bakery');
   });
 
+  it('draws the draft and the three in the gallery style (D146)', async () => {
+    const draft = gatedDraft();
+    const build = gatedBuild();
+    const looks: MockupRunOptions[] = [];
+    const session = createSession({
+      resolveProvider: build.resolveProvider,
+      requestMockupsImpl: ((options: MockupRunOptions) => {
+        if (options.draft) return draft.impl(options);
+        looks.push(options);
+        return Promise.resolve([mockup()]);
+      }) as never,
+    });
+    session.setModel('deepseek-flash');
+    session.setGalleryStyle('amberbrae');
+    await session.explore('a bakery');
+    assert.equal(looks[0]?.galleryStyle, 'amberbrae');
+    assert.equal(looks[0]?.style, null);
+
+    const done = session.submit('a bakery', 'succeed');
+    await build.reported;
+    assert.equal(draft.asked[0]?.galleryStyle, 'amberbrae');
+    draft.answer([mockup()]);
+    build.release();
+    await done;
+  });
+
+  it('builds a chosen mockup in the gallery style it was drawn in (D146)', async () => {
+    const built: unknown[] = [];
+    const session = createSession({
+      resolveProvider: (async (plan: GenerationPlan, ...rest: unknown[]) => {
+        built.push(rest[rest.length - 1]);
+        return new FakeModelProvider([plan]);
+      }) as never,
+      requestMockupsImpl: ((options: MockupRunOptions) =>
+        Promise.resolve(options.draft ? [] : [mockup()])) as never,
+    });
+    session.setGalleryStyle('amberbrae');
+    await session.explore('a bakery');
+    session.setGalleryStyle('vinepool');
+    session.chooseMockup(session.getState().mockups[0]!);
+    await settle();
+    assert.deepEqual(built, ['amberbrae']);
+    assert.equal(session.getState().galleryStyle, 'amberbrae');
+  });
+
+  it('keeps the preset a chosen mockup was drawn in', async () => {
+    const session = createSession({
+      requestMockupsImpl: ((options: MockupRunOptions) =>
+        Promise.resolve(options.draft ? [] : [mockup()])) as never,
+    });
+    await session.explore('a bakery', 'brutalism');
+    session.setGalleryStyle('amberbrae');
+    session.chooseMockup(session.getState().mockups[0]!);
+    await settle();
+    assert.equal(session.getState().galleryStyle, null);
+    assert.equal(session.getState().style, 'brutalism');
+  });
+
   it('asks for none on a local model, whose server answers one at a time (D124)', async () => {
     const draft = gatedDraft();
     const build = gatedBuild();

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
   DRAFT_MOCKUP_JSON_INSTRUCTION,
@@ -28,7 +29,25 @@ import {
   MAX_MEDIA_SECTION_CHARS,
   MAX_REFERENCE_CHARS,
 } from '@vibld/ai/limits';
+import {
+  parseStyleGallery,
+  styleGalleryGuidance,
+} from '@vibld/ai/style-gallery';
 import { DEFAULT_LIMITS } from '../worker/request-guard.ts';
+
+const STYLE_GALLERY_FILE = new URL(
+  '../../../packages/ai/data/style-gallery.json',
+  import.meta.url,
+);
+
+/** Each gallery style's guidance (D146), as a build in it is told. */
+function galleryGuidances(): string[] {
+  if (!existsSync(STYLE_GALLERY_FILE)) return [];
+  const catalog = parseStyleGallery(readFileSync(STYLE_GALLERY_FILE, 'utf8'));
+  return catalog.entries.map((entry) =>
+    styleGalleryGuidance(catalog.baseline_rules_markdown, entry),
+  );
+}
 
 /**
  * What a mockup run reserves against what it actually sends (internal PR 189 review).
@@ -213,12 +232,30 @@ describe('what a build reserves for its own prompt text', () => {
     'real estate legal crypto ai video hero cinematic editorial',
   ].join(' ');
 
+  // A gallery style's guidance (D146) stands in for a preset's and is
+  // longer: the gallery's baseline rules plus the style's build prompt.
+  const GALLERY = galleryGuidances();
+
   function largestFixedText(): number {
     const guidance = Math.max(
       ...[null, ...STYLE_PRESETS.map((preset) => preset.id)].map(
         (style) =>
           buildUserPrompt({ prompt: KITCHEN_SINK }, style).length -
           KITCHEN_SINK.length,
+      ),
+      ...GALLERY.map(
+        (gallery) =>
+          buildUserPrompt(
+            { prompt: KITCHEN_SINK },
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            gallery,
+          ).length - KITCHEN_SINK.length,
       ),
     );
     // Whichever system prompt is longest: the single-response one, or

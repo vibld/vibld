@@ -100,6 +100,13 @@ export interface WorkflowParams {
   style?: StylePresetId;
   /** Standing visual preferences, already sanitized against the catalogue. */
   styleDna?: StyleDna;
+  /**
+   * The gallery style's tokens file (D145), read by `handlePlan` from the
+   * style's entry, which every patch writes and imports.
+   */
+  styleTokens?: string;
+  /** What the model is told about the gallery style (D146). */
+  galleryGuidance?: string;
   knowledge?: string;
   /**
    * Already-fetched, already-truncated text from a reference URL (L52-style
@@ -1214,6 +1221,10 @@ export async function buildInSteps(
   const builder = new BoundedBuilder(deps.client, {
     model: params.model,
     ...(params.style ? { style: params.style } : {}),
+    ...(params.styleTokens ? { styleTokens: params.styleTokens } : {}),
+    ...(params.galleryGuidance
+      ? { galleryGuidance: params.galleryGuidance }
+      : {}),
     ...(params.styleDna && Object.keys(params.styleDna).length > 0
       ? { styleDna: params.styleDna }
       : {}),

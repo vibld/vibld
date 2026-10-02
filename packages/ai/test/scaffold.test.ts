@@ -6,6 +6,9 @@ import {
   PROJECT_SCRIPTS,
   SCAFFOLD_PATHS,
   SCAFFOLD_SECTION,
+  STYLE_TOKENS_IMPORT,
+  STYLE_TOKENS_MARKER,
+  STYLE_TOKENS_PATH,
   TSCONFIG,
   UTILS_TS,
   VITE_CONFIG,
@@ -20,6 +23,8 @@ import {
   scaffoldText,
   withImportedDependencies,
   withScaffold,
+  withStyleTokensImport,
+  withoutStyleTokensImport,
 } from '../src/scaffold.ts';
 import { OPTIONAL_PACKAGES, stackDependencies } from '../src/stack.ts';
 import {
@@ -527,5 +532,98 @@ describe('renaming a site on a follow-up', () => {
       true,
     ).find((file) => file.path === 'index.html')!;
     assert.equal(untouched.content, HAND_EDITED);
+  });
+});
+
+describe("a gallery style's tokens file (D145)", () => {
+  const TOKENS = `/* Amberbrae: ${STYLE_TOKENS_MARKER}. */\n@import '@fontsource/raleway/700.css';\n\n@theme {\n  --color-canvas: #f9f6f2;\n}\n`;
+  const input = { title: 'Site', description: 'A site.', styleTokens: TOKENS };
+  const byPath = (files: { path: string; content: string }[]) =>
+    new Map(files.map((file) => [file.path, file.content]));
+
+  it('imports it right after Tailwind, once', () => {
+    const css = withStyleTokensImport(STYLES.content);
+    assert.equal(
+      css,
+      `@import url('https://fonts.googleapis.com/css2?family=Fraunces');
+@import "tailwindcss";
+${STYLE_TOKENS_IMPORT}
+@import "tw-animate-css";
+`,
+    );
+    assert.equal(withStyleTokensImport(css), css);
+    assert.equal(withoutStyleTokensImport(css), STYLES.content);
+    assert.equal(
+      withStyleTokensImport('body {}\n'),
+      `${STYLE_TOKENS_IMPORT}\nbody {}\n`,
+    );
+  });
+
+  it('writes it into a new project over anything the model wrote there', () => {
+    const files = byPath(
+      withScaffold(
+        [APP, STYLES, { path: STYLE_TOKENS_PATH, content: 'mine' }],
+        input,
+        false,
+      ),
+    );
+    assert.equal(files.get(STYLE_TOKENS_PATH), TOKENS);
+    assert.match(
+      files.get('src/styles.css')!,
+      /tailwindcss";\n@import "\.\/vibld-gallery-style\.css";/,
+    );
+    const pkg = parsed(files.get('package.json')!);
+    assert.equal(pkg.dependencies!['@fontsource/raleway'], 'latest');
+  });
+
+  it('rewrites it on every follow-up that has a style, and removes it without one', () => {
+    const base = withScaffold([APP, STYLES], input, false);
+    const changed = `${TOKENS}/* another */\n`;
+    const next = byPath(
+      withScaffold(base, { ...input, styleTokens: changed }, true),
+    );
+    assert.equal(next.get(STYLE_TOKENS_PATH), changed);
+    assert.equal(
+      next.get('src/styles.css')!.split('vibld-gallery-style.css').length - 1,
+      1,
+    );
+    const without = byPath(
+      withScaffold(base, { title: 'Site', description: 'A site.' }, true),
+    );
+    assert.equal(without.has(STYLE_TOKENS_PATH), false);
+    assert.doesNotMatch(
+      without.get('src/styles.css')!,
+      /vibld-gallery-style\.css/,
+    );
+    assert.equal(without.get('src/styles.css'), STYLES.content);
+  });
+
+  it("keeps a project's own file at that path, and its import", () => {
+    const own = { path: STYLE_TOKENS_PATH, content: '@theme { --x: 1; }\n' };
+    const styles = {
+      path: 'src/styles.css',
+      content: withStyleTokensImport(STYLES.content),
+    };
+    const files = byPath(
+      withScaffold(
+        [APP, styles, own],
+        { title: 'Site', description: 'A site.' },
+        true,
+      ),
+    );
+    assert.equal(files.get(STYLE_TOKENS_PATH), own.content);
+    assert.equal(files.get('src/styles.css'), styles.content);
+  });
+
+  it('is never written into a project without a style', () => {
+    const files = byPath(
+      withScaffold(
+        [APP, STYLES, { path: STYLE_TOKENS_PATH, content: 'mine' }],
+        { title: 'Site', description: 'A site.' },
+        false,
+      ),
+    );
+    assert.equal(files.has(STYLE_TOKENS_PATH), false);
+    assert.equal(files.get('src/styles.css'), STYLES.content);
   });
 });

@@ -241,6 +241,52 @@ a contrast guard on color edits.
   name, description and prompt is newly written, and that "This folder makes
   no licensing decisions." Until Chris decides, `scripts/public-export.mjs`
   leaves the data file out, and the public copy runs with the gallery empty.
+- **D144. How the builder reaches the gallery, taken on Chris's behalf.**
+  A chosen gallery style is a project setting, stored by `id` in a new
+  `projects.style_gallery` column (migration 0045) and carried like the
+  style preset: choosing one clears the preset and choosing a preset clears
+  it, so a build never gets two styles. The production build writes the
+  gallery beside the builder's assets as files (`_style-gallery/cards.json`,
+  `baseline.json`, `styles/<id>.json`; `apps/web/scripts/style-gallery-assets.ts`)
+  rather than into any bundle. The Worker runs first for `/_style-gallery/*`
+  and answers 404, so the files are reached only through
+  `/api/style-gallery`, which the access gate guards like the rest of the
+  builder. The picker loads the cards (about 1.4 MB) only when its panel is
+  first opened.
+- **D145. A gallery style's tokens are a file Vibld writes, Chris's choice
+  (2026-10-02).** A build in a gallery style sends the style's id; the
+  Worker reads its entry and writes `src/vibld-gallery-style.css` into every patch
+  (`styleTokensFile`, `withScaffold`), and src/styles.css imports it right
+  after Tailwind. The file holds exactly the entry's `design_tokens` in
+  Tailwind v4's `@theme` namespaces: each color under its own token
+  (`--color-canvas`, so `bg-canvas`), each type step as `--text-N` with its
+  line height, tracking and weight (`text-62`), each radius as
+  `--radius-<element>` (`rounded-cards`), each shadow as `--shadow-N`, and
+  the faces as `--font-display` and `--font-body`, with body text at 16px.
+  Fonts are self-hosted from Fontsource (`@fontsource/<family>/<weight>.css`
+  for each weight the type scale uses), which the dependency scan declares
+  in package.json. It is a templated path, so the model never writes it, and
+  it is rewritten on every build that has a style. A build without one
+  (the style cleared, or a preset chosen) removes the file and its import,
+  so the old style stops setting the theme. It removes only a file that
+  says Vibld wrote it, so a project's own file at that path is kept.
+- **D146. What a build in a gallery style is told, taken on Chris's behalf.**
+  As Chris asked, the gallery's `baseline_rules_markdown`, then the style's
+  `build_prompt`, both whole, after a short note naming the tokens file and
+  the utilities it declares (`styleGalleryGuidance`). It goes last in every
+  call's request context and replaces the product-type palette, the
+  standing style preferences and any style preset, so the model is never
+  given two design systems. Two lines are vibld's own: decorative colors
+  never sit behind text and body text stays at 16px or more (Chris's
+  rules), and where the rules or prompt name a stack, package or service
+  vibld's STACK does not have (the baseline mentions Supabase and zod),
+  STACK wins. The request itself outranks the style, as it outranks a
+  preset. The longest guidance (orchardlough) is about 24,200 characters
+  against a preset's 12,400, so a build's reservation for fixed prompt text
+  rises from 36,000 to 48,000 characters, and the smallest build a Free
+  account can start on the default model needs $0.87 set aside, from
+  $0.86. Mockups and the quick draft are drawn in the gallery style too
+  (`styleGalleryDirection`, within the preset directions' bound).
 
 ### Resolved 2026-09-30 (afternoon)
 

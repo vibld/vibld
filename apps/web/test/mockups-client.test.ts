@@ -83,6 +83,22 @@ describe('requesting mockups', () => {
     assert.deepEqual(body, { prompt: 'a bakery', style: 'brutalism' });
   });
 
+  it('sends a gallery style (D146)', async () => {
+    const { fetchImpl, sent } = serving([
+      event('mockups', { mockups: [mockup('A'), mockup('B')] }),
+    ]);
+    await requestMockups({
+      prompt: 'a bakery',
+      galleryStyle: 'amberbrae',
+      fetchImpl,
+      getToken: token,
+    });
+    assert.deepEqual(JSON.parse(String(sent[0]?.body)), {
+      prompt: 'a bakery',
+      galleryStyle: 'amberbrae',
+    });
+  });
+
   it('asks for a draft only when told to', async () => {
     // The draft a build shows while it runs (docs/decisions.md,
     // 2026-09-28): one direction, through the same route.

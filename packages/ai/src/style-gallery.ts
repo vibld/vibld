@@ -15,6 +15,7 @@
  * it. `name` is display text only and may change between imports.
  */
 import { contrastRatio } from './contrast.ts';
+import { FONTSOURCE_WEIGHTS } from './fontsource-weights.ts';
 
 export const STYLE_GALLERY_GROUPS = [
   'saas',
@@ -547,4 +548,347 @@ export function styleCardOf(entry: StyleGalleryEntry): StyleCard {
       body: entry.design_tokens.fonts.body,
     },
   };
+}
+
+/** A stored id: kebab-case, at most 64 characters. */
+export function isStyleGalleryId(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 64 && KEBAB.test(value);
+}
+
+/** What a picker narrows the gallery by. An empty value is "any". */
+export interface StyleCardFilter {
+  theme?: StyleGalleryTheme | '';
+  category?: StyleGalleryCategory | '';
+  group?: StyleGalleryGroup | '';
+  /** Words, each of which must appear in the name, kind, tags or signature. */
+  query?: string;
+}
+
+function searchText(card: StyleCard): string {
+  return [card.name, card.kind, ...card.style_tags, ...card.signature]
+    .join(' ')
+    .toLowerCase();
+}
+
+/**
+ * The cards that pass every filter, in their given order. The query is
+ * split on spaces and every word must match somewhere, so "dark serif"
+ * finds a dark style with a serif in any of its searched fields.
+ */
+export function filterStyleCards(
+  cards: readonly StyleCard[],
+  filter: StyleCardFilter,
+): StyleCard[] {
+  const words = (filter.query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+  return cards.filter(
+    (card) =>
+      (!filter.theme || card.theme === filter.theme) &&
+      (!filter.category || card.category === filter.category) &&
+      (!filter.group || card.group === filter.group) &&
+      (words.length === 0 ||
+        words.every((word) => searchText(card).includes(word))),
+  );
+}
+
+/** The industries as the source's README names them. */
+export const STYLE_GROUP_LABELS: Record<StyleGalleryGroup, string> = {
+  saas: 'SaaS',
+  'agency-portfolio': 'Agency and portfolio',
+  ecommerce: 'E-commerce',
+  general: 'General brand',
+  ai: 'AI',
+  'design-tools': 'Design tools',
+  devtools: 'Developer tools',
+  fintech: 'Fintech',
+  productivity: 'Productivity',
+  'media-publishing': 'Media and publishing',
+  web3: 'Web3',
+};
+
+export const STYLE_CATEGORY_LABELS: Record<StyleGalleryCategory, string> = {
+  'monochrome-minimal': 'Monochrome minimal',
+  'editorial-serif': 'Editorial serif',
+  'dark-cinematic': 'Dark cinematic',
+  'dark-technical': 'Dark technical',
+  'warm-minimal': 'Warm minimal',
+  'soft-gradient': 'Soft gradient',
+  'clean-corporate': 'Clean corporate',
+  'bold-graphic': 'Bold graphic',
+  'vivid-playful': 'Vivid playful',
+};
+
+/*
+ * Applying a style (D145): its design tokens as the CSS a generated site
+ * imports, every value the catalog's own. Colors, type steps, radii and
+ * shadows go into Tailwind v4's `@theme` under its own namespaces, which is
+ * what makes `bg-canvas`, `text-62`, `rounded-cards` and `shadow-1` mean
+ * this style's values. Nothing is derived or rounded.
+ */
+
+/** A radius name as a CSS identifier: "hero panels" is `hero-panels`. */
+function cssName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+/** A Google font's self-hosted package: "Roboto Mono" is `@fontsource/roboto-mono`. */
+export function fontsourcePackage(family: string): string {
+  return `@fontsource/${cssName(family)}`;
+}
+
+/** Every family the gallery's styles name, in first-use order. */
+export function styleGalleryFamilies(
+  entries: readonly StyleGalleryEntry[],
+): string[] {
+  const families = new Set<string>();
+  for (const { design_tokens: tokens } of entries) {
+    families.add(tokens.fonts.display);
+    families.add(tokens.fonts.body);
+    if (tokens.fonts.mono) families.add(tokens.fonts.mono);
+    for (const step of tokens.type_scale) families.add(step.font);
+  }
+  return [...families];
+}
+
+/**
+ * The weight Fontsource ships closest to the one asked for: a family has
+ * no file for a weight it does not publish (`FONTSOURCE_WEIGHTS`). A tie
+ * goes the way a browser would synthesize it, heavier above 500 and
+ * lighter below.
+ */
+export function fontsourceWeight(family: string, weight: number): number {
+  const available = FONTSOURCE_WEIGHTS[family];
+  if (!available || available.length === 0 || available.includes(weight)) {
+    return weight;
+  }
+  return available.reduce((best, candidate) => {
+    const d = Math.abs(candidate - weight) - Math.abs(best - weight);
+    if (d !== 0) return d < 0 ? candidate : best;
+    return weight > 500 === candidate > best ? candidate : best;
+  });
+}
+
+/**
+ * Each family the style names or a type step sets, with the weights its
+ * type scale sets in it, each one a weight Fontsource ships (`fontsourceWeight`). A family no
+ * step uses (a body face the scale leaves out) gets the regular weight.
+ */
+export function styleGalleryFontWeights(
+  tokens: StyleDesignTokens,
+): { family: string; weights: number[] }[] {
+  // The declared faces, then any a type step sets that none of them is:
+  // some styles set a label or a numeral step in a third family.
+  const families = [
+    tokens.fonts.display,
+    tokens.fonts.body,
+    ...(tokens.fonts.mono ? [tokens.fonts.mono] : []),
+    ...tokens.type_scale.map((step) => step.font),
+  ].filter((family, i, all) => all.indexOf(family) === i);
+  return families.map((family) => {
+    const asked = tokens.type_scale
+      .filter((step) => step.font === family)
+      .map((step) => step.weight);
+    const weights = [
+      ...new Set(
+        (asked.length > 0 ? asked : [400]).map((weight) =>
+          fontsourceWeight(family, weight),
+        ),
+      ),
+    ].sort((a, b) => a - b);
+    return { family, weights };
+  });
+}
+
+/** The stylesheet imports that self-host the fonts, one per weight. */
+export function styleGalleryFontImports(tokens: StyleDesignTokens): string[] {
+  return styleGalleryFontWeights(tokens).flatMap(({ family, weights }) =>
+    weights.map((weight) => `${fontsourcePackage(family)}/${weight}.css`),
+  );
+}
+
+const quoted = (family: string) => `'${family.replace(/'/g, '')}'`;
+
+/**
+ * The font utility a type step's family is set with: the declared faces
+ * by role, and any other family a step names by its own name
+ * (`font-archivo`), which `styleGalleryCss` declares.
+ */
+export function styleGalleryFontUtility(
+  tokens: StyleDesignTokens,
+  family: string,
+): string {
+  if (family === tokens.fonts.display) return 'font-display';
+  if (family === tokens.fonts.body) return 'font-body';
+  if (family === tokens.fonts.mono) return 'font-mono';
+  return `font-${cssName(family)}`;
+}
+
+/** The `@theme` block for a style's tokens, and the base it sets. */
+export function styleGalleryCss(tokens: StyleDesignTokens): string {
+  const theme: string[] = [];
+  for (const color of tokens.colors)
+    theme.push(`${color.token}: ${color.hex};`);
+  theme.push(
+    `--font-display: ${quoted(tokens.fonts.display)};`,
+    `--font-body: ${quoted(tokens.fonts.body)};`,
+  );
+  if (tokens.fonts.mono)
+    theme.push(`--font-mono: ${quoted(tokens.fonts.mono)};`);
+  // A family only a type step sets gets a utility of its own.
+  for (const family of new Set(tokens.type_scale.map((step) => step.font))) {
+    const utility = styleGalleryFontUtility(tokens, family);
+    if (!['font-display', 'font-body', 'font-mono'].includes(utility)) {
+      theme.push(`--${utility}: ${quoted(family)};`);
+    }
+  }
+  for (const step of tokens.type_scale) {
+    theme.push(
+      `${step.token}: ${step.size};`,
+      `${step.token}--line-height: ${step.line_height};`,
+      `${step.token}--letter-spacing: ${step.tracking};`,
+      `${step.token}--font-weight: ${step.weight};`,
+    );
+  }
+  for (const [element, value] of Object.entries(tokens.radius)) {
+    theme.push(`--radius-${cssName(element)}: ${value};`);
+  }
+  (tokens.shadows ?? []).forEach((shadow, i) => {
+    theme.push(`--shadow-${i + 1}: ${shadow};`);
+  });
+  return [
+    '@theme {',
+    ...theme.map((line) => `  ${line}`),
+    '}',
+    '',
+    // Chris's rule: body text is 16px, in the style's body face.
+    '@layer base {',
+    '  body { font-family: var(--font-body); font-size: 16px; }',
+    '}',
+  ].join('\n');
+}
+
+/**
+ * Where a gallery style's tokens file goes (D145). Written from the
+ * catalog's values whenever a build has a gallery style, never by the
+ * model, so the values cannot drift (`withScaffold`).
+ */
+export const STYLE_TOKENS_PATH = 'src/vibld-gallery-style.css';
+
+/**
+ * What the tokens file says on its first line, which is how a build tells
+ * the file Vibld wrote from one a project made itself.
+ */
+export const STYLE_TOKENS_MARKER = 'written by Vibld from the style gallery';
+
+/**
+ * The whole tokens file a build writes for a gallery style (D145,
+ * `STYLE_TOKENS_PATH`): its self-hosted fonts, then its theme.
+ */
+export function styleTokensFile(entry: StyleGalleryEntry): string {
+  const tokens = entry.design_tokens;
+  return [
+    `/* ${entry.name}: ${STYLE_TOKENS_MARKER}. Edits here are replaced on the next build. */`,
+    ...styleGalleryFontImports(tokens).map((sheet) => `@import '${sheet}';`),
+    '',
+    styleGalleryCss(tokens),
+    '',
+  ].join('\n');
+}
+
+/**
+ * The direction a mockup run is given for a gallery style (D146): the
+ * same style a build in it gets, said in the few lines a sketch has room
+ * for (`MAX_MOCKUP_DIRECTION_CHARS`, which `mockup-schema.test.ts` holds
+ * every style to). Its colors with their roles, its faces and type steps,
+ * its corners and what makes it recognizable.
+ */
+export function styleGalleryDirection(entry: StyleGalleryEntry): string {
+  const tokens = entry.design_tokens;
+  const decorative = tokens.colors
+    .filter((color) => isDecorativeRole(color.role))
+    .map((color) => color.hex);
+  const faces = [
+    `display ${tokens.fonts.display}`,
+    `body ${tokens.fonts.body}`,
+    ...(tokens.fonts.mono ? [`mono ${tokens.fonts.mono}`] : []),
+  ];
+  const steps = tokens.type_scale.map(
+    (step) => `${step.size} ${step.font} ${step.weight}`,
+  );
+  const corners = Object.entries(tokens.radius).map(
+    ([element, value]) => `${element} ${value}`,
+  );
+  return [
+    `Draw it in one style from the style gallery, ${entry.name}: ${entry.kind}. Where this conflicts with an instruction in the request above, follow the request.`,
+    `Colors, only these: ${tokens.colors.map((color) => `${color.role} ${color.hex}`).join('; ')}.`,
+    ...(decorative.length > 0
+      ? [`Decorative, never behind text: ${decorative.join(', ')}.`]
+      : []),
+    `Fonts, from Google Fonts: ${faces.join(', ')}. Type steps: ${steps.join('; ')}. Body text 16px; nothing under 12px.`,
+    `Corners: ${corners.join('; ')}.${(tokens.shadows ?? []).length === 0 ? ' No shadows.' : ''}`,
+    `What makes it this style: ${entry.signature.join('; ')}.`,
+  ].join('\n');
+}
+
+/**
+ * What a build in a gallery style is told (D146): the tokens file it has,
+ * then the gallery's baseline rules, then the style's own build prompt, as
+ * Chris asked. The style replaces the color, style preset and standing
+ * preference guidance a build would otherwise get (`buildUserPrompt`).
+ */
+export function styleGalleryGuidance(
+  baseline: string,
+  entry: StyleGalleryEntry,
+): string {
+  const tokens = entry.design_tokens;
+  const name = (token: string, prefix: string) => token.slice(prefix.length);
+  const colors = tokens.colors.map((color) => name(color.token, '--color-'));
+  const decorative = tokens.colors
+    .filter((color) => isDecorativeRole(color.role))
+    .map((color) => name(color.token, '--color-'));
+  const steps = tokens.type_scale.map(
+    (step) =>
+      `${name(step.token, '--')} in ${styleGalleryFontUtility(tokens, step.font)}`,
+  );
+  const fonts = [
+    ...new Set([
+      'font-display',
+      'font-body',
+      ...(tokens.fonts.mono ? ['font-mono'] : []),
+      ...tokens.type_scale.map((step) =>
+        styleGalleryFontUtility(tokens, step.font),
+      ),
+    ]),
+  ];
+  const radii = Object.keys(tokens.radius).map(
+    (element) => `rounded-${cssName(element)}`,
+  );
+  const shadows = (tokens.shadows ?? []).map((_, i) => `shadow-${i + 1}`);
+  const lines = [
+    `This build is in one complete style from the style gallery: ${entry.name}.`,
+    `${STYLE_TOKENS_PATH} holds its tokens and fonts and is written for you; src/styles.css imports it. Do not write it and do not redeclare its tokens. Use them through utilities:`,
+    `- colors (bg-, text-, border-): ${colors.join(', ')}`,
+    `- type steps, each with its own line height, tracking and weight, and set in the face beside it: ${steps.join(', ')}`,
+    `- fonts: ${fonts.join(', ')}`,
+    `- corners: ${radii.join(', ')}`,
+    ...(shadows.length > 0 ? [`- shadows: ${shadows.join(', ')}`] : []),
+    ...(decorative.length > 0
+      ? [
+          `Decorative colors never sit behind text, at any size: ${decorative.join(', ')}.`,
+        ]
+      : []),
+    'Body text is 16px or larger, and no text is below 12px.',
+    'The rules and the build prompt below were written for any coding agent. Where they name a stack, package, backend or service that STACK above does not have, keep to STACK and build the page without it. The request itself outranks the style.',
+  ];
+  return `${lines.join('\n')}
+
+--- BEGIN STYLE GALLERY RULES ---
+${baseline.trim()}
+--- END STYLE GALLERY RULES ---
+
+--- BEGIN STYLE BUILD PROMPT ---
+${entry.build_prompt.trim()}
+--- END STYLE BUILD PROMPT ---`;
 }

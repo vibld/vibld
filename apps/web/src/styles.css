@@ -2980,3 +2980,85 @@ a.projectlist__name:hover {
   align-items: center;
   gap: 0.75rem;
 }
+
+/* The style gallery (D144): filters in a row, then a grid of cards, each
+   with its palette and its faces. */
+.gallery {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.gallery__filters {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+
+.gallery__filters .option-panel__label {
+  margin-bottom: 0.25rem;
+}
+
+.gallery__grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 28rem;
+  overflow-y: auto;
+}
+
+.gallery__card {
+  display: grid;
+  gap: 0.3rem;
+  width: 100%;
+  height: 100%;
+  padding: 0.6rem;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.gallery__card:hover,
+.gallery__card:focus-visible {
+  border-color: var(--edge-strong);
+}
+
+.gallery__card--on {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 1px var(--brand);
+}
+
+.gallery__swatches {
+  display: flex;
+  height: 1.5rem;
+  border-radius: calc(var(--radius) / 2);
+  overflow: hidden;
+  border: 1px solid var(--edge);
+}
+
+.gallery__swatch {
+  flex: 1;
+}
+
+/* Decorative colors never carry text, so they are drawn narrower. */
+.gallery__swatch--decorative {
+  flex: 0.5;
+}
+
+.gallery__name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.gallery__kind,
+.gallery__fonts {
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--text-muted);
+}

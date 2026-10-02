@@ -25,6 +25,11 @@ export interface ProjectSettings {
   /** Null for "never set", which the builder fills from this browser. */
   knowledge: string | null;
   styleDna: StyleDna | null;
+  /**
+   * The style gallery style, by id (D144). Absent from a Worker older than
+   * the gallery, which reads as none.
+   */
+  galleryStyle?: string | null;
 }
 
 export interface ProjectSummary {

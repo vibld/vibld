@@ -376,6 +376,7 @@ export function useProjects(
     state.model,
     state.knowledge,
     state.styleDna,
+    state.galleryStyle,
   ]);
 
   // A page going away sends what is queued. The request is made with

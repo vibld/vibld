@@ -1,6 +1,7 @@
 import type { ProjectFile } from '@vibld/core';
 
 import { backdropFiles, isBackdropPath } from './backdrops.ts';
+import { STYLE_TOKENS_MARKER, STYLE_TOKENS_PATH } from './style-gallery.ts';
 import {
   OPTIONAL_PACKAGES,
   STACK_PACKAGES,
@@ -50,12 +51,17 @@ export function isScaffoldPath(path: string): path is ScaffoldPath {
   return SCAFFOLD_SET.has(path);
 }
 
+export { STYLE_TOKENS_MARKER, STYLE_TOKENS_PATH };
+
 /**
  * Whether Vibld writes the file at `path` rather than the model: a scaffold
- * file, or an animated background (`backdrops.ts`).
+ * file, an animated background (`backdrops.ts`), or a gallery style's
+ * tokens.
  */
 export function isTemplatedPath(path: string): boolean {
-  return isScaffoldPath(path) || isBackdropPath(path);
+  return (
+    isScaffoldPath(path) || isBackdropPath(path) || path === STYLE_TOKENS_PATH
+  );
 }
 
 /** A package beyond the stack, as an outline declares it. */
@@ -83,6 +89,12 @@ export interface ScaffoldInput {
    * index.html. Absent on a repair, which never renames anything.
    */
   retitle?: { title?: string; description?: string };
+  /**
+   * The gallery style's tokens file (`styleTokensFile`, D145), written to
+   * `STYLE_TOKENS_PATH` on every build that has one. Absent removes the
+   * file and its import: the project no longer has a gallery style.
+   */
+  styleTokens?: string;
 }
 
 /**
@@ -770,6 +782,80 @@ export function withImportedDependencies(
   return changed ? `${JSON.stringify(pkg, null, 2)}\n` : content;
 }
 
+/** The import that brings a gallery style's tokens into the stylesheet. */
+export const STYLE_TOKENS_IMPORT = `@import "./${STYLE_TOKENS_PATH.replace('src/', '')}";`;
+
+const STYLE_TOKENS_FILE = STYLE_TOKENS_PATH.replace('src/', '').replace(
+  /[.]/g,
+  '\\.',
+);
+
+/**
+ * src/styles.css with the tokens file imported, after Tailwind's own import
+ * so its `@theme` is read by the same compile; as it was if it imports it
+ * already.
+ */
+export function withStyleTokensImport(css: string): string {
+  if (
+    new RegExp(`@import\\s+(?:url\\()?['"]\\./${STYLE_TOKENS_FILE}['"]`).test(
+      css,
+    )
+  ) {
+    return css;
+  }
+  const tailwind = /^[ \t]*@import\s+['"]tailwindcss['"][^;\n]*;[ \t]*$/m.exec(
+    css,
+  );
+  if (!tailwind) return `${STYLE_TOKENS_IMPORT}\n${css}`;
+  const end = tailwind.index + tailwind[0].length;
+  return `${css.slice(0, end)}\n${STYLE_TOKENS_IMPORT}${css.slice(end)}`;
+}
+
+const STYLE_TOKENS_IMPORT_LINE = new RegExp(
+  `^[ \\t]*@import\\s+(?:url\\()?['"]\\./${STYLE_TOKENS_FILE}['"]\\)?[^;\\n]*;[ \\t]*\\n?`,
+  'gm',
+);
+
+/** src/styles.css without the tokens file's import. */
+export function withoutStyleTokensImport(css: string): string {
+  return css.replace(STYLE_TOKENS_IMPORT_LINE, '');
+}
+
+/**
+ * The tokens file in place and imported, where the build has a gallery
+ * style; gone, with its import, where it has none, so a style that was
+ * cleared or replaced by a preset stops setting the theme.
+ */
+function withStyleTokens(
+  files: readonly ProjectFile[],
+  styleTokens: string | undefined,
+): ProjectFile[] {
+  if (styleTokens === undefined) {
+    // Only the file Vibld wrote: one a project made at this path is its own.
+    const ours = files.find((file) => file.path === STYLE_TOKENS_PATH);
+    if (!ours || !ours.content.includes(STYLE_TOKENS_MARKER)) {
+      return [...files];
+    }
+    return files
+      .filter((file) => file.path !== STYLE_TOKENS_PATH)
+      .map((file) =>
+        file.path === 'src/styles.css'
+          ? { path: file.path, content: withoutStyleTokensImport(file.content) }
+          : file,
+      );
+  }
+  return [
+    ...files
+      .filter((file) => file.path !== STYLE_TOKENS_PATH)
+      .map((file) =>
+        file.path === 'src/styles.css'
+          ? { path: file.path, content: withStyleTokensImport(file.content) }
+          : file,
+      ),
+    { path: STYLE_TOKENS_PATH, content: styleTokens },
+  ];
+}
+
 /**
  * `files` with Vibld's own files in place.
  *
@@ -781,14 +867,28 @@ export function withImportedDependencies(
  * or description when the follow-up gave one (`retitle`,
  * `retitledIndexHtml`). A templated file the project lacks (one generated
  * before D71 may) is written, and so is a backdrop a file now imports.
+ * A build with a gallery style writes its tokens file every time, and
+ * src/styles.css imports it (D145).
  */
 export function withScaffold(
   files: readonly ProjectFile[],
   input: ScaffoldInput,
   followUp: boolean,
 ): ProjectFile[] {
+  return scaffolded(withStyleTokens(files, input.styleTokens), input, followUp);
+}
+
+function scaffolded(
+  files: readonly ProjectFile[],
+  input: ScaffoldInput,
+  followUp: boolean,
+): ProjectFile[] {
   if (!followUp) {
-    const own = files.filter((file) => !isTemplatedPath(file.path));
+    const own = files.filter(
+      (file) =>
+        !isTemplatedPath(file.path) ||
+        (file.path === STYLE_TOKENS_PATH && input.styleTokens !== undefined),
+    );
     const withBackdrops = [...own, ...backdropFiles(own)];
     return [...withBackdrops, ...scaffoldFiles(input, withBackdrops)];
   }
