@@ -222,7 +222,7 @@ Ask for an aurora, a starfield, a smoky gradient or any "animated background", a
 - Repository search over an existing codebase (internal issue 12).
 - A bakeoff result strong enough to recommend one model over another. The harness exists and has run; the evidence does not settle it yet.
 - Sandbox output in the builder's own panes. The console shows generation events, and Problems shows the design checks and the verification build, not the install, build and type errors from a live preview.
-- A self-hosting path validated outside the project. A workflow deploys a separately named copy from the docs and checks it comes up and refuses a signed-out caller, but nobody outside the project has deployed their own copy yet, and sign-in and generation on a copy are not checked.
+- A self-hosting path validated outside the project. A workflow deploys a separately named copy from the docs, checks it refuses a signed-out caller, then signs in with the owner's password and builds one site on it with a real model, on Cloudflare and under Docker. Nobody outside the project has deployed their own copy yet.
 - The builder's interface against a real model from `pnpm dev`, which runs the fake provider. Its model path needs sign-in, D1, R2 and a Workflow, which a Cloudflare deployment has and so does [the Docker setup](#run-it-with-docker), with a key or [a local model](#local-models).
 
 **What to be careful of.** It is a beta, not a place for work you cannot afford to lose. Very little of it has been used by anyone other than its author, which is a different kind of risk from a missing feature and not one a feature list shows.
@@ -316,7 +316,7 @@ flowchart LR
 
 ## Running it yourself
 
-Self-hosting is possible, and still needs validation outside the project: a workflow deploys a separately named copy from the docs and checks it comes up signed out, but nobody else has deployed their own copy yet. A deployment needs:
+Self-hosting is possible, and still needs validation outside the project: a workflow deploys a separately named copy from the docs, signs in to it and builds one site on it, on Cloudflare and under Docker, but nobody else has deployed their own copy yet. A deployment needs:
 
 - **Cloudflare**, for three Workers (the builder, the sandbox and the publish service) plus D1, R2, a Durable Object and a Workflow behind the builder. Publishing, and live previews in a sandbox, run generated code in [Containers](https://developers.cloudflare.com/containers/), which need the Workers Paid plan, and building the sandbox image needs Docker. Without Containers, the Preview pane bundles the project in the viewer's browser instead (esbuild-wasm, packages from esm.sh, Tailwind compiled in the browser).
 - **A model provider API key.** Without one, generation refuses rather than degrading. The builder's configuration ships `VIBLD_MODEL` as `gpt-6-sol`: set it to a model your key serves, or a copy with only another provider's key falls back to whichever of that provider's models the catalog lists first.

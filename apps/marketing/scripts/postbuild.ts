@@ -285,10 +285,10 @@ exportable.
   if the build fails. A weekly workflow proves this from a clean clone.
 - \`pnpm --filter @vibld/web dev\` runs the builder's interface locally with a
   deterministic fake provider. No model is called.
-- Self-hosting the whole service on Cloudflare is documented, and a workflow
-  checks that a separately named copy deploys from the docs and refuses a
-  signed-out caller. Nobody outside the project has deployed their own copy
-  yet, and sign-in and generation on a copy are not checked. See
+- Self-hosting the whole service on Cloudflare or under Docker is documented,
+  and a workflow checks that a separately named copy deploys from the docs,
+  that its owner can sign in, and that it builds one site with a real model.
+  Nobody outside the project has deployed their own copy yet. See
   ${absolute('/docs/self-hosting')}.
 
 ## Questions

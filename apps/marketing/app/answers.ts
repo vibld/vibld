@@ -63,7 +63,7 @@ export function answers(plans: Plans): Answer[] {
     {
       question: `Can I run ${SITE.name} myself?`,
       answer:
-        'Yes. The source is public, and self-hosted, vibld is three Cloudflare Workers on your own Cloudflare account with your own model keys; live previews and publishing need the Workers Paid plan. The project checks that a separately named copy deploys from the docs and refuses a signed-out caller, but nobody outside the project has deployed their own copy yet, and sign-in and generation on a copy are not checked. The self-hosting guide lists what it involves and what differs from the hosted service.',
+        'Yes. The source is public, and self-hosted, vibld is three Cloudflare Workers on your own Cloudflare account with your own model keys; live previews and publishing need the Workers Paid plan. The project checks that a separately named copy deploys from the docs, that its owner can sign in, and that it builds one site with a real model, on Cloudflare and under Docker, but nobody outside the project has deployed their own copy yet. The self-hosting guide lists what it involves and what differs from the hosted service.',
     },
     {
       question: `Can I use ${SITE.name} with my own model key, without deploying anything?`,

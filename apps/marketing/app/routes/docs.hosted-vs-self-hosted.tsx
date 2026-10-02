@@ -2,7 +2,7 @@ import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, SITE, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'hosted-vs-self-hosted')!;
-const CHECKED = '2026-09-30';
+const CHECKED = '2026-10-02';
 
 export function meta() {
   return metaFor('/docs/hosted-vs-self-hosted');
@@ -20,9 +20,10 @@ export default function HostedVsSelfHosted() {
         is the source in the repository.
       </p>
       <p>
-        The project checks that a copy deploys from the docs and refuses a
-        signed-out caller, but nobody outside the project has deployed their own
-        copy yet, and sign-in and generation on a copy are not checked.
+        The project checks that a copy deploys from the docs, that its owner can
+        sign in, and that it builds one site with a real model, on Cloudflare
+        and under Docker. Nobody outside the project has deployed their own copy
+        yet.
       </p>
 
       <h2>The same either way</h2>
@@ -57,11 +58,24 @@ export default function HostedVsSelfHosted() {
         <code>pnpm --filter @vibld/web dev</code> runs the builder’s interface
         locally with no sign-in and a deterministic fake provider, so you can go
         through the whole flow at no cost, but no model is called. Its real
-        model path needs sign-in, D1, R2 and a Workflow, which only a Cloudflare
-        deployment has.
+        model path needs sign-in, D1, R2 and a Workflow, which a Cloudflare
+        deployment has and so does Docker.
       </p>
       <p>
-        The local way to a real build is the command line:{' '}
+        <code>docker compose up</code> runs the whole builder on one machine
+        with no Cloudflare account: sign in with an owner password, build with
+        your own key or a local model, and preview each project in a container
+        on your Docker. The{' '}
+        <a
+          href={`${SITE.repoUrl}#run-it-with-docker`}
+          rel="noopener noreferrer"
+        >
+          repository’s Docker section
+        </a>{' '}
+        has the steps.
+      </p>
+      <p>
+        Without the builder, the command line builds too:{' '}
         <code>{'pnpm generate "your prompt" --out ./site --build'}</code> with
         one provider key set. It runs the same bounded build as the hosted
         builder, writes the project, and with <code>--build</code> installs and
