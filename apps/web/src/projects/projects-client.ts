@@ -1,5 +1,6 @@
 import type { ProjectSnapshot, TranscriptTurn } from '@vibld/core';
 import type { StyleDna } from '@vibld/ai/style-dna';
+import type { StyleColorEdits } from '@vibld/ai/style-gallery';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import { getClerkToken } from '../auth/clerk-token.ts';
 import type { Tier } from '../billing/billing-client.ts';
@@ -30,6 +31,8 @@ export interface ProjectSettings {
    * the gallery, which reads as none.
    */
   galleryStyle?: string | null;
+  /** Its color edits by token (D147); absent from an older Worker. */
+  galleryColors?: StyleColorEdits | null;
 }
 
 export interface ProjectSummary {

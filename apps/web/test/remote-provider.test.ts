@@ -106,9 +106,12 @@ describe('RemoteModelProvider', () => {
         fetchImpl,
         getToken: async () => null,
         galleryStyle,
+        galleryColors: { '--color-text': '#000000' },
       }).generate({ prompt: 'a landing page' });
     }
     assert.equal(bodies[0]!.galleryStyle, 'amberbrae');
+    assert.deepEqual(bodies[0]!.galleryColors, { '--color-text': '#000000' });
+    assert.equal('galleryColors' in bodies[1]!, false);
     assert.equal('galleryStyle' in bodies[1]!, false);
   });
 

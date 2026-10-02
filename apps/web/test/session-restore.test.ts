@@ -214,6 +214,7 @@ describe('what a project remembers about how it is built', () => {
       knowledge: 'Keep it warm.',
       styleDna: { corners: 'sharp' },
       galleryStyle: null,
+      galleryColors: null,
     });
   });
 
@@ -227,6 +228,23 @@ describe('what a project remembers about how it is built', () => {
     session.setStyle('brutalism');
     assert.equal(session.getState().galleryStyle, null);
     assert.equal(session.settings().style, 'brutalism');
+  });
+
+  it('keeps color edits only for the gallery style they were made to', async () => {
+    const session = createSession({ projectIds: [], bases: [] });
+    await session.restore(project());
+    session.setGalleryColors({ '--color-text': '#000000' });
+    assert.equal(session.getState().galleryColors, null, 'no style, no edits');
+    session.setGalleryStyle('vinepool');
+    session.setGalleryColors({ '--color-text': '#000000' });
+    assert.deepEqual(session.settings().galleryColors, {
+      '--color-text': '#000000',
+    });
+    session.setGalleryStyle('amberbrae');
+    assert.equal(session.getState().galleryColors, null);
+    session.setGalleryColors({ '--color-text': '#000000' });
+    session.setStyle('brutalism');
+    assert.equal(session.getState().galleryColors, null);
   });
 
   it('puts back the gallery style a project saved', async () => {

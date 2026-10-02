@@ -44,6 +44,7 @@ import {
   parseProjectId,
   parseAdminTopupRequest,
   parseReferenceUrl,
+  parseGalleryColors,
   parseGalleryStyle,
   parseStyleDna,
   parseStylePreset,
@@ -1106,17 +1107,23 @@ async function handlePlan(
     return refuse('request-invalid', styleDna.error, styleDna.status);
   }
 
-  // A gallery style's tokens file (D145), read now so a style this copy
-  // does not hold is refused before anything is reserved.
+  // A gallery style's tokens file and guidance (D145, D146), read now so a
+  // style this copy does not hold, or edits that fail its contrast pairs,
+  // are refused before anything is reserved.
   const galleryStyle = parseGalleryStyle(body);
   if (!galleryStyle.ok) {
     return refuse('request-invalid', galleryStyle.error, galleryStyle.status);
+  }
+  const galleryColors = parseGalleryColors(body);
+  if (!galleryColors.ok) {
+    return refuse('request-invalid', galleryColors.error, galleryColors.status);
   }
   const gallery = galleryStyle.value
     ? await readGalleryStyle(
         env,
         new URL(request.url).origin,
         galleryStyle.value,
+        galleryColors.value,
       )
     : null;
   if (galleryStyle.value && gallery === null) {
@@ -1124,6 +1131,14 @@ async function handlePlan(
     return refuse(
       'request-invalid',
       'This style is no longer in the gallery. Choose another in Gallery, or clear it.',
+      400,
+    );
+  }
+  // The theme guard (D147), on the server as well as in the builder.
+  if (gallery && !gallery.ok) {
+    return refuse(
+      'request-invalid',
+      `These color edits fail the style's contrast checks: ${gallery.problems.join('; ')}.`,
       400,
     );
   }
@@ -1515,7 +1530,7 @@ async function handlePlan(
         ...(Object.keys(styleDna.value).length > 0
           ? { styleDna: styleDna.value }
           : {}),
-        ...(gallery
+        ...(gallery?.ok
           ? { styleTokens: gallery.tokens, galleryGuidance: gallery.guidance }
           : {}),
         ...(knowledge.value ? { knowledge: knowledge.value } : {}),
@@ -1948,17 +1963,29 @@ async function handleMockups(
   if (!galleryStyle.ok) {
     return refuse('request-invalid', galleryStyle.error, galleryStyle.status);
   }
+  const galleryColors = parseGalleryColors(body);
+  if (!galleryColors.ok) {
+    return refuse('request-invalid', galleryColors.error, galleryColors.status);
+  }
   const gallery = galleryStyle.value
     ? await readGalleryStyle(
         env,
         new URL(request.url).origin,
         galleryStyle.value,
+        galleryColors.value,
       )
     : null;
   if (galleryStyle.value && gallery === null) {
     return refuse(
       'request-invalid',
       'This style is no longer in the gallery. Choose another in Gallery, or clear it.',
+      400,
+    );
+  }
+  if (gallery && !gallery.ok) {
+    return refuse(
+      'request-invalid',
+      `These color edits fail the style's contrast checks: ${gallery.problems.join('; ')}.`,
       400,
     );
   }
@@ -2267,7 +2294,7 @@ async function handleMockups(
             return retryHold.verdict.allow;
           },
           ...(style.value ? { style: style.value } : {}),
-          ...(gallery ? { direction: gallery.direction } : {}),
+          ...(gallery?.ok ? { direction: gallery.direction } : {}),
           // One direction, shown while a build runs (docs/decisions.md,
           // 2026-09-28, the draft preview). The same run in every other
           // respect: this route's reservation, ceiling, retry and

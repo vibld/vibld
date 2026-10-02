@@ -14,6 +14,7 @@ import {
   parseModel,
   parsePreviewRequest,
   parseReferenceUrl,
+  parseGalleryColors,
   parseGalleryStyle,
   parseStylePreset,
 } from '../worker/request-guard.ts';
@@ -265,6 +266,23 @@ describe('generation request validation', () => {
       true,
       'a follow-up was refused for the size of a project it no longer sends',
     );
+  });
+});
+
+describe('parseGalleryColors (D147)', () => {
+  it('takes tokens to hexes, or none', () => {
+    assert.deepEqual(parseGalleryColors({}), { ok: true, value: {} });
+    assert.deepEqual(
+      parseGalleryColors({ galleryColors: { '--color-text': '#000000' } }),
+      { ok: true, value: { '--color-text': '#000000' } },
+    );
+    for (const galleryColors of [
+      [],
+      { text: '#000000' },
+      { '--color-text': 'red' },
+    ]) {
+      assert.equal(parseGalleryColors({ galleryColors }).ok, false);
+    }
   });
 });
 

@@ -392,10 +392,16 @@ export function checkStyleEntry(
   if (paletteKey(palette) !== paletteKey(tokens.colors)) {
     say('design_tokens.colors are not the palette');
   }
+  // Contrast pairs name colors by hex, so each token's hex is its own: two
+  // tokens sharing one could not be edited apart (D147).
+  const hexes = new Set<string>();
   for (const color of tokens.colors) {
     if (!/^--[a-z0-9-]+$/.test(color.token)) {
       say(`color token ${color.token} is not a CSS custom property`);
     }
+    const hex = color.hex.toLowerCase();
+    if (hexes.has(hex)) say(`color ${hex} is used by two tokens`);
+    hexes.add(hex);
   }
 
   const families = new Set<string>(
@@ -841,8 +847,14 @@ export function styleGalleryDirection(entry: StyleGalleryEntry): string {
 export function styleGalleryGuidance(
   baseline: string,
   entry: StyleGalleryEntry,
+  edits: StyleColorEdits = {},
 ): string {
+  const original = entry;
+  entry = withColorEdits(entry, edits);
   const tokens = entry.design_tokens;
+  const changed = original.design_tokens.colors
+    .filter((color) => edits[color.token] && edits[color.token] !== color.hex)
+    .map((color) => `${color.token} ${color.hex} is now ${edits[color.token]}`);
   const name = (token: string, prefix: string) => token.slice(prefix.length);
   const colors = tokens.colors.map((color) => name(color.token, '--color-'));
   const decorative = tokens.colors
@@ -879,6 +891,11 @@ export function styleGalleryGuidance(
           `Decorative colors never sit behind text, at any size: ${decorative.join(', ')}.`,
         ]
       : []),
+    ...(changed.length > 0
+      ? [
+          `The person changed these colors, and the tokens file has the new values; wherever the build prompt below names an old one, use the new: ${changed.join('; ')}.`,
+        ]
+      : []),
     'Body text is 16px or larger, and no text is below 12px.',
     'The rules and the build prompt below were written for any coding agent. Where they name a stack, package, backend or service that STACK above does not have, keep to STACK and build the page without it. The request itself outranks the style.',
   ];
@@ -891,4 +908,190 @@ ${baseline.trim()}
 --- BEGIN STYLE BUILD PROMPT ---
 ${entry.build_prompt.trim()}
 --- END STYLE BUILD PROMPT ---`;
+}
+
+/*
+ * The theme guard (D147): a person's color edits to a gallery style, by
+ * token, checked against every contrast pair the style measured before
+ * they are used. A text pair needs its target (4.5:1, or 3:1 for large
+ * text), a UI pair its 3:1, and a color whose roles are all decorative
+ * never carries text.
+ */
+
+/** What the theme guard reads of a style, which the builder fetches alone. */
+export interface StyleColorSubject {
+  design_tokens: { colors: StyleColorToken[] };
+  contrast_checks: StyleContrastCheck[];
+}
+
+/** A style's colors and contrast pairs, for the builder's color editor. */
+export function styleColorSubjectOf(
+  entry: StyleGalleryEntry,
+): StyleColorSubject {
+  return {
+    design_tokens: { colors: entry.design_tokens.colors },
+    contrast_checks: entry.contrast_checks,
+  };
+}
+
+/** Edited colors by token (`--color-canvas`), each a 6-digit lowercase hex. */
+export type StyleColorEdits = Readonly<Record<string, string>>;
+
+export interface StyleContrastFailure {
+  use: string;
+  fg: string;
+  bg: string;
+  /** Null when the pair names a color that is not a hex. */
+  ratio: number | null;
+  target: number;
+  /** `decorative`: a decorative-only color carrying text, whatever the ratio. */
+  reason: 'contrast' | 'decorative';
+}
+
+export type StyleColorCheck =
+  | { ok: true }
+  | { ok: false; problems: string[]; failures: StyleContrastFailure[] };
+
+const HEX6 = /^#[0-9a-f]{6}$/;
+
+/**
+ * Each original hex to the one it is edited to. A style's token hexes are
+ * unique (`checkStyleEntry`), so a hex names one token.
+ */
+function hexEdits(
+  entry: StyleColorSubject,
+  edits: StyleColorEdits,
+): Map<string, string> {
+  const byHex = new Map<string, string>();
+  for (const color of entry.design_tokens.colors) {
+    const edited = edits[color.token];
+    if (edited !== undefined && edited !== color.hex) {
+      byHex.set(color.hex, edited);
+    }
+  }
+  return byHex;
+}
+
+/** Edits as a project may store them: an object of tokens to hexes. */
+export function isStyleColorEdits(value: unknown): value is StyleColorEdits {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const entries = Object.entries(value);
+  return (
+    entries.length <= 24 &&
+    entries.every(
+      ([token, hex]) =>
+        /^--color-[a-z0-9-]{1,40}$/.test(token) &&
+        typeof hex === 'string' &&
+        HEX6.test(hex),
+    )
+  );
+}
+
+export function checkColorEdits(
+  entry: StyleColorSubject,
+  edits: StyleColorEdits,
+): StyleColorCheck {
+  const problems: string[] = [];
+  const tokens = new Map(
+    entry.design_tokens.colors.map((color) => [color.token, color]),
+  );
+  for (const [token, hex] of Object.entries(edits)) {
+    if (!tokens.has(token))
+      problems.push(`${token} is not one of this style's colors`);
+    else if (!HEX6.test(hex))
+      problems.push(`${token}: ${hex} is not a 6-digit hex`);
+  }
+  if (problems.length > 0) return { ok: false, problems, failures: [] };
+
+  const edited = hexEdits(entry, edits);
+  const decorative = new Set(
+    entry.design_tokens.colors
+      .filter((color) => isDecorativeRole(color.role))
+      .map((color) => color.hex),
+  );
+  const failures: StyleContrastFailure[] = [];
+  for (const check of entry.contrast_checks) {
+    if (isExemptCheck(check)) continue;
+    const fg = edited.get(check.fg) ?? check.fg;
+    const bg = edited.get(check.bg) ?? check.bg;
+    const ratio = contrastRatio(fg, bg);
+    const rounded = ratio === null ? null : Math.round(ratio * 100) / 100;
+    if (decorative.has(check.fg) || decorative.has(check.bg)) {
+      failures.push({
+        use: check.use,
+        fg,
+        bg,
+        ratio: rounded,
+        target: check.target,
+        reason: 'decorative',
+      });
+    } else if (ratio === null || ratio < check.target) {
+      failures.push({
+        use: check.use,
+        fg,
+        bg,
+        ratio: rounded,
+        target: check.target,
+        reason: 'contrast',
+      });
+    }
+  }
+  return failures.length === 0
+    ? { ok: true }
+    : {
+        ok: false,
+        problems: failures.map((failure) =>
+          failure.reason === 'decorative'
+            ? `${failure.use}: a decorative color cannot carry text`
+            : `${failure.use}: ${failure.ratio ?? '?'}:1, needs ${failure.target}:1`,
+        ),
+        failures,
+      };
+}
+
+/**
+ * The style with the edits in its colors, palette and contrast pairs (each
+ * pair measured again), for a tokens file and guidance that use them.
+ * Check the edits first (`checkColorEdits`): this applies whatever it is
+ * given.
+ */
+export function withColorEdits(
+  entry: StyleGalleryEntry,
+  edits: StyleColorEdits,
+): StyleGalleryEntry {
+  const edited = hexEdits(entry, edits);
+  if (edited.size === 0) return entry;
+  const hex = (value: string) => edited.get(value) ?? value;
+  return {
+    ...entry,
+    visual_style: {
+      ...entry.visual_style,
+      palette: entry.visual_style.palette.map((swatch) => ({
+        ...swatch,
+        hex: hex(swatch.hex),
+      })),
+    },
+    design_tokens: {
+      ...entry.design_tokens,
+      colors: entry.design_tokens.colors.map((color) => ({
+        ...color,
+        hex: hex(color.hex),
+      })),
+    },
+    contrast_checks: entry.contrast_checks.map((check) => {
+      const fg = hex(check.fg);
+      const bg = hex(check.bg);
+      const ratio = contrastRatio(fg, bg);
+      return {
+        ...check,
+        fg,
+        bg,
+        ...(typeof check.ratio === 'number' && ratio !== null
+          ? { ratio: Math.round(ratio * 100) / 100 }
+          : {}),
+      };
+    }),
+  };
 }

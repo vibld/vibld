@@ -99,6 +99,24 @@ describe('requesting mockups', () => {
     });
   });
 
+  it("sends a gallery style's color edits with it (D147)", async () => {
+    const { fetchImpl, sent } = serving([
+      event('mockups', { mockups: [mockup('A'), mockup('B')] }),
+    ]);
+    await requestMockups({
+      prompt: 'a bakery',
+      galleryStyle: 'amberbrae',
+      galleryColors: { '--color-accent': '#7a2000' },
+      fetchImpl,
+      getToken: token,
+    });
+    assert.deepEqual(JSON.parse(String(sent[0]?.body)), {
+      prompt: 'a bakery',
+      galleryStyle: 'amberbrae',
+      galleryColors: { '--color-accent': '#7a2000' },
+    });
+  });
+
   it('asks for a draft only when told to', async () => {
     // The draft a build shows while it runs (docs/decisions.md,
     // 2026-09-28): one direction, through the same route.

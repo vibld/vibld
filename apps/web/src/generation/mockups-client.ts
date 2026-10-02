@@ -1,4 +1,5 @@
 import type { ParsedMockup } from '@vibld/ai/mockup-schema';
+import type { StyleColorEdits } from '@vibld/ai/style-gallery';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import { getClerkToken } from '../auth/clerk-token.ts';
 import { SignInRequiredError, readPlanEvents } from './remote-provider.ts';
@@ -23,6 +24,8 @@ export interface MockupRunOptions {
   style?: StylePresetId | null;
   /** A gallery style's id (D146), drawn in place of a preset. */
   galleryStyle?: string | null;
+  /** Its color edits (D147), checked again by the Worker. */
+  galleryColors?: StyleColorEdits | null;
   model?: string | null;
   signal?: AbortSignal;
   onProgress?: (progress: GenerationProgress) => void;
@@ -55,6 +58,9 @@ export async function requestMockups(
       prompt: options.prompt,
       ...(options.style ? { style: options.style } : {}),
       ...(options.galleryStyle ? { galleryStyle: options.galleryStyle } : {}),
+      ...(options.galleryStyle && options.galleryColors
+        ? { galleryColors: options.galleryColors }
+        : {}),
       ...(options.model ? { model: options.model } : {}),
       ...(options.draft ? { draft: true } : {}),
     }),

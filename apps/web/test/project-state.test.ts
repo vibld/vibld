@@ -163,6 +163,7 @@ describe('what opening a project puts back', () => {
       knowledge: '',
       styleDna: {},
       galleryStyle: null,
+      galleryColors: null,
     });
   });
 
@@ -204,6 +205,7 @@ describe('what counts as a change worth saving', () => {
     knowledge: '',
     styleDna: {},
     galleryStyle: null,
+    galleryColors: null,
   };
 
   it('is nothing, for a project exactly as it was opened', () => {
@@ -225,6 +227,7 @@ describe('what counts as a change worth saving', () => {
         knowledge: '',
         styleDna: {},
         galleryStyle: null,
+        galleryColors: null,
       },
     });
     assert.equal(changedSince(first!.marks, settings, []), null);

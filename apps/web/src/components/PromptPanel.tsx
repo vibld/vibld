@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import type { StyleColorEdits } from '@vibld/ai/style-gallery';
 import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import { MAX_REFERENCE_URL_CHARS } from '@vibld/ai/limits';
 import { STYLE_PRESETS } from '@vibld/ai/style-presets';
@@ -93,6 +94,9 @@ export interface PromptPanelProps {
    */
   galleryStyle?: string | null;
   onGalleryStyleChange?: (id: string | null) => void;
+  /** The gallery style's color edits (D147). */
+  galleryColors?: StyleColorEdits | null;
+  onGalleryColorsChange?: (edits: StyleColorEdits | null) => void;
   /**
    * What the button beside the label says. "Start over" discards the
    * conversation in place; where the conversation is a saved project, the
@@ -137,6 +141,8 @@ export function PromptPanel({
   onReferenceUrlChange,
   galleryStyle = null,
   onGalleryStyleChange,
+  galleryColors = null,
+  onGalleryColorsChange,
   resetLabel = 'Start over',
 }: PromptPanelProps) {
   // A template's brief, when vibld.com sent one (D106): filled once, to be
@@ -335,6 +341,10 @@ export function PromptPanel({
                 active={open === 'gallery'}
                 value={galleryStyle}
                 onChange={onGalleryStyleChange}
+                colors={galleryColors}
+                {...(onGalleryColorsChange
+                  ? { onColorsChange: onGalleryColorsChange }
+                  : {})}
                 disabled={disabled}
               />
             ),

@@ -1,16 +1,23 @@
 import {
+  checkColorEdits,
   isStyleGalleryId,
+  styleColorSubjectOf,
   styleGalleryDirection,
   styleGalleryGuidance,
   styleTokensFile,
+  withColorEdits,
 } from '@vibld/ai/style-gallery';
-import type { StyleGalleryEntry } from '@vibld/ai/style-gallery';
+import type {
+  StyleColorEdits,
+  StyleGalleryEntry,
+} from '@vibld/ai/style-gallery';
 
 import type { PrincipalDenied, PrincipalGranted } from './principal.ts';
 
 /**
  * `/api/style-gallery`: the style gallery's picker cards (docs/decisions.md,
- * D142, D144).
+ * D142, D144), and with `?style=<id>` one style's colors and contrast pairs
+ * for the color editor (D147).
  *
  * The cards are a file the build writes beside the builder's own assets
  * (`scripts/style-gallery-assets.ts`), read here through the assets binding
@@ -73,11 +80,26 @@ export async function handleStyleGallery(
   if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
   const resolved = await resolve(request);
   if (resolved.denied) return resolved.denied;
-  const cards = await readStyleGalleryAsset(
-    env,
-    new URL(request.url).origin,
-    'cards.json',
-  );
+  const origin = new URL(request.url).origin;
+  // One style's colors and contrast pairs, for the color editor (D147).
+  const id = new URL(request.url).searchParams.get('style');
+  if (id !== null) {
+    if (!isStyleGalleryId(id)) return json({ error: 'Unknown style.' }, 404);
+    const file = await readStyleGalleryAsset(env, origin, `styles/${id}.json`);
+    if (!file) return json({ error: 'Unknown style.' }, 404);
+    const entry = (await file.json()) as StyleGalleryEntry;
+    return new Response(
+      JSON.stringify({ id: entry.id, ...styleColorSubjectOf(entry) }),
+      {
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'private, max-age=3600',
+          vary: 'Authorization',
+        },
+      },
+    );
+  }
+  const cards = await readStyleGalleryAsset(env, origin, 'cards.json');
   // No file is a copy built without the gallery (D143): an empty gallery,
   // not an error.
   if (!cards) return json([]);
@@ -103,7 +125,12 @@ export async function readGalleryStyle(
   env: StyleGalleryEnv,
   origin: string,
   id: string,
-): Promise<{ tokens: string; guidance: string; direction: string } | null> {
+  edits: StyleColorEdits = {},
+): Promise<
+  | { ok: true; tokens: string; guidance: string; direction: string }
+  | { ok: false; problems: string[] }
+  | null
+> {
   if (!isStyleGalleryId(id)) return null;
   const response = await readStyleGalleryAsset(
     env,
@@ -121,12 +148,18 @@ export async function readGalleryStyle(
   const baseline = baselineFile
     ? ((await baselineFile.json()) as { baseline?: unknown }).baseline
     : '';
+  // The theme guard again (D147): the builder ran it before saving, and a
+  // request is the person's to send.
+  const guard = checkColorEdits(entry, edits);
+  if (!guard.ok) return { ok: false, problems: guard.problems };
   return {
-    tokens: styleTokensFile(entry),
+    ok: true,
+    tokens: styleTokensFile(withColorEdits(entry, edits)),
     guidance: styleGalleryGuidance(
       typeof baseline === 'string' ? baseline : '',
       entry,
+      edits,
     ),
-    direction: styleGalleryDirection(entry),
+    direction: styleGalleryDirection(withColorEdits(entry, edits)),
   };
 }

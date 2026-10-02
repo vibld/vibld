@@ -57,6 +57,7 @@ export function settingsToRestore(
     knowledge: saved.knowledge ?? defaults.knowledge,
     styleDna: saved.styleDna ?? defaults.styleDna,
     galleryStyle: saved.galleryStyle ?? null,
+    galleryColors: saved.galleryColors ?? null,
   };
 }
 
@@ -111,6 +112,7 @@ export function wireSettings(settings: SessionSettings): ProjectSettings {
     knowledge: settings.knowledge,
     styleDna: settings.styleDna,
     galleryStyle: settings.galleryStyle,
+    galleryColors: settings.galleryColors,
   };
 }
 
@@ -127,6 +129,7 @@ export function settingsMark(settings: ProjectSettings): string {
     settings.knowledge,
     settings.styleDna,
     settings.galleryStyle ?? null,
+    settings.galleryColors ?? null,
   ]);
 }
 

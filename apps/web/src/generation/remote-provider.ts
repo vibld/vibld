@@ -1,3 +1,4 @@
+import type { StyleColorEdits } from '@vibld/ai/style-gallery';
 import type {
   GenerationPlan,
   GenerationRequest,
@@ -160,6 +161,8 @@ export interface RemoteModelProviderOptions {
   styleDna?: StyleDna | null;
   /** The gallery style, by id (D145): the Worker writes its tokens file. */
   galleryStyle?: string | null;
+  /** Its color edits by token (D147), which the Worker checks again. */
+  galleryColors?: StyleColorEdits | null;
   /** Standing instructions for the project, sent with every turn. */
   knowledge?: string | null;
   /**
@@ -208,6 +211,7 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #style: StylePresetId | null;
   readonly #styleDna: StyleDna | null;
   readonly #galleryStyle: string | null;
+  readonly #galleryColors: StyleColorEdits | null;
   readonly #knowledge: string | null;
   readonly #referenceUrl: string | null;
   readonly #model: string | null;
@@ -227,6 +231,7 @@ export class RemoteModelProvider implements ModelProvider {
     this.#style = options.style ?? null;
     this.#styleDna = options.styleDna ?? null;
     this.#galleryStyle = options.galleryStyle ?? null;
+    this.#galleryColors = options.galleryColors ?? null;
     this.#knowledge = options.knowledge ?? null;
     this.#referenceUrl = options.referenceUrl ?? null;
     this.#model = options.model ?? null;
@@ -260,6 +265,9 @@ export class RemoteModelProvider implements ModelProvider {
           ? { styleDna: this.#styleDna }
           : {}),
         ...(this.#galleryStyle ? { galleryStyle: this.#galleryStyle } : {}),
+        ...(this.#galleryStyle && this.#galleryColors
+          ? { galleryColors: this.#galleryColors }
+          : {}),
         ...(this.#knowledge ? { knowledge: this.#knowledge } : {}),
         ...(this.#referenceUrl ? { referenceUrl: this.#referenceUrl } : {}),
         ...(this.#model ? { model: this.#model } : {}),

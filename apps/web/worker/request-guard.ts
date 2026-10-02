@@ -14,7 +14,8 @@ import {
 } from '@vibld/ai/limits';
 import { canonicalModelId, findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
-import { isStyleGalleryId } from '@vibld/ai/style-gallery';
+import { isStyleColorEdits, isStyleGalleryId } from '@vibld/ai/style-gallery';
+import type { StyleColorEdits } from '@vibld/ai/style-gallery';
 // The one bound, from the schema that produces the labels this guard reads
 // back, rather than a second copy of 60 with a comment asserting they
 // agree (internal PR 189 review).
@@ -591,6 +592,27 @@ export function parseGalleryStyle(body: unknown): GuardResult<string | null> {
     return fail(400, 'Unknown "galleryStyle".');
   }
   return { ok: true, value: galleryStyle };
+}
+
+/**
+ * A gallery style's color edits (D147): an object of color tokens to
+ * 6-digit hexes, or none. The theme guard checks them against the style's
+ * contrast pairs once the style is read; this only checks their shape.
+ */
+export function parseGalleryColors(
+  body: unknown,
+): GuardResult<StyleColorEdits> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { galleryColors } = body as { galleryColors?: unknown };
+  if (galleryColors === undefined || galleryColors === null) {
+    return { ok: true, value: {} };
+  }
+  if (!isStyleColorEdits(galleryColors)) {
+    return fail(400, '"galleryColors" must map color tokens to 6-digit hexes.');
+  }
+  return { ok: true, value: galleryColors };
 }
 
 /**

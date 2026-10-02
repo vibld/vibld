@@ -509,6 +509,28 @@ describe('what a project remembers', () => {
     assert.equal(both.status, 400);
   });
 
+  it("clears a gallery style's color edits when a save names a style without them (D147)", async () => {
+    const w = world();
+    const made = await create(w, ALICE, {});
+    const path = `/api/projects/${made.id}`;
+    const settingsNow = async () =>
+      (await w.call(ALICE, 'GET', path)).body.project.settings;
+    const edits = { '--color-text': '#000000' };
+
+    await w.call(ALICE, 'PATCH', path, {
+      settings: { galleryStyle: 'harbor', galleryColors: edits },
+    });
+    assert.deepEqual((await settingsNow()).galleryColors, edits);
+
+    // A builder older than the edits saves only the style.
+    await w.call(ALICE, 'PATCH', path, {
+      settings: { galleryStyle: 'amberbrae' },
+    });
+    const settings = await settingsNow();
+    assert.equal(settings.galleryStyle, 'amberbrae');
+    assert.equal(settings.galleryColors, null);
+  });
+
   it('refuses a malformed conversation rather than saving part of it', async () => {
     const w = world();
     const made = await create(w, ALICE);

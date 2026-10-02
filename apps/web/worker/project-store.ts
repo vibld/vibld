@@ -2,7 +2,8 @@ import { parseTranscript } from '@vibld/core';
 import type { ProjectSnapshot, TranscriptTurn } from '@vibld/core';
 import { sanitizeStyleDna } from '@vibld/ai/style-dna';
 import type { StyleDna } from '@vibld/ai/style-dna';
-import { isStyleGalleryId } from '@vibld/ai/style-gallery';
+import { isStyleColorEdits, isStyleGalleryId } from '@vibld/ai/style-gallery';
+import type { StyleColorEdits } from '@vibld/ai/style-gallery';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
@@ -43,6 +44,8 @@ export interface ProjectSettings {
   styleDna: StyleDna | null;
   /** The style gallery style, by its stable id; null for none (D144). */
   galleryStyle: string | null;
+  /** Its color edits by token, checked by the theme guard (D147). */
+  galleryColors: StyleColorEdits | null;
 }
 
 export const EMPTY_SETTINGS: ProjectSettings = {
@@ -52,6 +55,7 @@ export const EMPTY_SETTINGS: ProjectSettings = {
   knowledge: null,
   styleDna: null,
   galleryStyle: null,
+  galleryColors: null,
 };
 
 export interface ProjectRecord {
@@ -125,6 +129,7 @@ interface ProjectRow {
   knowledge: string | null;
   style_dna: string | null;
   style_gallery: string | null;
+  style_gallery_colors: string | null;
   transcript_key: string | null;
   transcript_turns: number;
   version: number;
@@ -152,7 +157,8 @@ interface ProjectRow {
  */
 const SELECT = `SELECT p.id, p.user_id, p.name, p.archived_at, p.created_at,
        p.updated_at, p.last_opened_at, p.style_preset, p.reference_url,
-       p.model, p.knowledge, p.style_dna, p.style_gallery, p.transcript_key,
+       p.model, p.knowledge, p.style_dna, p.style_gallery,
+       p.style_gallery_colors, p.transcript_key,
        p.transcript_turns, p.version, p.version_writer, p.share_token,
        p.shared_at, p.share_held_at,
        g.accepted_revision,
@@ -186,6 +192,16 @@ function styleDnaOf(raw: string | null): StyleDna | null {
   }
 }
 
+function galleryColorsOf(raw: string | null): StyleColorEdits | null {
+  if (raw === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isStyleColorEdits(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function recordOf(row: ProjectRow): ProjectRecord {
   return {
     id: row.id,
@@ -206,6 +222,7 @@ function recordOf(row: ProjectRow): ProjectRecord {
       galleryStyle: isStyleGalleryId(row.style_gallery)
         ? row.style_gallery
         : null,
+      galleryColors: galleryColorsOf(row.style_gallery_colors),
     },
     transcriptKey: row.transcript_key,
     transcriptTurns: row.transcript_turns,
@@ -414,8 +431,8 @@ export class ProjectStore {
         `INSERT INTO projects
            (id, user_id, name, created_at, updated_at, last_opened_at,
             style_preset, reference_url, model, knowledge, style_dna,
-            style_gallery)
-         SELECT ?1, ?2, ?3, ?4, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?11
+            style_gallery, style_gallery_colors)
+         SELECT ?1, ?2, ?3, ?4, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?11, ?12
           WHERE ?10 IS NULL
              OR (SELECT COUNT(*) FROM projects
                   WHERE user_id = ?2 AND archived_at IS NULL) < ?10`,
@@ -432,6 +449,7 @@ export class ProjectStore {
         settings.styleDna ? JSON.stringify(settings.styleDna) : null,
         limit,
         settings.galleryStyle,
+        settings.galleryColors ? JSON.stringify(settings.galleryColors) : null,
       )
       .run();
     return (result.meta?.changes ?? 0) > 0;
@@ -557,13 +575,14 @@ export class ProjectStore {
       ['knowledge', 'knowledge'],
       ['styleDna', 'style_dna'],
       ['galleryStyle', 'style_gallery'],
+      ['galleryColors', 'style_gallery_colors'],
     ];
     const settings = content.settings ?? {};
     const present = columns.filter(([field]) => field in settings);
     const values: unknown[] = present.map(([field]) =>
-      field === 'styleDna'
-        ? settings.styleDna
-          ? JSON.stringify(settings.styleDna)
+      field === 'styleDna' || field === 'galleryColors'
+        ? settings[field]
+          ? JSON.stringify(settings[field])
           : null
         : (settings[field] ?? null),
     );

@@ -16,7 +16,10 @@ import type {
   StyleGalleryTheme,
 } from '@vibld/ai/style-gallery';
 
+import type { StyleColorEdits } from '@vibld/ai/style-gallery';
+
 import { loadStyleCards } from '../generation/style-gallery-client.ts';
+import { StyleColorEditor } from './StyleColorEditor.tsx';
 
 /** Cards shown at once, and how many more each "Show more" adds. */
 export const PAGE = 24;
@@ -35,6 +38,8 @@ export function StyleGalleryPicker({
   value,
   onChange,
   disabled,
+  colors = null,
+  onColorsChange,
   loader = loadStyleCards,
 }: {
   /** The panel is open. */
@@ -43,6 +48,9 @@ export function StyleGalleryPicker({
   value: string | null;
   onChange: (id: string | null) => void;
   disabled: boolean;
+  /** The chosen style's color edits (D147), offered where they are held. */
+  colors?: StyleColorEdits | null;
+  onColorsChange?: (edits: StyleColorEdits | null) => void;
   /** For tests. */
   loader?: typeof loadStyleCards;
 }) {
@@ -131,6 +139,14 @@ export function StyleGalleryPicker({
             Clear
           </button>
         </p>
+      ) : null}
+      {value && onColorsChange ? (
+        <StyleColorEditor
+          styleId={value}
+          value={colors}
+          onChange={onColorsChange}
+          disabled={disabled}
+        />
       ) : null}
       <div className="gallery__filters">
         <div>

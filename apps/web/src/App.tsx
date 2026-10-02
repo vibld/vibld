@@ -323,6 +323,8 @@ function Builder() {
               onStyleChange={(style) => session.setStyle(style)}
               galleryStyle={state.galleryStyle}
               onGalleryStyleChange={(id) => session.setGalleryStyle(id)}
+              galleryColors={state.galleryColors}
+              onGalleryColorsChange={(edits) => session.setGalleryColors(edits)}
               referenceUrl={state.referenceUrl}
               onReferenceUrlChange={(value) => session.setReferenceUrl(value)}
               onCancel={() => void session.cancel()}

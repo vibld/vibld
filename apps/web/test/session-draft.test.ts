@@ -203,7 +203,7 @@ describe('the draft a first build shows', () => {
     session.setGalleryStyle('vinepool');
     session.chooseMockup(session.getState().mockups[0]!);
     await settle();
-    assert.deepEqual(built, ['amberbrae']);
+    assert.deepEqual(built, [{ id: 'amberbrae', colors: null }]);
     assert.equal(session.getState().galleryStyle, 'amberbrae');
   });
 

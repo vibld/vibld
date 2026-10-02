@@ -287,6 +287,18 @@ a contrast guard on color edits.
   account can start on the default model needs $0.87 set aside, from
   $0.86. Mockups and the quick draft are drawn in the gallery style too
   (`styleGalleryDirection`, within the preset directions' bound).
+- **D147. The theme guard blocks rather than warns, taken on Chris's
+  behalf.** vibld had no color editor, so the gallery panel gets one: the
+  chosen style's color tokens, each editable. Every edit is checked against
+  all of the style's measured contrast pairs (`checkColorEdits`), each at
+  its own target (4.5:1 for text, 3:1 for UI and large text), and a pair
+  that names a decorative-only color fails whatever its ratio. An edit that
+  fails is not applied, and the panel lists the pairs it broke. The kept
+  edits are saved with the project (`projects.style_gallery_colors`,
+  migration 0046), cleared when the style changes, and checked again by
+  the Worker before a build writes them into the tokens file, so a request
+  that skips the builder is refused the same way. Exempt pairs (the
+  catalog's decorative fills) are not measured.
 
 ### Resolved 2026-09-30 (afternoon)
 

@@ -1,6 +1,6 @@
 import { canonicalModelId, isKnownModel } from '@vibld/ai';
 import { sanitizeStyleDna } from '@vibld/ai/style-dna';
-import { isStyleGalleryId } from '@vibld/ai/style-gallery';
+import { isStyleColorEdits, isStyleGalleryId } from '@vibld/ai/style-gallery';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 import {
   DEFAULT_PROJECT_NAME,
@@ -275,14 +275,28 @@ export function parseProjectSettings(
       ? raw.galleryStyle
       : null;
   }
+  if ('galleryColors' in raw) {
+    settings.galleryColors = isStyleColorEdits(raw.galleryColors)
+      ? raw.galleryColors
+      : null;
+  }
   // A project builds in a preset or a gallery style, never both (D144).
   // Choosing one clears the other here too, so a builder older than the
-  // gallery, which saves only `style`, cannot leave both stored.
+  // gallery, which saves only `style`, cannot leave both stored. Color
+  // edits belong to the gallery style and go with it (D147): a save that
+  // names a style without them, as a builder older than the edits does,
+  // clears them, so one style's edits never carry over to another.
   if (settings.style && settings.galleryStyle) {
     return fail(400, 'Choose a style or a gallery style, not both.');
   }
   if (settings.style) settings.galleryStyle = null;
   if (settings.galleryStyle) settings.style = null;
+  if (
+    'galleryStyle' in settings &&
+    (!settings.galleryStyle || !('galleryColors' in raw))
+  ) {
+    settings.galleryColors = null;
+  }
   return { ok: true, value: settings };
 }
 
@@ -484,6 +498,7 @@ export async function handleProjects(
         knowledge: null,
         styleDna: null,
         galleryStyle: null,
+        galleryColors: null,
         ...parsed.value,
       };
     }

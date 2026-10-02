@@ -33,6 +33,7 @@ import { deriveBrief } from './brief.ts';
 import type { PlanMode } from './plan-builder.ts';
 import { buildPlan } from './plan-builder.ts';
 import type { StyleDna } from '@vibld/ai/style-dna';
+import type { StyleColorEdits } from '@vibld/ai/style-gallery';
 import type { ParsedMockup } from '@vibld/ai/mockup-schema';
 import { requestMockups } from './mockups-client.ts';
 import { requestChatTurn } from './chat-client.ts';
@@ -189,6 +190,11 @@ export interface BuilderState {
    */
   galleryStyle: string | null;
   /**
+   * The person's color edits to the gallery style, by token, each one
+   * passed by the theme guard (D147); null for none. Cleared with the style.
+   */
+  galleryColors: StyleColorEdits | null;
+  /**
    * A project is being opened. The composer waits for it, so nothing typed
    * in the moment before is sent against the project being left.
    */
@@ -269,6 +275,7 @@ export interface RestoredProject {
   knowledge: string;
   styleDna: StyleDna;
   galleryStyle?: string | null;
+  galleryColors?: StyleColorEdits | null;
   /**
    * A build the Worker is still running in this project, from opening it
    * (`GET /api/projects/:id`), or null for none. It carried on after the
@@ -286,6 +293,7 @@ export interface SessionSettings {
   knowledge: string;
   styleDna: StyleDna;
   galleryStyle: string | null;
+  galleryColors: StyleColorEdits | null;
 }
 
 /**
@@ -372,8 +380,9 @@ export interface SessionOptions {
     onRun?: (runId: string) => void,
     // And what its check says as it goes (D69).
     checks?: BuildCheckHooks,
-    // The gallery style, by id (D145): last, as above.
-    galleryStyle?: string | null,
+    // The gallery style, by id, and its color edits (D145, D147): last, as
+    // above.
+    gallery?: GalleryChoice | null,
   ) => Promise<ModelProvider>;
 }
 
@@ -438,6 +447,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     style: null,
     referenceUrl: '',
     galleryStyle: null,
+    galleryColors: null,
     opening: false,
     draft: null,
     serverRunId: null,
@@ -445,6 +455,12 @@ function initialState(budget: RunUsageReport): BuilderState {
     early: null,
     check: null,
   };
+}
+
+/** A build's gallery style and the person's edits to its colors. */
+export interface GalleryChoice {
+  id: string;
+  colors: StyleColorEdits | null;
 }
 
 /**
@@ -481,7 +497,7 @@ async function defaultResolveProvider(
   projectId?: string | null,
   onRun?: (runId: string) => void,
   checks?: BuildCheckHooks,
-  galleryStyle?: string | null,
+  gallery?: GalleryChoice | null,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
@@ -497,7 +513,8 @@ async function defaultResolveProvider(
         ...(referenceUrl ? { referenceUrl } : {}),
         ...(styleDna && Object.keys(styleDna).length > 0 ? { styleDna } : {}),
         ...(mockup ? { mockup } : {}),
-        ...(galleryStyle ? { galleryStyle } : {}),
+        ...(gallery ? { galleryStyle: gallery.id } : {}),
+        ...(gallery?.colors ? { galleryColors: gallery.colors } : {}),
       })
     : // The deterministic fake has no visual vocabulary at all, so a preset
       // cannot change what it produces. Nothing here pretends otherwise.
@@ -559,8 +576,9 @@ export class BuilderSession {
   #mockupContext: {
     prompt: string;
     style: StylePresetId | null;
-    /** The gallery style the set was drawn in (D146). */
+    /** The gallery style the set was drawn in (D146), and its edits (D147). */
     galleryStyle: string | null;
+    galleryColors: StyleColorEdits | null;
     referenceUrl: string | null;
   } | null = null;
   /**
@@ -590,7 +608,7 @@ export class BuilderSession {
     projectId?: string | null,
     onRun?: (runId: string) => void,
     checks?: BuildCheckHooks,
-    galleryStyle?: string | null,
+    gallery?: GalleryChoice | null,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
   readonly #fetchBuild: (
@@ -735,6 +753,7 @@ export class BuilderSession {
       ...this.#state,
       style,
       galleryStyle: style ? null : this.#state.galleryStyle,
+      galleryColors: style ? null : this.#state.galleryColors,
     };
     this.#emit();
   }
@@ -755,8 +774,27 @@ export class BuilderSession {
     this.#state = {
       ...this.#state,
       galleryStyle,
+      // Edits are to one style's colors, so another style starts clean.
+      galleryColors: null,
       style: galleryStyle ? null : this.#state.style,
     };
+    this.#emit();
+  }
+
+  /**
+   * The person's color edits to the gallery style (D147), already passed by
+   * the theme guard; null or empty for none. The Worker checks them again.
+   */
+  setGalleryColors(galleryColors: StyleColorEdits | null): void {
+    if (this.#disposed || !this.#state.galleryStyle) return;
+    const next =
+      galleryColors && Object.keys(galleryColors).length > 0
+        ? galleryColors
+        : null;
+    if (JSON.stringify(next) === JSON.stringify(this.#state.galleryColors)) {
+      return;
+    }
+    this.#state = { ...this.#state, galleryColors: next };
     this.#emit();
   }
 
@@ -797,6 +835,7 @@ export class BuilderSession {
       knowledge: this.#state.knowledge,
       styleDna: this.#state.styleDna,
       galleryStyle: this.#state.galleryStyle,
+      galleryColors: this.#state.galleryColors,
     };
   }
 
@@ -884,6 +923,9 @@ export class BuilderSession {
       knowledge: project.knowledge,
       styleDna: project.styleDna,
       galleryStyle: project.galleryStyle ?? null,
+      galleryColors: project.galleryStyle
+        ? (project.galleryColors ?? null)
+        : null,
       ...(watching
         ? {
             status: 'planning' as const,
@@ -1203,10 +1245,12 @@ export class BuilderSession {
     const controller = new AbortController();
     this.#exploreAbort = controller;
     const galleryStyle = style ? null : this.#state.galleryStyle;
+    const galleryColors = galleryStyle ? this.#state.galleryColors : null;
     this.#mockupContext = {
       prompt: trimmed,
       style,
       galleryStyle,
+      galleryColors,
       referenceUrl,
     };
     this.#patch(epoch, (state) => ({
@@ -1223,6 +1267,7 @@ export class BuilderSession {
         style,
         // The project's gallery style (D146), so the three are drawn in it.
         galleryStyle,
+        galleryColors,
         model: this.#state.model,
         signal: controller.signal,
         onProgress: (progress) => {
@@ -1305,6 +1350,7 @@ export class BuilderSession {
       ...this.#state,
       mockups: [],
       galleryStyle: context.galleryStyle,
+      galleryColors: context.galleryColors,
       style: context.galleryStyle ? null : context.style,
     };
     this.#emit();
@@ -1759,7 +1805,12 @@ export class BuilderSession {
             checked.verdict = verdict;
           },
         },
-        this.#state.galleryStyle,
+        this.#state.galleryStyle
+          ? {
+              id: this.#state.galleryStyle,
+              colors: this.#state.galleryColors,
+            }
+          : null,
       );
     } catch (error) {
       reservation.release();
@@ -2126,6 +2177,7 @@ export class BuilderSession {
       prompt,
       style,
       galleryStyle: style ? null : this.#state.galleryStyle,
+      galleryColors: style ? null : this.#state.galleryColors,
       model: this.#state.model,
       signal: controller.signal,
       draft: true,

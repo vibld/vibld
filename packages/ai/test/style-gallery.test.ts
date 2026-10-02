@@ -279,6 +279,17 @@ describe('checkStyleEntry', () => {
     ]);
   });
 
+  it('refuses two color tokens with one hex (D147)', () => {
+    const entry = sample('alpha');
+    const [first] = entry.design_tokens.colors;
+    entry.design_tokens.colors.push({ ...first!, token: '--color-copy' });
+    assert.ok(
+      checkStyleEntry(entry).includes(
+        `alpha: color ${first!.hex} is used by two tokens`,
+      ),
+    );
+  });
+
   it('refuses a pair below its target, or recorded wrongly', () => {
     const entry = sample('alpha');
     entry.contrast_checks[2] = {

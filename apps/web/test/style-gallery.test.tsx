@@ -410,6 +410,7 @@ describe('/api/style-gallery', () => {
       ASSETS: assets({
         '/_style-gallery/styles/a.json': JSON.stringify({
           ...entry,
+          contrast_checks: [],
           build_prompt: '### Goal\nBuild it.',
         }),
         '/_style-gallery/baseline.json': JSON.stringify({
@@ -418,8 +419,8 @@ describe('/api/style-gallery', () => {
       }),
     };
     const style = await readGalleryStyle(env, get.url, 'a');
-    const tokens = style?.tokens;
-    const guidance = style!.guidance;
+    assert.ok(style?.ok);
+    const { tokens, guidance } = style;
     assert.ok(
       guidance.indexOf('Be kind.') < guidance.indexOf('Build it.'),
       'the baseline, then the build prompt',
@@ -435,6 +436,86 @@ describe('/api/style-gallery', () => {
     assert.match(style!.direction, /#ffffff/);
     assert.equal(await readGalleryStyle(env, get.url, 'b'), null);
     assert.equal(await readGalleryStyle(env, get.url, '../cards'), null);
+  });
+
+  it("answers one style's colors and pairs for the editor (D147)", async () => {
+    const entry = {
+      id: 'a',
+      design_tokens: {
+        colors: [{ token: '--color-canvas', role: 'canvas', hex: '#ffffff' }],
+      },
+      contrast_checks: [],
+      build_prompt: 'not sent',
+    };
+    const env = {
+      ASSETS: assets({
+        '/_style-gallery/styles/a.json': JSON.stringify(entry),
+      }),
+    };
+    const found = await handleStyleGallery(
+      new Request('https://vibld.test/api/style-gallery?style=a'),
+      env,
+      granted,
+    );
+    assert.deepEqual(await found.json(), {
+      id: 'a',
+      design_tokens: entry.design_tokens,
+      contrast_checks: [],
+    });
+    for (const style of ['b', '../cards']) {
+      const missing = await handleStyleGallery(
+        new Request(`https://vibld.test/api/style-gallery?style=${style}`),
+        env,
+        granted,
+      );
+      assert.equal(missing.status, 404);
+    }
+  });
+
+  it("refuses color edits that fail the style's pairs (D147)", async () => {
+    const entry = {
+      id: 'a',
+      name: 'Alpha',
+      kind: 'Quiet product site',
+      signature: ['flat white surfaces'],
+      build_prompt: '### Goal',
+      visual_style: { palette: [] },
+      design_tokens: {
+        theme: 'light',
+        colors: [
+          { token: '--color-canvas', role: 'canvas', hex: '#ffffff' },
+          { token: '--color-text', role: 'text', hex: '#111111' },
+        ],
+        fonts: { display: 'Inter', body: 'Inter' },
+        type_scale: [],
+        spacing: { base_unit: '4px', density: 'comfortable', scale: [] },
+        radius: {},
+      },
+      contrast_checks: [
+        {
+          use: 'body text on canvas',
+          fg: '#111111',
+          bg: '#ffffff',
+          ratio: 18.88,
+          target: 4.5,
+        },
+      ],
+    };
+    const env = {
+      ASSETS: assets({
+        '/_style-gallery/styles/a.json': JSON.stringify(entry),
+      }),
+    };
+    const refused = await readGalleryStyle(env, get.url, 'a', {
+      '--color-text': '#eeeeee',
+    });
+    assert.equal(refused?.ok, false);
+    const kept = await readGalleryStyle(env, get.url, 'a', {
+      '--color-text': '#000000',
+    });
+    assert.ok(kept?.ok);
+    assert.match(kept.tokens, /--color-text: #000000;/);
+    assert.match(kept.guidance, /--color-text #111111 is now #000000/);
   });
 
   it('marks the build files as never served as they are', () => {
