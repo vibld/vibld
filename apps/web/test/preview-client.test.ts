@@ -6,6 +6,7 @@ import {
   createShare,
   listShares,
   previewConfigured,
+  previewMode,
   previewStatus,
   outcomeResponse,
   revokeShare,
@@ -42,6 +43,20 @@ describe('previewConfigured', () => {
     assert.equal(
       previewConfigured({ PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' }),
       true,
+    );
+  });
+});
+
+describe('previewMode (D125)', () => {
+  it('uses the sandbox only where it is bound and may serve previews', () => {
+    const { binding } = fakeBinding(() => jsonResponse({}));
+    const bound = { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' };
+    assert.equal(previewMode({}), 'browser');
+    assert.equal(previewMode(bound), 'sandbox');
+    // A self-hosted copy with no preview domain: bound for build checks.
+    assert.equal(
+      previewMode({ ...bound, VIBLD_PREVIEW: 'browser' }),
+      'browser',
     );
   });
 });

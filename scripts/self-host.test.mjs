@@ -88,6 +88,9 @@ describe("a self-hosted copy's configuration (D115)", () => {
     assert.equal(bare.vars.VIBLD_MODEL, undefined);
     const sandbox = selfHostConfig('preview', base.preview, SETTINGS);
     assert.equal(sandbox.vars.PREVIEW_HOSTNAME, undefined);
+    // Bound for its build checks, but previews run in the browser (D125).
+    assert.ok(bare.services.some((b) => b.binding === 'PREVIEW'));
+    assert.equal(bare.vars.VIBLD_PREVIEW, 'browser');
 
     const domains = {
       ...SETTINGS,
@@ -99,6 +102,7 @@ describe("a self-hosted copy's configuration (D115)", () => {
       { pattern: 'build.example.com', custom_domain: true },
     ]);
     assert.equal(web.vars.PUBLISH_HOSTNAME, 'example-preview.dev');
+    assert.equal(web.vars.VIBLD_PREVIEW, undefined);
     assert.equal(web.vars.VIBLD_REFERRAL_ORIGIN, 'https://build.example.com');
     const preview = selfHostConfig('preview', base.preview, domains);
     assert.deepEqual(preview.routes, [

@@ -133,7 +133,9 @@ deploys from the `wrangler.self-host.jsonc` that `scripts/self-host.mjs`
 writes, with `-c wrangler.self-host.jsonc` on every `wrangler` command
 ([Deploying](https://vibld.com/docs/deploying)). The **Self-host check**
 workflow (`.github/workflows/self-host-check.yml`) does the whole sequence
-for a prefixed copy and checks it comes up.
+for a prefixed copy, checks it comes up, then signs in with the owner's
+password and runs one real build on it, and does the same under Docker
+(`scripts/self-host-journey.mjs`).
 
 The deployed Worker serves at `app.vibld.com` (a custom domain route --
 `docs/decisions.md` L20; adding it disables the `workers.dev` URL for this

@@ -144,6 +144,7 @@ import {
   createShare,
   listShares,
   previewConfigured,
+  previewMode,
   previewStatus,
   UNREADABLE_PREVIEW,
   outcomeResponse,
@@ -277,6 +278,8 @@ export interface Env extends PrincipalEnv {
   VIBLD_LOCAL_BASE_URL?: string;
   VIBLD_LOCAL_MODEL?: string;
   VIBLD_LOCAL_API_KEY?: string;
+  /** "browser" when the sandbox cannot serve previews; see `previewMode`. */
+  VIBLD_PREVIEW?: string;
   /** "anthropic", "deepseek", "openai" or "local". Explicit beats inferred; see selectProvider. */
   VIBLD_PROVIDER?: string;
   /**
@@ -3598,7 +3601,7 @@ async function route(
       // Where the Preview pane runs a project: in a sandbox container where
       // this deployment has one, and otherwise in the viewer's own browser
       // (D125).
-      preview: previewConfigured(env) ? 'sandbox' : 'browser',
+      preview: previewMode(env),
     });
   }
 

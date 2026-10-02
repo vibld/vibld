@@ -2,7 +2,7 @@ import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, SITE, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'deploying')!;
-const CHECKED = '2026-09-30';
+const CHECKED = '2026-10-01';
 
 export function meta() {
   return metaFor('/docs/deploying');
@@ -15,8 +15,9 @@ export default function Deploying() {
         The repository’s own READMEs carry the exact commands and are the
         version to follow. The project’s own Self-host check follows this page
         on every run: it deploys a separately named copy, confirms the copy
-        comes up and refuses a signed-out caller, then removes it. Sign-in and
-        generation on a copy are not part of that check, and nobody outside the
+        comes up and refuses a signed-out caller, signs in with the owner’s
+        password, builds one site with a real model and opens its preview, then
+        removes the copy. It does the same under Docker. Nobody outside the
         project has followed the page end to end yet.
       </p>
       <p>
@@ -55,10 +56,13 @@ export default function Deploying() {
         <code>builderDomain</code> and a <code>previewDomain</code> the Workers
         are served at <code>workers.dev</code>, and publishing stays off: the
         builder is left unbound from the publish Worker, which would otherwise
-        name sites under vibld’s own domain. Rate-limit namespace ids are shared
-        across a Cloudflare account, so <code>rateLimitNamespaceBase</code> is
-        required, and the script refuses vibld’s own. The optional settings are
-        listed at the top of the script.
+        name sites under vibld’s own domain. Without a{' '}
+        <code>previewDomain</code> the Preview pane also runs each project in
+        the viewer’s own browser instead of in a sandbox, while the sandbox
+        still checks each build. Rate-limit namespace ids are shared across a
+        Cloudflare account, so <code>rateLimitNamespaceBase</code> is required,
+        and the script refuses vibld’s own. The optional settings are listed at
+        the top of the script.
       </p>
       <p>
         <code>auth</code> is how people sign in: <code>owner</code> (one
@@ -174,9 +178,11 @@ export default function Deploying() {
           Object or Workflow bindings.
         </li>
         <li>
-          Start one sandbox. If it reports itself unavailable rather than
-          failing, the service binding or the shared secret is missing on one of
-          the two sides, or the sandbox has no <code>PREVIEW_HOSTNAME</code>.
+          Run the live preview. With a <code>previewDomain</code> it starts a
+          sandbox; if that reports itself unavailable rather than failing, the
+          service binding or the shared secret is missing on one of the two
+          sides, or the sandbox has no <code>PREVIEW_HOSTNAME</code>. Without
+          one it bundles in your browser.
         </li>
       </ul>
       <p>Each of those refuses with a reason rather than half-working.</p>

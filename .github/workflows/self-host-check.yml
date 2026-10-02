@@ -2,7 +2,10 @@ name: Self-host check
 
 # Deploys a second, separately named copy of vibld from this commit, the way
 # https://vibld.com/docs/deploying tells a self-hoster to, and checks that
-# it comes up and refuses what it has not been given (D80, D115). Every
+# it comes up and refuses what it has not been given (D80, D115). Signed in
+# with the owner's password (D123), it then runs one real build on the copy
+# and opens its preview, and does the same under Docker (D122), with
+# scripts/self-host-journey.mjs. Every
 # Worker, database, bucket and Workflow name is derived from `prefix` by
 # scripts/self-host.mjs, which refuses to write a configuration that still
 # names vibld's own deployment, so this can run in the same account as
@@ -18,9 +21,15 @@ on:
         description: Names start with this (lowercase; never "vibld")
         required: true
         default: selfhost
+      auth:
+        description: How the copy signs in (D123). Only owner is signed in and built on.
+        type: choice
+        options: [owner, clerk]
+        default: owner
       clerk_frontend_api_url:
-        description: A Clerk instance's Frontend API URL (https://..., no path)
-        required: true
+        description: With clerk, a Clerk instance's Frontend API URL (https://..., no path)
+        required: false
+        default: ''
       provider:
         description: The model provider the builder selects
         type: choice
@@ -43,7 +52,8 @@ jobs:
     name: Deploy a prefixed copy and check it
     if: github.repository == 'vibld/vibld-internal'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # One real build of up to twenty-five minutes on top of the deploy.
+    timeout-minutes: 60
     environment:
       name: preview
     env:
@@ -66,6 +76,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check the inputs
+        env:
+          AUTH: ${{ inputs.auth }}
+          CLERK_URL: ${{ inputs.clerk_frontend_api_url }}
+        run: |
+          if [ "$AUTH" = clerk ] && [ -z "$CLERK_URL" ]; then
+            echo "::error::auth is clerk, so clerk_frontend_api_url is needed."
+            exit 1
+          fi
+
       - name: Create this copy's database and bucket
         id: state
         env:
@@ -78,15 +98,18 @@ jobs:
         env:
           PREFIX: ${{ inputs.prefix }}
           D1_ID: ${{ steps.state.outputs.d1_database_id }}
+          AUTH: ${{ inputs.auth }}
           CLERK_URL: ${{ inputs.clerk_frontend_api_url }}
           PROVIDER: ${{ inputs.provider }}
         run: |
           node -e '
             const { writeFileSync } = require("node:fs");
+            const clerk = process.env.AUTH === "clerk";
             writeFileSync(process.argv[1], JSON.stringify({
               prefix: process.env.PREFIX,
               d1DatabaseId: process.env.D1_ID,
-              clerkFrontendApiUrl: process.env.CLERK_URL,
+              auth: process.env.AUTH,
+              ...(clerk ? { clerkFrontendApiUrl: process.env.CLERK_URL } : {}),
               provider: process.env.PROVIDER,
               rateLimitNamespaceBase: 5001,
             }));
@@ -110,7 +133,7 @@ jobs:
         working-directory: apps/preview
         run: $WRANGLER deploy -c wrangler.self-host.jsonc
 
-      # No Clerk publishable key: this copy is checked signed out.
+      # No Clerk publishable key: a clerk copy is checked signed out.
       - name: Build the builder
         run: pnpm --filter @vibld/web build
 
@@ -126,7 +149,16 @@ jobs:
 
       # Fresh values for this copy alone, never vibld's, given on stdin so
       # they reach no log. Each side of a service binding gets the same one.
+      # The owner's password is made here too, masked, and handed to the
+      # journey below through the job's environment. The model key is the
+      # 'preview' environment's, as for vibld's own preview.
       - name: Set the shared secrets
+        env:
+          AUTH: ${{ inputs.auth }}
+          PROVIDER: ${{ inputs.provider }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
           put() { (cd "apps/$1" && printf '%s' "$3" | $WRANGLER secret put "$2" -c wrangler.self-host.jsonc >/dev/null); }
@@ -138,11 +170,25 @@ jobs:
           put web PUBLISH_INTERNAL_SECRET "$publish"
           put publish PUBLISH_INTERNAL_SECRET "$publish"
           put preview PREVIEW_SHARE_SECRET "$share"
+          case "$PROVIDER" in
+            deepseek) key=DEEPSEEK_API_KEY ;;
+            openai) key=OPENAI_API_KEY ;;
+            *) key=ANTHROPIC_API_KEY ;;
+          esac
+          if [ -z "${!key}" ]; then
+            echo "::error::$key is not set on the 'preview' environment, so the copy has nothing to build with."
+            exit 1
+          fi
+          put web "$key" "${!key}"
+          if [ "$AUTH" = owner ]; then
+            password="$(openssl rand -hex 24)"
+            echo "::add-mask::$password"
+            put web VIBLD_OWNER_PASSWORD "$password"
+            echo "VIBLD_OWNER_PASSWORD=$password" >> "$GITHUB_ENV"
+          fi
 
       # What can be checked signed out: the interface is served, and the
       # API refuses an anonymous caller rather than answering or failing.
-      # Signing in and generating need a real Clerk instance and a model key
-      # (docs/deploying, "What to check once it is up").
       - name: Check the deployed copy
         env:
           URL: ${{ steps.web.outputs.url }}
@@ -168,6 +214,35 @@ jobs:
             *) echo "::error::/api/config answered $api to a signed-out caller"; cat "$RUNNER_TEMP/config.json"; exit 1 ;;
           esac
 
+      # Outside the workspace and not in the lockfile, as for the end-to-end
+      # check on production: nothing else in the repository uses it.
+      - name: Install Playwright
+        if: ${{ inputs.auth == 'owner' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/journey"
+          cd "$RUNNER_TEMP/journey"
+          echo '{"private":true}' > package.json
+          npm install --no-audit --no-fund --ignore-scripts playwright@1.63.0
+          npx playwright install --with-deps chromium
+
+      # D122: sign in as the owner, build, open the preview, delete the
+      # project.
+      - name: Sign in and build
+        if: ${{ inputs.auth == 'owner' }}
+        env:
+          SELF_HOST_URL: ${{ steps.web.outputs.url }}
+        run: node scripts/self-host-journey.mjs "$RUNNER_TEMP/journey" "$RUNNER_TEMP/journey-out"
+
+      # Screenshots and results.json. No trace: it would record the cookie.
+      - name: Upload the screenshots
+        if: ${{ always() && inputs.auth == 'owner' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: self-host-cloudflare
+          path: ${{ runner.temp }}/journey-out
+          retention-days: 14
+          if-no-files-found: ignore
+
       # D117. Runs whether the check passed or failed, so a failed run does
       # not leave a half-deployed copy behind.
       - name: Tear the copy down
@@ -175,3 +250,79 @@ jobs:
         env:
           PREFIX: ${{ inputs.prefix }}
         run: node scripts/self-host-resources.mjs teardown "$PREFIX"
+
+  # The same journey under docker compose (D126), on this runner's own
+  # Docker: previews run as sibling containers (D137). Nothing outlives the
+  # job, so there is nothing to tear down.
+  docker:
+    name: Run it under Docker, sign in and build
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment:
+      name: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Written to .env, which compose reads; the model key is the
+      # 'preview' environment's and the password is made for this job.
+      - name: Start it
+        env:
+          PROVIDER: ${{ inputs.provider }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          case "$PROVIDER" in
+            deepseek) key=DEEPSEEK_API_KEY ;;
+            openai) key=OPENAI_API_KEY ;;
+            *) key=ANTHROPIC_API_KEY ;;
+          esac
+          if [ -z "${!key}" ]; then
+            echo "::error::$key is not set on the 'preview' environment, so the copy has nothing to build with."
+            exit 1
+          fi
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          echo "VIBLD_OWNER_PASSWORD=$password" >> "$GITHUB_ENV"
+          umask 077
+          printf 'VIBLD_OWNER_PASSWORD=%s\nVIBLD_PROVIDER=%s\n%s=%s\n' "$password" "$PROVIDER" "$key" "${!key}" > .env
+          docker compose up --build --detach
+
+      - name: Wait for it
+        run: node docker/smoke.mjs 900
+
+      - name: Install Playwright
+        run: |
+          mkdir -p "$RUNNER_TEMP/journey"
+          cd "$RUNNER_TEMP/journey"
+          echo '{"private":true}' > package.json
+          npm install --no-audit --no-fund --ignore-scripts playwright@1.63.0
+          npx playwright install --with-deps chromium
+
+      - name: Sign in and build
+        env:
+          SELF_HOST_URL: http://localhost:8787
+        run: node scripts/self-host-journey.mjs "$RUNNER_TEMP/journey" "$RUNNER_TEMP/journey-out"
+
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: self-host-docker
+          path: ${{ runner.temp }}/journey-out
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color | tail -n 300

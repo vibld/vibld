@@ -2,7 +2,7 @@ import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, SITE, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'self-hosting')!;
-const CHECKED = '2026-09-30';
+const CHECKED = '2026-10-01';
 
 export function meta() {
   return metaFor('/docs/self-hosting');
@@ -20,10 +20,11 @@ export default function SelfHosting() {
       </p>
       <p>
         <strong>Checked by the project, not yet by anyone else.</strong> A
-        workflow deploys a separately named copy from these docs and confirms it
-        comes up and refuses a signed-out caller. Sign-in and generation on a
-        copy are not checked, and nobody outside the project has deployed their
-        own yet. Expect to be among the first, and to find gaps.
+        workflow deploys a separately named copy from these docs, confirms it
+        comes up and refuses a signed-out caller, then signs in with the owner’s
+        password and builds one site on it with a real model. It does the same
+        under Docker. Nobody outside the project has deployed their own yet.
+        Expect to be among the first, and to find gaps.
       </p>
       <p>
         For a real build with your own model key, you need none of this.{' '}

@@ -51,6 +51,21 @@ export function previewConfigured(env: PreviewServiceEnv): boolean {
   return Boolean(env.PREVIEW && env.PREVIEW_INTERNAL_SECRET);
 }
 
+/**
+ * Where the Preview pane runs a project (D125): in a sandbox container where
+ * this deployment can start one, and otherwise in the viewer's own browser.
+ * `VIBLD_PREVIEW=browser` says the preview Worker is bound for its build
+ * checks but has no hostname to serve previews under: a self-hosted copy
+ * without a preview domain (scripts/self-host.mjs).
+ */
+export function previewMode(
+  env: PreviewServiceEnv & { VIBLD_PREVIEW?: string },
+): 'sandbox' | 'browser' {
+  return previewConfigured(env) && env.VIBLD_PREVIEW !== 'browser'
+    ? 'sandbox'
+    : 'browser';
+}
+
 const INTERNAL_ORIGIN = 'https://internal.invalid';
 
 function authHeaders(env: PreviewServiceEnv): Record<string, string> {

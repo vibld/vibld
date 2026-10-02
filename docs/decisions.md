@@ -477,6 +477,11 @@ builder, and whether the repository should move to his account.
   Worker variables on Cloudflare, the same place as `VIBLD_PROVIDER` and
   `VIBLD_MODEL`. Chris chose this over the admin panel and over both with
   the panel first.
+- **D139. The in-browser preview merges when CI is green.** Codex review
+  findings are fixed as they come, but its pull request did not wait for a
+  clean Codex review.
+- **D140. Not while the live generate check is red.** The pull request
+  waited for "Clone, generate with one key, build" to pass on its head.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

@@ -288,7 +288,14 @@ export function selfHostConfig(app, base, settings) {
     if (s.builderDomain)
       vars.VIBLD_REFERRAL_ORIGIN = `https://${s.builderDomain}`;
     else delete vars.VIBLD_REFERRAL_ORIGIN;
-    if (s.previewDomain) vars.PUBLISH_HOSTNAME = s.previewDomain;
+    if (s.previewDomain) {
+      vars.PUBLISH_HOSTNAME = s.previewDomain;
+      delete vars.VIBLD_PREVIEW;
+    } else {
+      // The sandbox still runs the build checks, but has no hostname to
+      // serve a preview under, so the pane bundles in the browser (D125).
+      vars.VIBLD_PREVIEW = 'browser';
+    }
   }
   if (app === 'preview') {
     if (s.previewDomain) {
