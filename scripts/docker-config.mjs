@@ -23,6 +23,11 @@
  *   and published sites `http://<slug>.localhost:<PUBLISH_PORT>/`.
  * - Settings and keys come from the environment at start
  *   (`docker/entrypoint.sh` writes them to `.dev.vars`), not from here.
+ *
+ * With `VIBLD_SANDBOX=off`, for a host that runs one container on one port
+ * with no Docker socket (D141): only the builder runs, unbound from the
+ * other two, so previews bundle in the viewer's browser (D125), builds are
+ * not checked in a sandbox and publishing reports itself unavailable.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -53,7 +58,7 @@ const DEPLOY_ONLY = ['routes', 'workers_dev', 'observability', 'limits'];
  * One Worker's configuration under Docker: the self-host configuration,
  * with the hosts made local. Pure: the tests read it directly.
  */
-export function dockerConfig(app, base) {
+export function dockerConfig(app, base, { sandbox = true } = {}) {
   const config = selfHostConfig(app, base, LOCAL_SETTINGS);
   for (const key of DEPLOY_ONLY) delete config[key];
   config.dev = { ip: '0.0.0.0', port: PORTS[app] };
@@ -74,6 +79,13 @@ export function dockerConfig(app, base) {
   // model set does (D124). The placeholder here would otherwise name OpenAI
   // on a copy with no OpenAI key.
   if (app === 'web') delete vars.VIBLD_PROVIDER;
+  if (app === 'web' && !sandbox) {
+    config.services = (config.services ?? []).filter(
+      (b) => b.binding !== 'PREVIEW' && b.binding !== 'PUBLISH',
+    );
+    delete vars.PUBLISH_HOSTNAME;
+    vars.VIBLD_PREVIEW = 'browser';
+  }
   config.vars = vars;
   const text = JSON.stringify(config);
   if (text.includes('localhost.invalid')) {
@@ -82,7 +94,13 @@ export function dockerConfig(app, base) {
   return config;
 }
 
+/** Whether the sandbox and publishing run beside the builder. */
+export function sandboxOn(env) {
+  return (env.VIBLD_SANDBOX ?? '').trim().toLowerCase() !== 'off';
+}
+
 function main() {
+  const sandbox = sandboxOn(process.env);
   for (const app of APPS) {
     const base = parseJsonc(
       readFileSync(join(ROOT, 'apps', app, 'wrangler.jsonc'), 'utf8'),
@@ -92,7 +110,7 @@ function main() {
       file,
       '// Written by scripts/docker-config.mjs from wrangler.jsonc.\n' +
         '// Do not edit: change that script and run it again.\n' +
-        `${JSON.stringify(dockerConfig(app, base), null, 2)}\n`,
+        `${JSON.stringify(dockerConfig(app, base, { sandbox }), null, 2)}\n`,
     );
     console.log(`wrote ${file}`);
   }

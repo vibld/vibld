@@ -482,6 +482,13 @@ builder, and whether the repository should move to his account.
   clean Codex review.
 - **D140. Not while the live generate check is red.** The pull request
   waited for "Clone, generate with one key, build" to pass on its head.
+- **D141. Container hosts run the builder alone, and a VPS runs it all.**
+  Hosts that give one container one port and no Docker socket (Render,
+  Railway, Fly.io) run the image with `VIBLD_SANDBOX=off`: only the builder
+  starts, on `PORT`, previews bundle in the viewer's browser (D125), builds
+  are not checked in a sandbox and publishing is off. A separate one-click
+  VPS template installs Docker and runs the full compose file, sandbox
+  previews included. Chris chose both over either one alone.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

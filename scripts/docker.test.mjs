@@ -7,12 +7,13 @@ import { describe, it } from 'node:test';
 import {
   PASSED,
   SHARED_SECRETS,
+  builderPort,
   devVars,
   settingsProblems,
   sharedSecrets,
   startPlan,
 } from '../docker/start.mjs';
-import { PORTS, dockerConfig } from './docker-config.mjs';
+import { PORTS, dockerConfig, sandboxOn } from './docker-config.mjs';
 import { APPS, VIBLD_OWN, parseJsonc } from './self-host.mjs';
 
 /** vibld under docker compose, with no Cloudflare account (D126, D137). */
@@ -222,5 +223,33 @@ describe('starting vibld in its container', () => {
       inspectors.add(command[command.indexOf('--inspector-port') + 1]);
     }
     assert.equal(inspectors.size, 3);
+  });
+
+  it('runs the builder alone on the host’s port with the sandbox off (D141)', () => {
+    assert.equal(sandboxOn({}), true);
+    assert.equal(sandboxOn({ VIBLD_SANDBOX: ' OFF ' }), false);
+    assert.equal(builderPort({ PORT: '10000' }), PORTS.web);
+    assert.equal(builderPort({ VIBLD_SANDBOX: 'off', PORT: '10000' }), 10000);
+    assert.equal(builderPort({ VIBLD_SANDBOX: 'off' }), PORTS.web);
+    const plan = startPlan('/data', 'wrangler', {
+      sandbox: false,
+      port: 10000,
+    });
+    assert.deepEqual(
+      plan.workers.map((w) => [w.app, w.port]),
+      [['web', 10000]],
+    );
+    const { command } = plan.workers[0];
+    assert.equal(command[command.indexOf('--port') + 1], '10000');
+
+    const web = dockerConfig('web', base.web, { sandbox: false });
+    assert.deepEqual(
+      web.services.filter((b) => ['PREVIEW', 'PUBLISH'].includes(b.binding)),
+      [],
+    );
+    assert.equal(web.vars.VIBLD_PREVIEW, 'browser');
+    assert.equal(web.vars.PUBLISH_HOSTNAME, undefined);
+    assert.ok(configs.web.services.some((b) => b.binding === 'PREVIEW'));
+    assert.equal(configs.web.vars.VIBLD_PREVIEW, undefined);
   });
 });

@@ -1,0 +1,31 @@
+# vibld on Render, from the repository's Dockerfile (docs/decisions.md D141).
+#
+# Render runs one container on one port with no Docker socket, so the
+# builder runs alone (VIBLD_SANDBOX=off): previews bundle in the viewer's
+# browser (D125), builds are not checked in a sandbox, and publishing is
+# off. Projects, accounts and the secrets made on first start are kept on
+# the disk at /data. README.md, "Deploy to a container host", has the rest.
+services:
+  - type: web
+    name: vibld
+    runtime: docker
+    # A persistent disk needs a paid instance type.
+    plan: 1c-2g
+    healthCheckPath: /
+    envVars:
+      - key: VIBLD_SANDBOX
+        value: 'off'
+      # The password you sign in with, 12 characters or more.
+      - key: VIBLD_OWNER_PASSWORD
+        sync: false
+      # One model key is enough; leave the others blank.
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+    disk:
+      name: vibld-data
+      mountPath: /data
+      sizeGB: 5

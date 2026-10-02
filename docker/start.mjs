@@ -21,7 +21,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { PORTS } from '../scripts/docker-config.mjs';
+import { PORTS, sandboxOn } from '../scripts/docker-config.mjs';
 import { ROOT } from '../scripts/self-host.mjs';
 
 /** Where the state lives: the compose file mounts a volume here. */
@@ -130,8 +130,26 @@ export function settingsProblems(env) {
 /** Debugger ports, inside the container only. */
 const INSPECTOR_PORTS = { web: 9229, preview: 9230, publish: 9231 };
 
-/** The commands, in order: the migrations, then the three Workers. */
-export function startPlan(data = DATA, wrangler = WRANGLER) {
+/**
+ * The builder's port: `PORT` where a host sets it, with the sandbox off
+ * (D141); the fixed one otherwise, which the compose file publishes.
+ */
+export function builderPort(env) {
+  const port = Number(env.PORT);
+  return !sandboxOn(env) && Number.isInteger(port) && port > 0
+    ? port
+    : PORTS.web;
+}
+
+/**
+ * The commands, in order: the migrations, then the three Workers, or the
+ * builder alone with the sandbox off (D141).
+ */
+export function startPlan(
+  data = DATA,
+  wrangler = WRANGLER,
+  { sandbox = true, port = PORTS.web } = {},
+) {
   const state = join(data, 'state');
   const config = (app) => join(ROOT, 'apps', app, 'wrangler.docker.jsonc');
   return {
@@ -148,9 +166,9 @@ export function startPlan(data = DATA, wrangler = WRANGLER) {
       config('web'),
     ],
     // Publishing and previews first, so the builder finds them bound.
-    workers: ['publish', 'preview', 'web'].map((app) => ({
+    workers: (sandbox ? ['publish', 'preview', 'web'] : ['web']).map((app) => ({
       app,
-      port: PORTS[app],
+      port: app === 'web' ? port : PORTS[app],
       command: [
         wrangler,
         'dev',
@@ -161,7 +179,7 @@ export function startPlan(data = DATA, wrangler = WRANGLER) {
         '--ip',
         '0.0.0.0',
         '--port',
-        String(PORTS[app]),
+        String(app === 'web' ? port : PORTS[app]),
         // Each its own debugger port: all three default to the same one.
         '--inspector-port',
         String(INSPECTOR_PORTS[app]),
@@ -194,7 +212,9 @@ function main() {
     );
   }
 
-  const plan = startPlan();
+  const sandbox = sandboxOn(process.env);
+  const port = builderPort(process.env);
+  const plan = startPlan(DATA, WRANGLER, { sandbox, port });
   const [cmd, ...args] = plan.migrate;
   const migrated = spawnSync(cmd, args, {
     stdio: 'inherit',
@@ -223,7 +243,7 @@ function main() {
     });
   }
   console.log(
-    `vibld is starting: the builder at http://localhost:${PORTS.web}/ (sign in with VIBLD_OWNER_PASSWORD).`,
+    `vibld is starting: the builder on port ${port} (sign in with VIBLD_OWNER_PASSWORD)${sandbox ? '' : ', with previews in the browser and no sandbox'}.`,
   );
 }
 

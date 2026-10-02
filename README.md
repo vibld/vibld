@@ -360,6 +360,16 @@ The builder then offers it as "Local: <name>", and with no provider key set it i
 - **Speed is your machine's.** Each step is sized for a model that writes about 12 tokens a second, and is given twice the time that needs. A slower machine can run out of time on a large step.
 - **Under Docker**, vibld uses your machine's network, so `localhost` in these settings is your machine. **On Cloudflare**, the Worker can only reach an address on the public internet, so the server has to be reachable from there.
 
+### Deploy to a container host
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vibld/vibld)
+
+A host that runs one container on one port, such as Render, can run the same image with `VIBLD_SANDBOX=off` (docs/decisions.md D141). [`render.yaml`](render.yaml) sets it up: Render asks for your password and a model key, and keeps your projects on a 5 GB disk at `/data`. A disk needs a paid Render instance type.
+
+- **The builder runs alone.** Such a host gives no Docker socket, so there is no sandbox: previews bundle in the viewer's browser ([as on Cloudflare without Containers](#running-it-yourself)), builds are not checked in a sandbox, and publishing reports itself unavailable.
+- **It listens on `PORT`**, which the host sets.
+- **Checked so far:** CI starts the image this way and signs in. Nobody has deployed it to Render yet.
+
 Read next: [what self-hosting involves](https://vibld.com/docs/self-hosting), [every setting and secret](https://vibld.com/docs/configuration), [deploying your own copy](https://vibld.com/docs/deploying) and [hosted or self-hosted](https://vibld.com/docs/hosted-vs-self-hosted). The exact commands are in [`apps/web/README.md`](apps/web/README.md), [`apps/preview/README.md`](apps/preview/README.md) and [`apps/publish/README.md`](apps/publish/README.md), beside the code they deploy. The workflows that deploy vibld's own hosted service run only in the maintainers' working repository, since a copy has none of their secrets.
 
 ## Documentation

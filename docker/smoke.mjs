@@ -11,10 +11,16 @@
  *
  * Starting a preview is not checked here: the end-to-end check does that
  * with a real build (D122).
+ *
+ * With VIBLD_SANDBOX=off (D141) only the builder runs, on PORT.
  */
-import { PORTS } from '../scripts/docker-config.mjs';
+import { PORTS, sandboxOn } from '../scripts/docker-config.mjs';
+import { builderPort } from './start.mjs';
 
-const BUILDER = `http://localhost:${PORTS.web}`;
+const BUILDER = `http://localhost:${builderPort(process.env)}`;
+const RUNNING = sandboxOn(process.env)
+  ? Object.entries(PORTS)
+  : [['web', builderPort(process.env)]];
 
 /** Wait until a URL answers anything at all, or give up. */
 async function answers(url, deadline) {
@@ -33,7 +39,7 @@ async function main(seconds = 600) {
   const password = process.env.VIBLD_OWNER_PASSWORD;
   if (!password) throw new Error('Set VIBLD_OWNER_PASSWORD to sign in with.');
   const deadline = Date.now() + seconds * 1000;
-  for (const [app, port] of Object.entries(PORTS)) {
+  for (const [app, port] of RUNNING) {
     const status = await answers(`http://localhost:${port}/`, deadline);
     console.log(`${app} answers on ${port} (${status})`);
   }
@@ -77,6 +83,13 @@ async function main(seconds = 600) {
   console.log(
     `the builder answers signed in: generation "${body.generation}", ${body.models.length} models`,
   );
+
+  // Alone on one port, the builder previews in the browser (D125, D141).
+  const expected = sandboxOn(process.env) ? 'sandbox' : 'browser';
+  if (body.preview !== expected) {
+    throw new Error(`previews run in "${body.preview}", not "${expected}"`);
+  }
+  console.log(`previews run in the ${expected}`);
 
   // A local model set in .env reaches the builder, offered by its own name
   // (D124). No server needs to answer for it to be listed.

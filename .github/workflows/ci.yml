@@ -148,6 +148,29 @@ jobs:
         if: always()
         run: docker compose logs --no-color | tail -n 300
 
+      # The same image as a container host runs it (D141, render.yaml): one
+      # port from PORT, no Docker socket, the builder alone.
+      - name: Start it on one port with the sandbox off
+        env:
+          VIBLD_OWNER_PASSWORD: ci-owner-password-123
+        run: |
+          docker compose down
+          docker run --detach --name vibld-one-port -p 10000:10000 \
+            -e VIBLD_SANDBOX=off -e PORT=10000 \
+            -e VIBLD_OWNER_PASSWORD -e OPENAI_API_KEY=sk-not-a-real-key \
+            vibld
+
+      - name: Sign in on one port
+        env:
+          VIBLD_OWNER_PASSWORD: ci-owner-password-123
+          VIBLD_SANDBOX: 'off'
+          PORT: '10000'
+        run: node docker/smoke.mjs 600
+
+      - name: Logs on one port
+        if: always()
+        run: docker logs vibld-one-port 2>&1 | tail -n 200 || true
+
   # The marketing template is deliberately outside the pnpm workspace: it has
   # to install and build on its own, with npm and no Vibld packages, because
   # that is what a user who exports it will do. Building it here is the only
