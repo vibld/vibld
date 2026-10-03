@@ -36,6 +36,7 @@ import {
   checkStyleGallery,
   parseStyleGallery,
   serializeStyleGallery,
+  styleGalleryIndexModule,
   upsertStyleGallery,
 } from '../src/style-gallery.ts';
 import type {
@@ -46,6 +47,10 @@ import type {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const STYLE_GALLERY_FILE = resolve(HERE, '../data/style-gallery.json');
+export const STYLE_GALLERY_INDEX_FILE = resolve(
+  HERE,
+  '../data/style-gallery-index.ts',
+);
 export const SOURCE_PATH = 'style-gallery-patterns';
 
 const EM_DASH = String.fromCodePoint(0x2014);
@@ -196,6 +201,10 @@ function main(argv: string[]): number {
   const current = existsSync(STYLE_GALLERY_FILE)
     ? readFileSync(STYLE_GALLERY_FILE, 'utf8')
     : null;
+  const indexText = styleGalleryIndexModule(catalog);
+  const currentIndex = existsSync(STYLE_GALLERY_INDEX_FILE)
+    ? readFileSync(STYLE_GALLERY_INDEX_FILE, 'utf8')
+    : null;
   const summary =
     `${catalog.entries.length} styles: ${changes.added.length} added, ` +
     `${changes.updated.length} updated, ${changes.removed.length} removed, ` +
@@ -206,9 +215,16 @@ function main(argv: string[]): number {
       console.error(`${STYLE_GALLERY_FILE} is not what an import writes`);
       return 1;
     }
+    if (currentIndex !== indexText) {
+      console.error(`${STYLE_GALLERY_INDEX_FILE} is not what an import writes`);
+      return 1;
+    }
     return 0;
   }
   if (current !== text) writeFileSync(STYLE_GALLERY_FILE, text);
+  if (currentIndex !== indexText) {
+    writeFileSync(STYLE_GALLERY_INDEX_FILE, indexText);
+  }
   console.log(`${summary} -> ${STYLE_GALLERY_FILE}`);
   return 0;
 }

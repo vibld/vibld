@@ -74,9 +74,13 @@ function sourcesFor(path: string): string[] {
         ? 'routes/use-case.tsx'
         : path.startsWith('/templates/')
           ? 'routes/template.tsx'
-          : ['/legal', '/docs', '/use-cases'].includes(path)
-            ? `routes/${path.slice(1)}.index.tsx`
-            : `routes/${path.slice(1).replace(/\//g, '.')}.tsx`;
+          : path === '/styles/gallery'
+            ? 'routes/style-gallery.tsx'
+            : path.startsWith('/styles/gallery/')
+              ? 'routes/style.tsx'
+              : ['/legal', '/docs', '/use-cases'].includes(path)
+                ? `routes/${path.slice(1)}.index.tsx`
+                : `routes/${path.slice(1).replace(/\//g, '.')}.tsx`;
   const data: Record<string, string[]> = {
     '/': ['answers.ts'],
     '/pricing': [
@@ -90,11 +94,15 @@ function sourcesFor(path: string): string[] {
   };
   // Every template page and the two galleries read the generated catalog.
   const catalog = '../../../packages/ai/data/design-templates.ts';
+  // The style gallery's pages read its data (D143).
+  const gallery = '../../../packages/ai/data/style-gallery.json';
   const extra = path.startsWith('/use-cases/')
     ? ['use-cases.ts']
     : path.startsWith('/templates') || path === '/inspiration'
       ? [catalog]
-      : (data[path] ?? []);
+      : path.startsWith('/styles/gallery')
+        ? [gallery]
+        : (data[path] ?? []);
   const files = [module, ...extra].map((file) => join(APP, file));
   for (const file of files) {
     if (!existsSync(file)) {
@@ -123,8 +131,19 @@ function gitCanDate(): boolean {
   }
 }
 
-/** The date of the last commit that touched any of `files`, or null. */
+const commitDates = new Map<string, string | null>();
+
+/**
+ * The date of the last commit that touched any of `files`, or null. Asked
+ * once per set of files: the gallery's 1,300+ pages share theirs.
+ */
 function lastCommitDate(files: string[]): string | null {
+  const key = files.join('\n');
+  if (!commitDates.has(key)) commitDates.set(key, gitLogDate(files));
+  return commitDates.get(key) ?? null;
+}
+
+function gitLogDate(files: string[]): string | null {
   try {
     const date = execFileSync(
       'git',
@@ -160,7 +179,10 @@ function sitemap(): string {
   if (!dated) console.log('  (no git history to date pages; lastmod omitted)');
   const urls = ROUTES.map((route) => {
     const home = route.path === '/';
-    const lastmod = dated ? lastCommitDate(sourcesFor(route.path)) : null;
+    // Mapped even when nothing will be dated, so a page whose source is
+    // misnamed fails every build, not only a deploy's full clone (internal PR 356).
+    const sources = sourcesFor(route.path);
+    const lastmod = dated ? lastCommitDate(sources) : null;
     return [
       '  <url>',
       `    <loc>${absolute(route.path)}</loc>`,

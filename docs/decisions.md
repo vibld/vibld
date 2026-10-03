@@ -233,14 +233,16 @@ a contrast guard on color edits.
   across vibld's catalogs, every contrast pair measured again). A swatch
   holding several roles ("canvas / supporting accent (decorative)") is
   decorative only when every role is.
-- **D143. Whether the data is exported to vibld/vibld: Chris to decide.**
-  Facts: designs-v1 is private and has no license file, and
+- **D143. The data is exported to vibld/vibld, and vibld.com publishes the
+  gallery (Chris, 2026-10-02: "Publish gallery").** `scripts/public-export.mjs`
+  no longer leaves `packages/ai/data/style-gallery.json` out, and vibld.com
+  gets browsable style pages beside the templates. The facts Chris decided
+  on, as recorded before: designs-v1 is private and has no license file, and
   `style-gallery-patterns/` has none of its own. Its README says the entries
   were "derived from measurements of public marketing sites" (colors, type
   sizes and weights, spacing, radii, shadows and section order), that every
   name, description and prompt is newly written, and that "This folder makes
-  no licensing decisions." Until Chris decides, `scripts/public-export.mjs`
-  leaves the data file out, and the public copy runs with the gallery empty.
+  no licensing decisions."
 - **D144. How the builder reaches the gallery, taken on Chris's behalf.**
   A chosen gallery style is a project setting, stored by `id` in a new
   `projects.style_gallery` column (migration 0045) and carried like the

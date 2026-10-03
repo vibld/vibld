@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { DESIGN_TEMPLATES } from '@vibld/ai/design-templates';
+import { parseStyleGallery } from '@vibld/ai/style-gallery';
 
 import { TEMPLATE_FONTS } from '../app/template-fonts.gen.ts';
 
@@ -16,6 +17,24 @@ describe('the templates’ self-hosted typefaces (D104)', () => {
       ),
     ].filter((family) => !TEMPLATE_FONTS[family]);
     assert.deepEqual(missing, [], 'run scripts/template-fonts.ts');
+  });
+
+  it('has every family a gallery style uses (D143)', () => {
+    const gallery = parseStyleGallery(
+      readFileSync(
+        new URL(
+          '../../../packages/ai/data/style-gallery.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    );
+    const missing = [
+      ...new Set(
+        gallery.entries.flatMap((e) => Object.values(e.design_tokens.fonts)),
+      ),
+    ].filter((family) => !TEMPLATE_FONTS[family]);
+    assert.deepEqual(missing, [], 'run scripts/template-fonts.ts --missing');
   });
 
   it('serves each file it names, with its licence beside it', () => {

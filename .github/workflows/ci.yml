@@ -11,7 +11,9 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # vibld.com prerenders a page per gallery style (D143), 1,300+ pages,
+    # which put the build past ten minutes on its own.
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -41,8 +43,16 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # vibld.com's tests build the site themselves and prerender a page per
+      # gallery style (D143), each a request React Router fails after ten
+      # seconds. Beside every other package's tests, on a runner's four
+      # cores, a page took longer and the build failed (internal PR 356). So they run
+      # on their own, after the rest.
       - name: Test
-        run: pnpm test
+        run: pnpm test --filter='!@vibld/marketing'
+
+      - name: Test vibld.com
+        run: pnpm test --filter=@vibld/marketing
 
       # The repository scripts are not a workspace package, so turbo's test
       # task never reaches them. Their tests run here instead.
@@ -55,10 +65,13 @@ jobs:
       #
       # The Clerk key is a placeholder. The build only embeds it, and a real
       # one would put an instance identifier in logs for no gain.
+      #
+      # Not vibld.com: its tests above ran its build script, postbuild
+      # included, and a second prerender would only repeat it.
       - name: Build
         env:
           VITE_CLERK_PUBLISHABLE_KEY: pk_test_placeholder
-        run: pnpm build
+        run: pnpm build --filter='!@vibld/marketing'
 
   # The eval stub reported a project accepted that stopped at
   # "vite: not found" (internal PR 59). Writing one case out and building it is the

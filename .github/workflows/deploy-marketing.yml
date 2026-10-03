@@ -40,7 +40,8 @@ jobs:
     # job reads, so there it could only fail.
     if: github.repository == 'vibld/vibld-internal'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # The build prerenders a page per gallery style (D143).
+    timeout-minutes: 15
 
     # Credentials live on this environment rather than the repository, so
     # they are reachable only from a job that names it, and any protection

@@ -17,6 +17,7 @@ packages/ai/data/screen-patterns.ts
 # The style gallery, written one entry per line by
 # packages/ai/bin/import-style-gallery.ts (D142).
 packages/ai/data/style-gallery.json
+packages/ai/data/style-gallery-index.ts
 # The animated backgrounds, written by apps/marketing/scripts/backdrops.ts
 # exactly as packages/ai gives them to a project; a test holds them to it.
 apps/marketing/app/components/backdrop

@@ -22,7 +22,8 @@ jobs:
     # job reads, so there it could only fail.
     if: github.repository == 'vibld/vibld-internal'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # The build prerenders a page per gallery style (D143).
+    timeout-minutes: 15
 
     # The same environment the production marketing deploy uses, so the
     # Cloudflare credentials are configured in one place. This job needs only

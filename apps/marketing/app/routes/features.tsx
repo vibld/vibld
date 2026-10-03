@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
 import { STYLE_PRESETS } from '@vibld/ai/style-presets';
+import { STYLE_GALLERY_INDEX } from '@vibld/ai/style-gallery-index';
 
 import { FeatureBento, SectionHead } from '../components/Sections';
 import { PageHead } from '../components/SiteChrome';
@@ -42,6 +43,14 @@ const COMPOSER: Feature[] = [
   {
     title: 'Style',
     body: 'A visual direction from the catalog, narrowed by mood. Styles whose moods your message names are marked as suggestions; nothing is picked for you.',
+  },
+  {
+    title: 'Gallery',
+    body: `One of ${approxCount(STYLE_GALLERY_INDEX.length)} complete styles: its colors, typefaces, type scale, corners and shadows are written into the site as tokens. Its colors can be edited, and an edit that breaks a contrast pair is not applied.`,
+  },
+  {
+    title: 'Templates',
+    body: 'A design from the template catalog as a starting point. Its brief is added to your message, to edit or send.',
   },
   {
     title: 'Reference',

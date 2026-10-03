@@ -108,7 +108,7 @@ export async function handleStyleGallery(
     );
   }
   const cards = await readStyleGalleryAsset(env, origin, 'cards.json');
-  // No file is a copy built without the gallery (D143): an empty gallery,
+  // No file is a copy built without the gallery's data: an empty gallery,
   // not an error.
   if (!cards) return json([]);
   return new Response(cards.body, {

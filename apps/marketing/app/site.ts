@@ -8,6 +8,11 @@
  */
 
 import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
+import {
+  STYLE_CATEGORY_LABELS,
+  STYLE_GROUP_LABELS,
+} from '@vibld/ai/style-gallery';
+import { STYLE_GALLERY_INDEX } from '@vibld/ai/style-gallery-index';
 
 import { LAYERS } from './layers.ts';
 import { USE_CASES } from './use-cases.ts';
@@ -391,6 +396,16 @@ export const ROUTES: SiteRoute[] = [
       'Every visual direction vibld can build in, from the builder\u2019s own list: full color systems where a direction has one, surface treatments where it does not.',
   },
   {
+    path: '/styles/gallery',
+    title: `Style gallery | ${SITE.name}`,
+    description: `${approxCount(STYLE_GALLERY_INDEX.length)} complete visual systems to build in, each with its colors and every text pair measured, typefaces, a type scale, corners, shadows and a build prompt.`,
+  },
+  ...STYLE_GALLERY_INDEX.map((style) => ({
+    path: `/styles/gallery/${style.id}`,
+    title: `${style.name}, a ${STYLE_CATEGORY_LABELS[style.category].toLowerCase()} style | ${SITE.name} style gallery`,
+    description: `${style.name}: a ${style.theme}-theme, ${STYLE_CATEGORY_LABELS[style.category].toLowerCase()} style for ${STYLE_GROUP_LABELS[style.group]} sites, with its colors, typefaces, type scale, contrast checks and build prompt.`,
+  })),
+  {
     path: '/templates',
     title: `Templates | ${SITE.name}`,
     description: `${approxCount(DESIGN_TEMPLATE_INDEX.filter((t) => t.format !== 'screen').length)} app and website designs and ${approxCount(DESIGN_TEMPLATE_INDEX.filter((t) => t.format === 'screen').length)} app screens to start from, each with a layout, a checked palette, typefaces and a build prompt.`,
@@ -503,6 +518,11 @@ export function breadcrumbsFor(path: string): { name: string; path: string }[] {
     ),
     ...LAYERS.map(
       (layer) => [`/templates/${layer.slug}`, layer.name] as [string, string],
+    ),
+    ['/styles/gallery', 'Style gallery'],
+    ...STYLE_GALLERY_INDEX.map(
+      (style) =>
+        [`/styles/gallery/${style.id}`, style.name] as [string, string],
     ),
   ]);
   const segments = path.split('/').filter(Boolean);

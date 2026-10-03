@@ -11,7 +11,7 @@
  * refuses it, so these files are read through the Worker's own API and are
  * never served as they are (D144).
  *
- * A copy without the data (the public export, D143) still gets a
+ * A copy built without the data file still gets a
  * `cards.json`, empty, so the picker says there are no styles rather than
  * failing.
  *

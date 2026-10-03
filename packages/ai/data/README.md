@@ -79,5 +79,4 @@ names one.
   sites", with every name, description and prompt newly written, and says
   "This folder makes no licensing decisions." It carries no license file of
   its own, and the repository has none.
-- The public export leaves this file out until Chris decides otherwise
-  (D143).
+- The public export includes this file (Chris, D143).

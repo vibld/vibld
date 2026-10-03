@@ -138,8 +138,8 @@ export const GATED_PATHS: readonly string[] = [
   // stays closed until somebody makes it rather than being decided by
   // whichever default I typed first.
   '/api/referral/claim',
-  // The style gallery (D142): part of what an invite buys, and its data is
-  // not public (D143). It spends nothing.
+  // The style gallery (D142): part of what an invite buys, as the builder
+  // is. Its data is public (D143); this route spends nothing.
   '/api/style-gallery',
   // A design template's brief for the builder (D148). The briefs are public
   // on vibld.com already; this is gated as the builder is. It spends nothing.

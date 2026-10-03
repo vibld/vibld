@@ -15,6 +15,7 @@ import { PRESET_MOODS, STYLE_MOODS } from '@vibld/ai/style-presets';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import { SITE, metaFor } from '../site';
 import { approxCount } from '../counts';
+import { STYLE_GALLERY_INDEX } from '@vibld/ai/style-gallery-index';
 
 export function meta() {
   return metaFor('/styles');
@@ -98,6 +99,28 @@ export default function Styles() {
             the builder’s style picker a mood narrows the list, and the styles
             whose moods your request names are listed as “Suggested for your
             request”. A suggestion is only a mark: nothing is picked for you.
+          </p>
+        </div>
+      </section>
+      <section
+        className="lb-section lb-section--tight"
+        aria-labelledby="gallery-title"
+        id="gallery"
+      >
+        <div className="lb-wrap">
+          <h2 className="lb-h2" id="gallery-title">
+            {approxCount(STYLE_GALLERY_INDEX.length)} more in the style gallery
+          </h2>
+          <p className="lb-lede">
+            Complete visual systems, each with its own colors (every text pair
+            measured), typefaces, type scale, corners and shadows. Choose one
+            under Gallery in the builder and the build writes its tokens into
+            the site. A gallery style replaces the style picked above.
+          </p>
+          <p className="lb-after__cta">
+            <Link className="button" to="/styles/gallery">
+              Browse the style gallery
+            </Link>
           </p>
         </div>
       </section>

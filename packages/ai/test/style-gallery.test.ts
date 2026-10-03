@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 
 import {
   STYLE_GALLERY_FILE,
+  STYLE_GALLERY_INDEX_FILE,
   importStyleGallery,
   readSource,
   takenNames,
@@ -25,10 +26,12 @@ import {
   styleGalleryFamilies,
   styleGalleryFontImports,
   styleGalleryFontWeights,
+  styleGalleryIndexModule,
   upsertStyleGallery,
   styleTokensFile,
 } from '../src/style-gallery.ts';
 import { FONTSOURCE_WEIGHTS } from '../src/fontsource-weights.ts';
+import { STYLE_GALLERY_INDEX } from '../src/style-gallery-index.ts';
 import type {
   StyleGalleryCatalog,
   StyleGalleryEntry,
@@ -353,7 +356,7 @@ describe('checkStyleEntry', () => {
   });
 });
 
-// The rest reads the imported data, which a copy without it (D143) lacks.
+// The rest reads the imported data, which a copy built without it lacks.
 const stored = existsSync(STYLE_GALLERY_FILE);
 
 describe('the imported style gallery', { skip: !stored }, () => {
@@ -363,6 +366,24 @@ describe('the imported style gallery', { skip: !stored }, () => {
   it('holds all 1,342 entries, one per id', () => {
     assert.equal(catalog.entries.length, 1342);
     assert.equal(new Set(catalog.entries.map((e) => e.id)).size, 1342);
+  });
+
+  it('has an index of every style by name, as an import writes it (D143)', () => {
+    assert.equal(
+      readFileSync(STYLE_GALLERY_INDEX_FILE, 'utf8'),
+      styleGalleryIndexModule(catalog),
+    );
+    assert.deepEqual(
+      STYLE_GALLERY_INDEX.map((s) => s.id),
+      catalog.entries.map((e) => e.id),
+    );
+    assert.deepEqual(Object.keys(STYLE_GALLERY_INDEX[0]!).sort(), [
+      'category',
+      'group',
+      'id',
+      'name',
+      'theme',
+    ]);
   });
 
   it('round-trips every entry exactly', () => {

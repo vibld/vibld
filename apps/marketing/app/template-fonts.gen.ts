@@ -9,7 +9,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/ar-one-sans/ar-one-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/ar-one-sans/LICENSE.txt"
@@ -21,7 +21,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/afacad/afacad-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/afacad/LICENSE.txt"
@@ -33,7 +33,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/afacad-flux/afacad-flux-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 1000"
       }
     ],
     "licence": "/fonts/templates/afacad-flux/LICENSE.txt"
@@ -45,7 +45,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/alan-sans/alan-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 900"
       }
     ],
     "licence": "/fonts/templates/alan-sans/LICENSE.txt"
@@ -57,7 +57,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/albert-sans/albert-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/albert-sans/LICENSE.txt"
@@ -69,7 +69,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/alegreya/alegreya-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 900"
       }
     ],
     "licence": "/fonts/templates/alegreya/LICENSE.txt"
@@ -97,7 +97,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/ancizar-sans/ancizar-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 1000"
       }
     ],
     "licence": "/fonts/templates/ancizar-sans/LICENSE.txt"
@@ -109,7 +109,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/anek-latin/anek-latin-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 800"
       }
     ],
     "licence": "/fonts/templates/anek-latin/LICENSE.txt"
@@ -149,7 +149,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/antonio/antonio-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 700"
       }
     ],
     "licence": "/fonts/templates/antonio/LICENSE.txt"
@@ -161,7 +161,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/archivo/archivo-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/archivo/LICENSE.txt"
@@ -178,6 +178,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/archivo-black/LICENSE.txt"
   },
+  "Archivo Narrow": {
+    "slug": "archivo-narrow",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/archivo-narrow 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/archivo-narrow/archivo-narrow-latin-wght-normal.woff2",
+        "weight": "400 700"
+      }
+    ],
+    "licence": "/fonts/templates/archivo-narrow/LICENSE.txt"
+  },
   "Arimo": {
     "slug": "arimo",
     "category": "sans-serif",
@@ -185,7 +197,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/arimo/arimo-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/arimo/LICENSE.txt"
@@ -197,7 +209,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/asap/asap-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/asap/LICENSE.txt"
@@ -209,7 +221,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/assistant/assistant-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 800"
       }
     ],
     "licence": "/fonts/templates/assistant/LICENSE.txt"
@@ -237,7 +249,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/atkinson-hyperlegible-next/atkinson-hyperlegible-next-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 800"
       }
     ],
     "licence": "/fonts/templates/atkinson-hyperlegible-next/LICENSE.txt"
@@ -249,7 +261,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/azeret-mono/azeret-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/azeret-mono/LICENSE.txt"
@@ -305,7 +317,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/baloo-2/baloo-2-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 800"
       }
     ],
     "licence": "/fonts/templates/baloo-2/LICENSE.txt"
@@ -317,7 +329,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/baloo-da-2/baloo-da-2-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 800"
       }
     ],
     "licence": "/fonts/templates/baloo-da-2/LICENSE.txt"
@@ -377,7 +389,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/baskervville/baskervville-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/baskervville/LICENSE.txt"
@@ -433,10 +445,22 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/bodoni-moda/bodoni-moda-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 900"
       }
     ],
     "licence": "/fonts/templates/bodoni-moda/LICENSE.txt"
+  },
+  "Bowlby One": {
+    "slug": "bowlby-one",
+    "category": "display",
+    "source": "@fontsource/bowlby-one 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/bowlby-one/bowlby-one-latin-400-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/bowlby-one/LICENSE.txt"
   },
   "Bricolage Grotesque": {
     "slug": "bricolage-grotesque",
@@ -445,7 +469,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/bricolage-grotesque/bricolage-grotesque-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 800"
       }
     ],
     "licence": "/fonts/templates/bricolage-grotesque/LICENSE.txt"
@@ -457,7 +481,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/brygada-1918/brygada-1918-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/brygada-1918/LICENSE.txt"
@@ -469,7 +493,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/cabin/cabin-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/cabin/LICENSE.txt"
@@ -493,7 +517,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/catamaran/catamaran-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/catamaran/LICENSE.txt"
@@ -505,7 +529,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/caveat/caveat-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/caveat/LICENSE.txt"
@@ -545,7 +569,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/chivo/chivo-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/chivo/LICENSE.txt"
@@ -557,7 +581,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/chivo-mono/chivo-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/chivo-mono/LICENSE.txt"
@@ -569,7 +593,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/comme/comme-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/comme/LICENSE.txt"
@@ -581,7 +605,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/commissioner/commissioner-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/commissioner/LICENSE.txt"
@@ -593,7 +617,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/cormorant/cormorant-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/cormorant/LICENSE.txt"
@@ -605,7 +629,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/cormorant-garamond/cormorant-garamond-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/cormorant-garamond/LICENSE.txt"
@@ -649,7 +673,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/crimson-pro/crimson-pro-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/crimson-pro/LICENSE.txt"
@@ -689,7 +713,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/dm-sans/dm-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 1000"
       }
     ],
     "licence": "/fonts/templates/dm-sans/LICENSE.txt"
@@ -713,7 +737,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/dancing-script/dancing-script-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/dancing-script/LICENSE.txt"
@@ -730,6 +754,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/dela-gothic-one/LICENSE.txt"
   },
+  "Dosis": {
+    "slug": "dosis",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/dosis 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/dosis/dosis-latin-wght-normal.woff2",
+        "weight": "200 800"
+      }
+    ],
+    "licence": "/fonts/templates/dosis/LICENSE.txt"
+  },
   "EB Garamond": {
     "slug": "eb-garamond",
     "category": "serif",
@@ -737,7 +773,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/eb-garamond/eb-garamond-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 800"
       }
     ],
     "licence": "/fonts/templates/eb-garamond/LICENSE.txt"
@@ -749,7 +785,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/encode-sans/encode-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/encode-sans/LICENSE.txt"
@@ -777,7 +813,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/epilogue/epilogue-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/epilogue/LICENSE.txt"
@@ -789,7 +825,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/exo-2/exo-2-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/exo-2/LICENSE.txt"
@@ -801,7 +837,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/familjen-grotesk/familjen-grotesk-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/familjen-grotesk/LICENSE.txt"
@@ -813,7 +849,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/faustina/faustina-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 800"
       }
     ],
     "licence": "/fonts/templates/faustina/LICENSE.txt"
@@ -825,7 +861,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/figtree/figtree-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 900"
       }
     ],
     "licence": "/fonts/templates/figtree/LICENSE.txt"
@@ -837,7 +873,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/fira-code/fira-code-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/fira-code/LICENSE.txt"
@@ -909,7 +945,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/frank-ruhl-libre/frank-ruhl-libre-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 900"
       }
     ],
     "licence": "/fonts/templates/frank-ruhl-libre/LICENSE.txt"
@@ -921,7 +957,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/fraunces/fraunces-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/fraunces/LICENSE.txt"
@@ -933,7 +969,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/fredoka/fredoka-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/fredoka/LICENSE.txt"
@@ -945,7 +981,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/funnel-sans/funnel-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 800"
       }
     ],
     "licence": "/fonts/templates/funnel-sans/LICENSE.txt"
@@ -957,7 +993,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/gabarito/gabarito-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 900"
       }
     ],
     "licence": "/fonts/templates/gabarito/LICENSE.txt"
@@ -969,7 +1005,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/gantari/gantari-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/gantari/LICENSE.txt"
@@ -981,7 +1017,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/geist/geist-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/geist/LICENSE.txt"
@@ -993,7 +1029,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/geist-mono/geist-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/geist-mono/LICENSE.txt"
@@ -1005,7 +1041,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/gelasio/gelasio-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/gelasio/LICENSE.txt"
@@ -1017,7 +1053,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/geologica/geologica-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/geologica/LICENSE.txt"
@@ -1029,7 +1065,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/georama/georama-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/georama/LICENSE.txt"
@@ -1065,7 +1101,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/glory/glory-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 800"
       }
     ],
     "licence": "/fonts/templates/glory/LICENSE.txt"
@@ -1077,7 +1113,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/golos-text/golos-text-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 900"
       }
     ],
     "licence": "/fonts/templates/golos-text/LICENSE.txt"
@@ -1089,7 +1125,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/google-sans/google-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/google-sans/LICENSE.txt"
@@ -1101,7 +1137,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/google-sans-code/google-sans-code-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 800"
       }
     ],
     "licence": "/fonts/templates/google-sans-code/LICENSE.txt"
@@ -1113,7 +1149,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/google-sans-flex/google-sans-flex-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "1 1000"
       }
     ],
     "licence": "/fonts/templates/google-sans-flex/LICENSE.txt"
@@ -1153,7 +1189,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/hanken-grotesk/hanken-grotesk-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/hanken-grotesk/LICENSE.txt"
@@ -1177,7 +1213,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/heebo/heebo-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/heebo/LICENSE.txt"
@@ -1217,7 +1253,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/host-grotesk/host-grotesk-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 800"
       }
     ],
     "licence": "/fonts/templates/host-grotesk/LICENSE.txt"
@@ -1229,7 +1265,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/hubot-sans/hubot-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/hubot-sans/LICENSE.txt"
@@ -1257,7 +1293,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 700"
       }
     ],
     "licence": "/fonts/templates/ibm-plex-sans/LICENSE.txt"
@@ -1269,7 +1305,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/imbue/imbue-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/imbue/LICENSE.txt"
@@ -1281,7 +1317,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/inclusive-sans/inclusive-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/inclusive-sans/LICENSE.txt"
@@ -1293,7 +1329,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/inconsolata/inconsolata-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/inconsolata/LICENSE.txt"
@@ -1305,7 +1341,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/instrument-sans/instrument-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/instrument-sans/LICENSE.txt"
@@ -1329,7 +1365,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/intel-one-mono/intel-one-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/intel-one-mono/LICENSE.txt"
@@ -1341,7 +1377,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/inter/inter-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/inter/LICENSE.txt"
@@ -1353,7 +1389,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/inter-tight/inter-tight-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/inter-tight/LICENSE.txt"
@@ -1365,7 +1401,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/jetbrains-mono/jetbrains-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 800"
       }
     ],
     "licence": "/fonts/templates/jetbrains-mono/LICENSE.txt"
@@ -1377,7 +1413,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/josefin-sans/josefin-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 700"
       }
     ],
     "licence": "/fonts/templates/josefin-sans/LICENSE.txt"
@@ -1389,7 +1425,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/jost/jost-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/jost/LICENSE.txt"
@@ -1433,7 +1469,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/karla/karla-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 800"
       }
     ],
     "licence": "/fonts/templates/karla/LICENSE.txt"
@@ -1445,7 +1481,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/kumbh-sans/kumbh-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/kumbh-sans/LICENSE.txt"
@@ -1497,7 +1533,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/league-spartan/league-spartan-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/league-spartan/LICENSE.txt"
@@ -1509,7 +1545,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/lexend/lexend-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/lexend/LICENSE.txt"
@@ -1521,7 +1557,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/lexend-deca/lexend-deca-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/lexend-deca/LICENSE.txt"
@@ -1533,7 +1569,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/lexend-exa/lexend-exa-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/lexend-exa/LICENSE.txt"
@@ -1545,7 +1581,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/lexend-zetta/lexend-zetta-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/lexend-zetta/LICENSE.txt"
@@ -1557,7 +1593,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/libre-baskerville/libre-baskerville-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/libre-baskerville/LICENSE.txt"
@@ -1569,7 +1605,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/libre-bodoni/libre-bodoni-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/libre-bodoni/LICENSE.txt"
@@ -1625,7 +1661,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/libre-franklin/libre-franklin-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/libre-franklin/LICENSE.txt"
@@ -1637,7 +1673,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/literata/literata-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/literata/LICENSE.txt"
@@ -1665,10 +1701,22 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/lora/lora-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/lora/LICENSE.txt"
+  },
+  "Lustria": {
+    "slug": "lustria",
+    "category": "serif",
+    "source": "@fontsource/lustria 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/lustria/lustria-latin-400-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/lustria/LICENSE.txt"
   },
   "M PLUS 2": {
     "slug": "m-plus-2",
@@ -1677,7 +1725,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/m-plus-2/m-plus-2-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/m-plus-2/LICENSE.txt"
@@ -1705,7 +1753,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/manrope/manrope-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 800"
       }
     ],
     "licence": "/fonts/templates/manrope/LICENSE.txt"
@@ -1717,7 +1765,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/martian-mono/martian-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 800"
       }
     ],
     "licence": "/fonts/templates/martian-mono/LICENSE.txt"
@@ -1729,7 +1777,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/maven-pro/maven-pro-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 900"
       }
     ],
     "licence": "/fonts/templates/maven-pro/LICENSE.txt"
@@ -1741,7 +1789,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/merriweather/merriweather-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 900"
       }
     ],
     "licence": "/fonts/templates/merriweather/LICENSE.txt"
@@ -1753,7 +1801,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/merriweather-sans/merriweather-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 800"
       }
     ],
     "licence": "/fonts/templates/merriweather-sans/LICENSE.txt"
@@ -1765,7 +1813,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/miranda-sans/miranda-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/miranda-sans/LICENSE.txt"
@@ -1777,7 +1825,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/mona-sans/mona-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/mona-sans/LICENSE.txt"
@@ -1789,7 +1837,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/montserrat/montserrat-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/montserrat/LICENSE.txt"
@@ -1817,7 +1865,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/mozilla-headline/mozilla-headline-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 700"
       }
     ],
     "licence": "/fonts/templates/mozilla-headline/LICENSE.txt"
@@ -1829,7 +1877,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/mozilla-text/mozilla-text-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 700"
       }
     ],
     "licence": "/fonts/templates/mozilla-text/LICENSE.txt"
@@ -1857,7 +1905,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/mulish/mulish-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 1000"
       }
     ],
     "licence": "/fonts/templates/mulish/LICENSE.txt"
@@ -1869,7 +1917,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/national-park/national-park-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 800"
       }
     ],
     "licence": "/fonts/templates/national-park/LICENSE.txt"
@@ -1881,7 +1929,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/newsreader/newsreader-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 800"
       }
     ],
     "licence": "/fonts/templates/newsreader/LICENSE.txt"
@@ -1893,7 +1941,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/noto-sans/noto-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/noto-sans/LICENSE.txt"
@@ -1905,10 +1953,22 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/noto-sans-display/noto-sans-display-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/noto-sans-display/LICENSE.txt"
+  },
+  "Noto Serif": {
+    "slug": "noto-serif",
+    "category": "serif",
+    "source": "@fontsource-variable/noto-serif 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/noto-serif/noto-serif-latin-wght-normal.woff2",
+        "weight": "100 900"
+      }
+    ],
+    "licence": "/fonts/templates/noto-serif/LICENSE.txt"
   },
   "Noto Serif Display": {
     "slug": "noto-serif-display",
@@ -1917,7 +1977,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/noto-serif-display/noto-serif-display-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/noto-serif-display/LICENSE.txt"
@@ -1929,7 +1989,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/nunito/nunito-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 1000"
       }
     ],
     "licence": "/fonts/templates/nunito/LICENSE.txt"
@@ -1941,10 +2001,26 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/nunito-sans/nunito-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 1000"
       }
     ],
     "licence": "/fonts/templates/nunito-sans/LICENSE.txt"
+  },
+  "Old Standard TT": {
+    "slug": "old-standard-tt",
+    "category": "serif",
+    "source": "@fontsource/old-standard-tt 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/old-standard-tt/old-standard-tt-latin-400-normal.woff2",
+        "weight": "400"
+      },
+      {
+        "file": "/fonts/templates/old-standard-tt/old-standard-tt-latin-700-normal.woff2",
+        "weight": "700"
+      }
+    ],
+    "licence": "/fonts/templates/old-standard-tt/LICENSE.txt"
   },
   "Onest": {
     "slug": "onest",
@@ -1953,7 +2029,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/onest/onest-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/onest/LICENSE.txt"
@@ -1965,7 +2041,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/open-sans/open-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 800"
       }
     ],
     "licence": "/fonts/templates/open-sans/LICENSE.txt"
@@ -1977,7 +2053,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/oswald/oswald-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 700"
       }
     ],
     "licence": "/fonts/templates/oswald/LICENSE.txt"
@@ -1989,7 +2065,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/outfit/outfit-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/outfit/LICENSE.txt"
@@ -2001,7 +2077,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/overpass/overpass-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/overpass/LICENSE.txt"
@@ -2013,7 +2089,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/overpass-mono/overpass-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/overpass-mono/LICENSE.txt"
@@ -2053,7 +2129,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/parkinsans/parkinsans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 800"
       }
     ],
     "licence": "/fonts/templates/parkinsans/LICENSE.txt"
@@ -2065,10 +2141,22 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/pathway-extreme/pathway-extreme-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/pathway-extreme/LICENSE.txt"
+  },
+  "Permanent Marker": {
+    "slug": "permanent-marker",
+    "category": "handwriting",
+    "source": "@fontsource/permanent-marker 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/permanent-marker/permanent-marker-latin-400-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/permanent-marker/LICENSE.txt"
   },
   "Petrona": {
     "slug": "petrona",
@@ -2077,7 +2165,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/petrona/petrona-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/petrona/LICENSE.txt"
@@ -2105,7 +2193,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/pixelify-sans/pixelify-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/pixelify-sans/LICENSE.txt"
@@ -2117,7 +2205,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/playfair/playfair-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 900"
       }
     ],
     "licence": "/fonts/templates/playfair/LICENSE.txt"
@@ -2129,7 +2217,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/playfair-display/playfair-display-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 900"
       }
     ],
     "licence": "/fonts/templates/playfair-display/LICENSE.txt"
@@ -2141,7 +2229,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/plus-jakarta-sans/plus-jakarta-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 800"
       }
     ],
     "licence": "/fonts/templates/plus-jakarta-sans/LICENSE.txt"
@@ -2153,7 +2241,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/pontano-sans/pontano-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/pontano-sans/LICENSE.txt"
@@ -2213,7 +2301,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/public-sans/public-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/public-sans/LICENSE.txt"
@@ -2225,7 +2313,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/quicksand/quicksand-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/quicksand/LICENSE.txt"
@@ -2237,7 +2325,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/radio-canada/radio-canada-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/radio-canada/LICENSE.txt"
@@ -2249,7 +2337,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/radio-canada-big/radio-canada-big-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/radio-canada-big/LICENSE.txt"
@@ -2261,7 +2349,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/raleway/raleway-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/raleway/LICENSE.txt"
@@ -2273,7 +2361,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/readex-pro/readex-pro-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "160 700"
       }
     ],
     "licence": "/fonts/templates/readex-pro/LICENSE.txt"
@@ -2285,7 +2373,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/red-hat-display/red-hat-display-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 900"
       }
     ],
     "licence": "/fonts/templates/red-hat-display/LICENSE.txt"
@@ -2297,7 +2385,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/red-hat-mono/red-hat-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/red-hat-mono/LICENSE.txt"
@@ -2309,7 +2397,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/red-hat-text/red-hat-text-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/red-hat-text/LICENSE.txt"
@@ -2321,7 +2409,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/reddit-mono/reddit-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/reddit-mono/LICENSE.txt"
@@ -2333,7 +2421,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/reddit-sans/reddit-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/reddit-sans/LICENSE.txt"
@@ -2345,7 +2433,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/rethink-sans/rethink-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 800"
       }
     ],
     "licence": "/fonts/templates/rethink-sans/LICENSE.txt"
@@ -2357,7 +2445,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/roboto/roboto-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/roboto/LICENSE.txt"
@@ -2369,7 +2457,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/roboto-flex/roboto-flex-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 1000"
       }
     ],
     "licence": "/fonts/templates/roboto-flex/LICENSE.txt"
@@ -2381,7 +2469,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/roboto-mono/roboto-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 700"
       }
     ],
     "licence": "/fonts/templates/roboto-mono/LICENSE.txt"
@@ -2393,7 +2481,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/roboto-slab/roboto-slab-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/roboto-slab/LICENSE.txt"
@@ -2405,7 +2493,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/rosario/rosario-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/rosario/LICENSE.txt"
@@ -2417,7 +2505,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/rubik/rubik-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 900"
       }
     ],
     "licence": "/fonts/templates/rubik/LICENSE.txt"
@@ -2429,7 +2517,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/suse/suse-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/suse/LICENSE.txt"
@@ -2441,7 +2529,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/saira/saira-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/saira/LICENSE.txt"
@@ -2465,7 +2553,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/schibsted-grotesk/schibsted-grotesk-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 900"
       }
     ],
     "licence": "/fonts/templates/schibsted-grotesk/LICENSE.txt"
@@ -2477,7 +2565,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/sen/sen-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 800"
       }
     ],
     "licence": "/fonts/templates/sen/LICENSE.txt"
@@ -2501,7 +2589,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/signika/signika-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/signika/LICENSE.txt"
@@ -2513,7 +2601,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/sofia-sans/sofia-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "1 1000"
       }
     ],
     "licence": "/fonts/templates/sofia-sans/LICENSE.txt"
@@ -2525,7 +2613,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/sofia-sans-extra-condensed/sofia-sans-extra-condensed-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "1 1000"
       }
     ],
     "licence": "/fonts/templates/sofia-sans-extra-condensed/LICENSE.txt"
@@ -2537,7 +2625,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/sofia-sans-semi-condensed/sofia-sans-semi-condensed-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "1 1000"
       }
     ],
     "licence": "/fonts/templates/sofia-sans-semi-condensed/LICENSE.txt"
@@ -2549,7 +2637,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/sometype-mono/sometype-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/sometype-mono/LICENSE.txt"
@@ -2561,7 +2649,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/sora/sora-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 800"
       }
     ],
     "licence": "/fonts/templates/sora/LICENSE.txt"
@@ -2573,7 +2661,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/source-code-pro/source-code-pro-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/source-code-pro/LICENSE.txt"
@@ -2585,7 +2673,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/source-sans-3/source-sans-3-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/source-sans-3/LICENSE.txt"
@@ -2597,7 +2685,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/source-serif-4/source-serif-4-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/source-serif-4/LICENSE.txt"
@@ -2609,7 +2697,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/space-grotesk/space-grotesk-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/space-grotesk/LICENSE.txt"
@@ -2637,7 +2725,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/special-gothic/special-gothic-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/special-gothic/LICENSE.txt"
@@ -2665,7 +2753,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/spline-sans/spline-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/spline-sans/LICENSE.txt"
@@ -2677,7 +2765,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/spline-sans-mono/spline-sans-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 700"
       }
     ],
     "licence": "/fonts/templates/spline-sans-mono/LICENSE.txt"
@@ -2689,7 +2777,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/syne/syne-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 800"
       }
     ],
     "licence": "/fonts/templates/syne/LICENSE.txt"
@@ -2701,7 +2789,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/tasa-orbiter/tasa-orbiter-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 800"
       }
     ],
     "licence": "/fonts/templates/tasa-orbiter/LICENSE.txt"
@@ -2713,7 +2801,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/teachers/teachers-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 800"
       }
     ],
     "licence": "/fonts/templates/teachers/LICENSE.txt"
@@ -2725,7 +2813,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/tiktok-sans/tiktok-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 900"
       }
     ],
     "licence": "/fonts/templates/tiktok-sans/LICENSE.txt"
@@ -2769,7 +2857,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/ubuntu-sans/ubuntu-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 800"
       }
     ],
     "licence": "/fonts/templates/ubuntu-sans/LICENSE.txt"
@@ -2781,7 +2869,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/ubuntu-sans-mono/ubuntu-sans-mono-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 700"
       }
     ],
     "licence": "/fonts/templates/ubuntu-sans-mono/LICENSE.txt"
@@ -2793,7 +2881,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/unbounded/unbounded-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/unbounded/LICENSE.txt"
@@ -2817,7 +2905,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/urbanist/urbanist-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/urbanist/LICENSE.txt"
@@ -2829,7 +2917,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/winky-sans/winky-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "300 900"
       }
     ],
     "licence": "/fonts/templates/winky-sans/LICENSE.txt"
@@ -2841,7 +2929,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/wix-madefor-display/wix-madefor-display-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 800"
       }
     ],
     "licence": "/fonts/templates/wix-madefor-display/LICENSE.txt"
@@ -2853,7 +2941,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/wix-madefor-text/wix-madefor-text-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "400 800"
       }
     ],
     "licence": "/fonts/templates/wix-madefor-text/LICENSE.txt"
@@ -2865,7 +2953,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/work-sans/work-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "100 900"
       }
     ],
     "licence": "/fonts/templates/work-sans/LICENSE.txt"
@@ -2877,7 +2965,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/ysabeau-office/ysabeau-office-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "1 1000"
       }
     ],
     "licence": "/fonts/templates/ysabeau-office/LICENSE.txt"
@@ -2889,7 +2977,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/zalando-sans/zalando-sans-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/zalando-sans/LICENSE.txt"
@@ -2901,7 +2989,7 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     "files": [
       {
         "file": "/fonts/templates/zalando-sans-expanded/zalando-sans-expanded-latin-wght-normal.woff2",
-        "weight": "400"
+        "weight": "200 900"
       }
     ],
     "licence": "/fonts/templates/zalando-sans-expanded/LICENSE.txt"

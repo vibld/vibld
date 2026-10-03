@@ -64,6 +64,20 @@ export default function GettingStarted() {
           from the project’s colors.
         </li>
         <li>
+          <strong>Gallery</strong> is one of the complete styles in the{' '}
+          <a href="/styles/gallery">style gallery</a>, filtered by theme, look
+          and industry. A gallery style replaces the style above: the build
+          writes its colors, typefaces, type scale, corners and shadows into the
+          site as tokens. Its colors can be changed there, and a change that
+          breaks one of the style’s contrast pairs is not applied.
+        </li>
+        <li>
+          <strong>Templates</strong> is the{' '}
+          <a href="/templates">template catalog</a>, searchable by name and
+          filtered by kind and use case. Adding one puts its brief in your
+          message, as “Start from this template” on a template’s page does.
+        </li>
+        <li>
           <strong>Reference</strong> is the address of a page to start from.
           vibld reads its text, colors, fonts and spacing and adapts them rather
           than copying. It goes with the message it is sent with, and the field

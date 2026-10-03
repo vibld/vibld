@@ -69,9 +69,12 @@ before(() => {
   // the package's own build script, not `react-router build` directly, so the
   // postbuild step (robots.txt, sitemap.xml, llms.txt, 404.html) is covered
   // by everything below.
+  //
+  // The build's errors go to the test's own stderr: with nothing shown, a
+  // failed build in CI said only "Command failed: npm run build" (internal PR 356).
   execFileSync('npm', ['run', 'build'], {
     cwd: join(import.meta.dirname, '..'),
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'inherit'],
   });
 });
 

@@ -1,6 +1,7 @@
 import { type RouteConfig, index, route } from '@react-router/dev/routes';
 
 import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
+import { STYLE_GALLERY_INDEX } from '@vibld/ai/style-gallery-index';
 
 import { LAYERS } from './layers';
 import { USE_CASES } from './use-cases';
@@ -33,6 +34,14 @@ export default [
     }),
   ),
   route('styles', 'routes/styles.tsx'),
+  // The style gallery (D143), one path per style for the same reason as the
+  // use cases above.
+  route('styles/gallery', 'routes/style-gallery.tsx'),
+  ...STYLE_GALLERY_INDEX.map((style) =>
+    route(`styles/gallery/${style.id}`, 'routes/style.tsx', {
+      id: `style-${style.id}`,
+    }),
+  ),
   route('templates', 'routes/templates.tsx'),
   // One module for every design, declared once per path for the same reason
   // as the use cases above.

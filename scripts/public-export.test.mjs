@@ -315,7 +315,6 @@ describe('the export', () => {
       'docs/pricing-routine.md',
       'docs/launch-email.md',
       '.github/dependabot.yml',
-      'packages/ai/data/style-gallery.json',
     ]);
   });
 
