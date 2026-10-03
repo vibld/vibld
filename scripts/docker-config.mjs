@@ -22,7 +22,7 @@
  *   localhost:<PREVIEW_PORT>/`, which browsers resolve to this machine,
  *   and published sites `http://<slug>.localhost:<PUBLISH_PORT>/`.
  * - Settings and keys come from the environment at start
- *   (`docker/entrypoint.sh` writes them to `.dev.vars`), not from here.
+ *   (`docker/start.mjs` writes them to `.dev.vars`), not from here.
  *
  * With `VIBLD_SANDBOX=off`, for a host that runs one container on one port
  * with no Docker socket (D141): only the builder runs, unbound from the
@@ -30,7 +30,7 @@
  * not checked in a sandbox and publishing reports itself unavailable.
  *
  * With `VIBLD_DOMAIN` and `VIBLD_PREVIEW_DOMAIN`, for a server on the
- * internet behind deploy/vps's proxy (D141): the builder answers as
+ * internet behind infrastructure/vps's proxy (D141): the builder answers as
  * `https://<VIBLD_DOMAIN>`, previews and published sites are minted under
  * the second domain (L8: never the builder's cookie scope), and every
  * Worker listens on 127.0.0.1 only, so nothing is reachable without TLS.
