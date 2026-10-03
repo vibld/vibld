@@ -205,6 +205,23 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
+### What comes next, 2026-10-03
+
+Chris asked what to tackle next and took all six suggestions, in the order
+suggested.
+
+- **D149. Launch first, then product work (Chris, 2026-10-03).** In order,
+  one pull request at a time: release v0.4.0 and point the Reddit post at
+  it; validate self-hosting from the README alone; close the M0 and M1
+  issues that have shipped; add `claude-sonnet-5-5` to the model catalog
+  (internal issue 300); build checkpoint history and rollback (M2); then a
+  curated gallery of real generated sites (internal issue 186).
+- **D150. It is v0.4.0.** Since v0.3.0 the whole builder runs under Docker
+  with no cloud account, signs in with no paid service, builds with a local
+  model, previews in the browser and has an admin panel and the style
+  gallery, which is more than a patch. Notes in `docs/releases/v0.4.0.md`;
+  the Public release workflow tags it after the export of the merge.
+
 ### The style gallery, 2026-10-02
 
 Chris asked for Drummond-IT/designs-v1's style gallery
