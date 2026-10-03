@@ -7,7 +7,11 @@ import type { StyleColorEdits } from '@vibld/ai/style-gallery';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
-import { D1GenerationStore, snapshotKey } from './generation-store.ts';
+import {
+  D1GenerationStore,
+  RUN_IN_FLIGHT_MS,
+  snapshotKey,
+} from './generation-store.ts';
 import { isProjectId } from './request-guard.ts';
 import { assertPrefixSafe, deletePrefix } from './storage-purge.ts';
 
@@ -328,15 +332,8 @@ export const PROJECT_ROW_DELETIONS: readonly string[] = [
   `DELETE FROM projects WHERE id = ?1`,
 ];
 
-/**
- * How long a run's stage may go unchanged and still be a run in flight.
- *
- * Twice a run's whole wall-clock budget (`RUN_WALL_CLOCK_BUDGET_MS`, fifteen
- * minutes), because a repair turn can follow a build. A stage older than
- * this and still not settled belongs to a run that was stopped between
- * steps and never came back, and must not block a deletion for ever.
- */
-export const RUN_IN_FLIGHT_MS = 30 * 60_000;
+/** Defined beside the stage rows it reads; kept here for its callers. */
+export { RUN_IN_FLIGHT_MS };
 
 /** One stage row of a run, with the accepted revision of its project. */
 export interface RunStageRow {
@@ -741,9 +738,12 @@ export class ProjectStore {
     if (!(await deletePrefix(this.#bucket, projectPrefix(projectId), pages))) {
       return false;
     }
-    for (const sql of PROJECT_ROW_DELETIONS) {
-      await this.#db.prepare(sql).bind(projectId).run();
-    }
+    // One batch, so nothing written for the project in between (a restore
+    // from History, D152) lands after its stage rows are gone and before
+    // the project is (Codex review of internal PR 360).
+    await this.#db.batch(
+      PROJECT_ROW_DELETIONS.map((sql) => this.#db.prepare(sql).bind(projectId)),
+    );
     return true;
   }
 

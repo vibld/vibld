@@ -202,9 +202,14 @@ export function PromptPanel({
   const panelId = useId();
   const referenceRef = useRef<HTMLInputElement | null>(null);
   // Opening a project holds the composer too: a message sent in that
-  // moment would go to the project being left.
+  // moment would go to the project being left. So does restoring a
+  // checkpoint, whose code a build sent meanwhile would not start from.
   const disabled =
-    state.running || state.exploring || state.chatting || state.opening;
+    state.running ||
+    state.exploring ||
+    state.chatting ||
+    state.opening ||
+    state.restoring;
   // Once there is a conversation, the examples are noise: what to type next
   // comes from what was just built, not from a generic starting point.
   const started = state.transcript.length > 0;

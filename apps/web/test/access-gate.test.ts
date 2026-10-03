@@ -450,3 +450,42 @@ describe('what an admin route requires', () => {
     }
   });
 });
+
+describe("a project's checkpoint history (D152)", () => {
+  it('is named by pattern, and reads the project id from the path', () => {
+    assert.equal(
+      routeKeyFor('/api/projects/abc-123/checkpoints'),
+      '/api/projects/:id/checkpoints',
+    );
+    assert.equal(
+      routeKeyFor('/api/projects/abc-123/checkpoints/restore'),
+      '/api/projects/:id/checkpoints/restore',
+    );
+    assert.equal(
+      projectIdInPath('/api/projects/abc-123/checkpoints'),
+      'abc-123',
+    );
+    assert.equal(
+      projectIdInPath('/api/projects/abc-123/checkpoints/restore'),
+      'abc-123',
+    );
+    for (const path of [
+      '/api/projects/abc-123/checkpoints/other',
+      '/api/projects/abc-123/checkpoints/restore/again',
+    ]) {
+      assert.equal(routeKeyFor(path), path, path);
+    }
+  });
+
+  it('stays open to an owner without an invite, like opening the project', () => {
+    // Putting back code the project already had spends nothing and starts
+    // nothing; a revoked account keeps what it made, history included.
+    assert.equal(isGated('/api/projects/abc-123/checkpoints', 'GET'), false);
+    assert.equal(
+      isGated('/api/projects/abc-123/checkpoints/restore', 'POST'),
+      false,
+    );
+    assert.ok('/api/projects/:id/checkpoints' in UNGATED_PATHS);
+    assert.ok('/api/projects/:id/checkpoints/restore' in UNGATED_PATHS);
+  });
+});

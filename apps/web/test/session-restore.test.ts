@@ -201,6 +201,79 @@ describe('opening a project', () => {
   });
 });
 
+describe('a checkpoint restored from the history (D152)', () => {
+  const EARLIER = {
+    revision: 'r-earlier',
+    files: [{ path: 'src/App.tsx', content: 'export default () => 1;\n' }],
+  };
+
+  it('is held as the accepted code, and the next build starts from it', async () => {
+    const seen: Seen = { projectIds: [], bases: [] };
+    const session = createSession(seen);
+    await session.restore(project());
+
+    assert.equal(await session.adoptCheckpoint('project-1', EARLIER), true);
+    const state = session.getState();
+    assert.deepEqual(state.acceptedSnapshot, EARLIER);
+    assert.deepEqual(state.stagedFiles, EARLIER.files);
+
+    await session.submit('Add a menu page');
+    assert.deepEqual(seen.bases, ['r-earlier']);
+    assert.equal(session.getState().status, 'accepted');
+  });
+
+  it('is not taken into a project that is no longer open', async () => {
+    const session = createSession({ projectIds: [], bases: [] });
+    await session.restore(project());
+    assert.equal(await session.adoptCheckpoint('project-2', EARLIER), false);
+    assert.deepEqual(session.getState().acceptedSnapshot, RESTORED_SNAPSHOT);
+  });
+
+  it('lets a project open only once every restore has settled', async () => {
+    const session = createSession({ projectIds: [], bases: [] });
+    await session.restore(project());
+    let opened = false;
+    await session.whenRestored();
+
+    const first = session.holdForRestore();
+    const second = session.holdForRestore();
+    const waiting = session.whenRestored().then(() => {
+      opened = true;
+    });
+    first();
+    await Promise.resolve();
+    assert.equal(opened, false);
+    second();
+    await waiting;
+    assert.equal(opened, true);
+  });
+
+  it('holds builds while it is on its way, apart from a project opening', async () => {
+    const seen: Seen = { projectIds: [], bases: [] };
+    const session = createSession(seen);
+    await session.restore(project());
+
+    const first = session.holdForRestore();
+    const second = session.holdForRestore();
+    session.setOpening(true);
+    await session.submit('Add a menu page');
+    assert.deepEqual(seen.bases, []);
+
+    // One restore settling releases only itself, twice or not.
+    first();
+    first();
+    assert.equal(session.getState().restoring, true);
+    second();
+    assert.equal(session.getState().restoring, false);
+    // And never the hold a project opening has.
+    assert.equal(session.getState().opening, true);
+    session.setOpening(false);
+
+    await session.submit('Add a menu page');
+    assert.deepEqual(seen.bases, ['r-restored']);
+  });
+});
+
 describe('what a project remembers about how it is built', () => {
   it('is the composer and the preferences, as the autosave reads them', async () => {
     const session = createSession({ projectIds: [], bases: [] });

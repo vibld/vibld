@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
+import type { ProjectSnapshot } from '@vibld/core';
 import type { BuilderState, DraftPreview } from '../generation/session.ts';
 import {
   showingChecked as isShowingChecked,
@@ -19,12 +20,14 @@ import { FileList } from './FileList.tsx';
 import { PreviewPanel } from './PreviewPanel.tsx';
 import { noteFor } from '../generation/pane-gaps.ts';
 import { RunHistory } from './RunHistory.tsx';
+import { CheckpointHistory } from './CheckpointHistory.tsx';
 
 const TABS = [
   { id: 'preview', label: 'Preview' },
   { id: 'code', label: 'Code' },
   { id: 'console', label: 'Console' },
   { id: 'problems', label: 'Problems' },
+  { id: 'history', label: 'History' },
   { id: 'runs', label: 'Runs' },
 ] as const;
 
@@ -33,8 +36,20 @@ type TabId = (typeof TABS)[number]['id'];
 export function Workspace({
   state,
   hidden = false,
+  onCheckpointRestored,
+  onCheckpointRestoring,
 }: {
   state: BuilderState;
+  /**
+   * A checkpoint restored from the History tab (D152), for the session to
+   * hold as the accepted one, so the preview and the next build follow it.
+   */
+  onCheckpointRestored?: (
+    projectId: string,
+    snapshot: ProjectSnapshot,
+  ) => boolean | Promise<boolean>;
+  /** A restore from the History tab sets off; answers its release. */
+  onCheckpointRestoring?: () => () => void;
   /**
    * Off screen without being taken apart. The preview sandbox, the chosen
    * tab and the selected file are all live state this component owns, and
@@ -294,6 +309,32 @@ export function Workspace({
               </ol>
             )}
           </div>
+        ) : null}
+
+        {activeTab === 'history' ? (
+          <CheckpointHistory
+            runCount={state.runCount}
+            projectId={state.projectId}
+            // A reply on its way counts too: its brief was written for the
+            // code a restore would replace. So does a restore still on its
+            // way from before this pane was last shown, whose result would
+            // land over a second one's, and a project still opening, whose
+            // read could land after a restore and put the older code back
+            // (Codex review of internal PR 360).
+            building={
+              state.running ||
+              state.chatting ||
+              state.restoring ||
+              state.opening
+            }
+            transcript={state.transcript}
+            {...(onCheckpointRestored
+              ? { onRestored: onCheckpointRestored }
+              : {})}
+            {...(onCheckpointRestoring
+              ? { onRestoring: onCheckpointRestoring }
+              : {})}
+          />
         ) : null}
 
         {activeTab === 'runs' ? (

@@ -13,8 +13,10 @@ import {
 import type { TranscriptTurn } from '@vibld/core';
 
 import {
+  PROJECT_CHECKPOINTS_ROUTE,
   PROJECT_DUPLICATE_ROUTE,
   PROJECT_ITEM_ROUTE,
+  PROJECT_RESTORE_ROUTE,
   PROJECT_SHARE_ROUTE,
   projectIdInPath,
   routeKeyFor,
@@ -38,7 +40,7 @@ import {
   parseReferenceUrl,
 } from './request-guard.ts';
 import type { GuardResult } from './request-guard.ts';
-import { buildInFlight } from './run-control.ts';
+import { buildInFlight, UNREADABLE_RUN_HELD_MS } from './run-control.ts';
 import { newShareToken, shareUrl } from './share-link.ts';
 
 /**
@@ -56,6 +58,10 @@ import { newShareToken, shareUrl } from './share-link.ts';
  *     POST   /api/projects/:id/duplicate   copy it (held to the limit)
  *     POST   /api/projects/:id/share       turn its share link on
  *     DELETE /api/projects/:id/share       turn it off, for good
+ *     GET    /api/projects/:id/checkpoints every accepted checkpoint
+ *     POST   /api/projects/:id/checkpoints/restore
+ *                                          make one of them the accepted
+ *                                          one again (D152)
  *
  * Every route that names a project answers 404 for one that is not the
  * caller's, never 403: "that exists, and it is not yours" is a fact about
@@ -402,7 +408,44 @@ const ALLOWED: Record<string, readonly string[]> = {
   [PROJECT_ITEM_ROUTE]: ['GET', 'PATCH', 'DELETE'],
   [PROJECT_DUPLICATE_ROUTE]: ['POST'],
   [PROJECT_SHARE_ROUTE]: ['POST', 'DELETE'],
+  [PROJECT_CHECKPOINTS_ROUTE]: ['GET'],
+  [PROJECT_RESTORE_ROUTE]: ['POST'],
 };
+
+/**
+ * A revision as this product names one (`r` and eight hex digits, from
+ * `GenerationMachine`), held to a shape that is safe in an R2 key rather
+ * than to that one spelling, so a revision named some other way by an
+ * older build is still one a person can restore.
+ */
+const REVISION = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** The code a restore made from an out-of-date history is refused with. */
+export const CHECKPOINT_MOVED_CODE = 'checkpoint-moved';
+
+interface RestoreRequest {
+  revision: string;
+  /** The accepted revision the caller was looking at; null for none. */
+  base: string | null;
+}
+
+/** A restore's body: which checkpoint, and from which accepted revision. */
+export function parseRestore(body: unknown): GuardResult<RestoreRequest> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const raw = body as Record<string, unknown>;
+  if (typeof raw.revision !== 'string' || !REVISION.test(raw.revision)) {
+    return fail(400, '"revision" is not a checkpoint.');
+  }
+  if (
+    raw.base !== null &&
+    (typeof raw.base !== 'string' || !REVISION.test(raw.base))
+  ) {
+    return fail(400, '"base" must be the accepted revision, or null.');
+  }
+  return { ok: true, value: { revision: raw.revision, base: raw.base } };
+}
 
 export async function handleProjects(
   request: Request,
@@ -523,6 +566,26 @@ export async function handleProjects(
   if (!isProjectId(id)) return NOT_FOUND();
   const project = await store.find(userId, id);
   if (!project) return NOT_FOUND();
+
+  if (route === PROJECT_CHECKPOINTS_ROUTE) {
+    const history = await new D1GenerationStore(
+      db,
+      env.PROJECT_CONTENT,
+    ).listCheckpoints(project.id);
+    return json(history);
+  }
+
+  if (route === PROJECT_RESTORE_ROUTE) {
+    return restoreCheckpoint(
+      request,
+      userId,
+      project,
+      store,
+      new D1GenerationStore(db, env.PROJECT_CONTENT),
+      clock(),
+      deps,
+    );
+  }
 
   if (route === PROJECT_DUPLICATE_ROUTE) {
     const limit = await limitOf(userId);
@@ -725,4 +788,123 @@ export async function handleProjects(
   }
   const saved = await store.find(userId, project.id);
   return saved ? json({ project: view(saved) }) : NOT_FOUND();
+}
+
+/**
+ * Make one of a project's accepted checkpoints the accepted one again
+ * (D152), and answer with its code, as opening the project does, so the
+ * builder can show it and build on it.
+ *
+ * Refused while a build runs in the project, for the reason a delete is:
+ * the build would promote over the restored code or be refused as a
+ * conflict, and either way the person would not get what they pressed.
+ * Refused for an archived project, which is read-only until unarchived.
+ * Refused when the accepted revision is no longer the one the caller was
+ * looking at, so a restore chosen from a stale list never undoes work
+ * another tab or a finished build has accepted since (D63's rule, applied
+ * to code).
+ *
+ * Nothing here spends: no budget is reserved or charged, no trace is
+ * written, and nothing is published or pushed. The published site and the
+ * connected repository stay as they were until the person ships again.
+ */
+async function restoreCheckpoint(
+  request: Request,
+  userId: string,
+  project: ProjectRecord,
+  store: ProjectStore,
+  generations: D1GenerationStore,
+  now: Date,
+  deps: ProjectsDeps,
+): Promise<Response> {
+  const body = await readJson(request);
+  if (!body.ok) return json({ error: body.error }, body.status);
+  const parsed = parseRestore(body.value);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+  const { revision, base } = parsed.value;
+
+  const archived = () =>
+    json(
+      {
+        error:
+          'This project is archived. Unarchive it to restore a checkpoint.',
+      },
+      409,
+    );
+  if (project.archivedAt !== null) return archived();
+  const buildRunning = () =>
+    json(
+      {
+        error:
+          'A build is still running in this project. Wait for it to finish, then restore a checkpoint.',
+      },
+      409,
+    );
+  // Every run that has not ended, however long since its row moved, asked
+  // of its Workflow: one still going refuses this, and one the engine
+  // stopped without saying so is settled here, so it does not hold off the
+  // batch below, which counts every unended row as a build (Codex review
+  // of internal PR 360). `rollback` asks again in that batch, which is what decides a
+  // build started in between.
+  // An instance that cannot be read is taken to be running, for far longer
+  // than the half hour a builder opening the project allows it: a restore
+  // under a live build would cost that build its budget.
+  if (
+    await buildInFlight(
+      store,
+      generations,
+      userId,
+      project.id,
+      now,
+      deps,
+      UNREADABLE_RUN_HELD_MS,
+    )
+  ) {
+    return buildRunning();
+  }
+  const history = await generations.listCheckpoints(project.id);
+  if (!history.checkpoints.some((entry) => entry.revision === revision)) {
+    return json({ error: 'That checkpoint does not exist.' }, 404);
+  }
+  const moved = (current: string | null) =>
+    json(
+      {
+        error:
+          'This project has changed since its history was loaded. Look again, then restore.',
+        code: CHECKPOINT_MOVED_CODE,
+        current,
+      },
+      409,
+    );
+
+  // Already there: a retry of a restore whose answer was lost, or a second
+  // press. What was asked for is true, so it is answered as done and
+  // nothing is written.
+  if (history.current === revision) {
+    const snapshot = await generations.loadRevision(project.id, revision);
+    if (!snapshot) {
+      return json({ error: 'That checkpoint is no longer stored.' }, 404);
+    }
+    return json({
+      snapshot: { revision: snapshot.revision, files: snapshot.files },
+    });
+  }
+  // Asked here for the common case, a list left open while something else
+  // moved the project; the compare-and-set in `rollback` decides a race.
+  if (history.current !== base) return moved(history.current);
+
+  const result = await generations.rollback(project.id, revision, base);
+  if (result.outcome === 'busy') return buildRunning();
+  if (result.outcome === 'archived') return archived();
+  if (result.outcome === 'gone') return NOT_FOUND();
+  if (result.outcome === 'missing') {
+    return json({ error: 'That checkpoint is no longer stored.' }, 404);
+  }
+  if (result.outcome === 'stale') return moved(result.current);
+  return json({
+    snapshot: {
+      revision: result.snapshot.revision,
+      files: result.snapshot.files,
+    },
+  });
 }

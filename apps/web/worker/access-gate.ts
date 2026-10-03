@@ -202,6 +202,17 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // The routes that do start work in a project (`/api/plan`, `/api/chat`)
   // stay gated, and that is where an invite is spent.
   '/api/projects/:id': "the caller's own project: read, tidy or delete it",
+  // A project's accepted checkpoints (GET), and making an earlier one the
+  // accepted one again (POST on `/restore`) (D152). Open for the reason
+  // the project itself is: the history is part of what the account made,
+  // and putting back code it already had is tidying it, like a save. It
+  // spends nothing: no model, no sandbox, no budget and no new storage,
+  // since the restored revision is already stored and only the pointer to
+  // it moves. Nothing is published or pushed by it either; the routes
+  // that do that stay where they are.
+  '/api/projects/:id/checkpoints': "a read of the caller's own project history",
+  '/api/projects/:id/checkpoints/restore':
+    "putting back code the caller's own project already had",
   // A shared project, as the stranger its owner sent the link to sees it:
   // its name and its accepted code, read-only. Not gated, and not
   // authenticated either, which makes it the third entry here that
@@ -365,6 +376,9 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
 export const PROJECT_ITEM_ROUTE = '/api/projects/:id';
 export const PROJECT_DUPLICATE_ROUTE = '/api/projects/:id/duplicate';
 export const PROJECT_SHARE_ROUTE = '/api/projects/:id/share';
+/** A project's accepted checkpoints, and restoring one (D152). */
+export const PROJECT_CHECKPOINTS_ROUTE = '/api/projects/:id/checkpoints';
+export const PROJECT_RESTORE_ROUTE = '/api/projects/:id/checkpoints/restore';
 /**
  * A share link's routes carry its token rather than a project id, and are
  * named the same way for the same reason (`share-handlers.ts`).
@@ -378,6 +392,8 @@ export const RUN_ITEM_ROUTE = '/api/runs/:id';
 const PROJECT_ITEM = /^\/api\/projects\/([^/]+)$/;
 const PROJECT_DUPLICATE = /^\/api\/projects\/([^/]+)\/duplicate$/;
 const PROJECT_SHARE = /^\/api\/projects\/([^/]+)\/share$/;
+const PROJECT_CHECKPOINTS = /^\/api\/projects\/([^/]+)\/checkpoints$/;
+const PROJECT_RESTORE = /^\/api\/projects\/([^/]+)\/checkpoints\/restore$/;
 const SHARE_VIEW = /^\/api\/share\/([^/]+)$/;
 const SHARE_PREVIEW = /^\/api\/share\/([^/]+)\/preview$/;
 const SHARE_REMIX = /^\/api\/share\/([^/]+)\/remix$/;
@@ -386,6 +402,8 @@ const RUN_ITEM = /^\/api\/runs\/([^/]+)$/;
 export function routeKeyFor(pathname: string): string {
   if (PROJECT_DUPLICATE.test(pathname)) return PROJECT_DUPLICATE_ROUTE;
   if (PROJECT_SHARE.test(pathname)) return PROJECT_SHARE_ROUTE;
+  if (PROJECT_CHECKPOINTS.test(pathname)) return PROJECT_CHECKPOINTS_ROUTE;
+  if (PROJECT_RESTORE.test(pathname)) return PROJECT_RESTORE_ROUTE;
   if (PROJECT_ITEM.test(pathname)) return PROJECT_ITEM_ROUTE;
   if (SHARE_PREVIEW.test(pathname)) return SHARE_PREVIEW_ROUTE;
   if (SHARE_REMIX.test(pathname)) return SHARE_REMIX_ROUTE;
@@ -408,6 +426,8 @@ export function projectIdInPath(pathname: string): string | null {
   return segment(
     PROJECT_DUPLICATE.exec(pathname) ??
       PROJECT_SHARE.exec(pathname) ??
+      PROJECT_CHECKPOINTS.exec(pathname) ??
+      PROJECT_RESTORE.exec(pathname) ??
       PROJECT_ITEM.exec(pathname),
   );
 }

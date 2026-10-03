@@ -200,6 +200,13 @@ export interface BuilderState {
    */
   opening: boolean;
   /**
+   * A checkpoint is being restored from History (D152). Held apart from
+   * `opening`, and counted, so a restore that settles never releases a
+   * project still opening, or another restore (Codex review of internal PR 360): a
+   * build sent meanwhile would start from the code being replaced.
+   */
+  restoring: boolean;
+  /**
    * A static sketch of the page to show while a first build runs, instead
    * of an empty pane (docs/decisions.md, 2026-09-28, the draft preview).
    *
@@ -449,6 +456,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     galleryStyle: null,
     galleryColors: null,
     opening: false,
+    restoring: false,
     draft: null,
     serverRunId: null,
     notice: null,
@@ -541,6 +549,30 @@ const STATUS_FROM_STAGE: Partial<Record<GenerationState, BuilderStatus>> = {
  * invalidates the in-flight run (`#epoch`), and a disposed session drops
  * every pending write, so no result from an abandoned run can land in the UI.
  */
+/**
+ * The code a conversation has reached: what its last accepted build made,
+ * or the code a later turn was asked about where that differs, which is a
+ * restore from History (D152). Null where no turn recorded either.
+ */
+function reachedRevision(transcript: readonly TranscriptTurn[]): string | null {
+  let current: string | null = null;
+  for (const turn of transcript) {
+    if (turn.baseRevision && current && turn.baseRevision !== current) {
+      current = turn.baseRevision;
+    }
+    if (turn.status === 'accepted' && turn.revision) current = turn.revision;
+  }
+  return current;
+}
+
+/** The newest of `accepted` whose build ended at `revision`. */
+function builtAt(
+  accepted: readonly TranscriptTurn[],
+  revision: string,
+): TranscriptTurn | undefined {
+  return [...accepted].reverse().find((turn) => turn.revision === revision);
+}
+
 export class BuilderSession {
   #state: BuilderState;
   #listeners = new Set<() => void>();
@@ -551,6 +583,10 @@ export class BuilderSession {
   #entrySeq = 0;
   #turnSeq = 0;
   #disposed = false;
+  /** Restores holding the composer (`holdForRestore`). */
+  #restores = 0;
+  /** Waiting for every restore to settle (`whenRestored`). */
+  #restoreWaiters: Array<() => void> = [];
   /**
    * The key the in-memory store holds this session's project under. The
    * server project's id once one is opened, and a placeholder before that,
@@ -696,6 +732,7 @@ export class BuilderSession {
     this.#chatAbort = null;
     this.#stopDraft();
     this.#listeners.clear();
+    this.#flushRestoreWaiters();
   }
 
   /** Choose the model, or null for the deployment's default. */
@@ -810,6 +847,51 @@ export class BuilderSession {
     if (this.#disposed || opening === this.#state.opening) return;
     this.#state = { ...this.#state, opening };
     this.#emit();
+  }
+
+  /**
+   * Hold the composer while a checkpoint restore is on its way, until the
+   * function this returns is called. Counted, so each hold releases only
+   * itself; calling the release twice changes nothing.
+   */
+  holdForRestore(): () => void {
+    if (this.#disposed) return () => undefined;
+    this.#restores += 1;
+    this.#syncRestoring();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#restores -= 1;
+      this.#syncRestoring();
+    };
+  }
+
+  #syncRestoring(): void {
+    const restoring = this.#restores > 0;
+    if (!restoring) this.#flushRestoreWaiters();
+    if (this.#disposed || restoring === this.#state.restoring) return;
+    this.#state = { ...this.#state, restoring };
+    this.#emit();
+  }
+
+  /**
+   * Settles once no restore holds the composer, at once when none does.
+   *
+   * Opening a project waits for it (Codex review of internal PR 360): a project read
+   * while a restore is on its way can be read from before the restore, and
+   * installed over the code the restore put in place, whether it is another
+   * project or the same one opened again.
+   */
+  whenRestored(): Promise<void> {
+    if (this.#disposed || this.#restores === 0) return Promise.resolve();
+    return new Promise((resolve) => this.#restoreWaiters.push(resolve));
+  }
+
+  #flushRestoreWaiters(): void {
+    const waiters = this.#restoreWaiters;
+    this.#restoreWaiters = [];
+    for (const resolve of waiters) resolve();
   }
 
   /**
@@ -941,6 +1023,60 @@ export class BuilderSession {
     };
     this.#emit();
     if (watching) void this.#watch(epoch, watching);
+  }
+
+  /**
+   * Hold `snapshot` as the accepted checkpoint, after the Worker has made
+   * it the project's accepted revision again from its history (D152).
+   *
+   * Held the way opening a project holds its code: put into the in-memory
+   * store as the accepted revision, not only onto the screen, because the
+   * next build asserts that revision as its base and a session still
+   * holding the one it replaced would have its next build refused as a
+   * conflict. The preview follows from `acceptedSnapshot`, as it follows
+   * any newly accepted checkpoint (D74).
+   *
+   * False, and nothing changed, while a build runs, which the Worker
+   * refuses a restore during anyway, or when another project has been
+   * opened since the restore was asked for.
+   */
+  async adoptCheckpoint(
+    projectId: string,
+    snapshot: ProjectSnapshot,
+  ): Promise<boolean> {
+    // Not under a reply on its way either, whose brief was written for the
+    // code being replaced (Codex review of internal PR 360); the History pane offers
+    // no restore then, and this is the same rule for any other caller.
+    if (this.#disposed || this.#state.running || this.#state.chatting) {
+      return false;
+    }
+    if (this.#projectId !== projectId) return false;
+    const epoch = this.#epoch;
+    const store = await this.#storeHolding(projectId, snapshot);
+    if (this.#disposed || epoch !== this.#epoch) return false;
+    if (
+      this.#state.running ||
+      this.#state.chatting ||
+      this.#projectId !== projectId
+    ) {
+      return false;
+    }
+    this.#store = store;
+    this.#patch(epoch, (state) => ({
+      ...state,
+      acceptedSnapshot: snapshot,
+      acceptedBrief: null,
+      stagedFiles: snapshot.files.map((file) => ({ ...file })),
+      early: null,
+      check: null,
+      problems: [],
+      timeline: this.#append(
+        state.timeline,
+        'info',
+        `Restored the checkpoint at revision ${snapshot.revision}`,
+      ),
+    }));
+    return true;
   }
 
   /** An in-memory store whose accepted revision is `snapshot`, or empty. */
@@ -1341,7 +1477,17 @@ export class BuilderSession {
    * second click that the run in flight would refuse anyway.
    */
   chooseMockup(mockup: ParsedMockup): void {
-    if (this.#disposed || this.#state.running) return;
+    // Held as the composer is (Codex review of internal PR 360): a direction chosen
+    // while a project opens or a checkpoint is restored would build from
+    // the code being left.
+    if (
+      this.#disposed ||
+      this.#state.running ||
+      this.#state.opening ||
+      this.#state.restoring
+    ) {
+      return;
+    }
     const context = this.#mockupContext;
     if (!context) return;
     // Built in the style the set was drawn in, a gallery style (D146) or a
@@ -1504,7 +1650,29 @@ export class BuilderSession {
   #conversation(): ChatMessage[] {
     const clip = (text: string) => text.slice(0, MAX_CHAT_MESSAGE_CHARS);
     const messages: ChatMessage[] = [];
+    const restoredNote = (turn: TranscriptTurn | null | undefined) =>
+      `The project was then restored to an earlier checkpoint${
+        turn ? `, the one built for "${turn.prompt}"` : ''
+      }. Changes built after it are no longer in the code.`;
+    // The accepted turns so far, and the code the conversation has reached:
+    // what the last accepted build made, or a checkpoint restored since.
+    const accepted: TranscriptTurn[] = [];
+    let current: string | null = null;
     for (const turn of this.#state.transcript) {
+      // A turn asked about other code than the conversation had reached: a
+      // checkpoint was restored from History in between (D152), said where
+      // it happened, before that turn (Codex review of internal PR 360).
+      if (turn.baseRevision && current && turn.baseRevision !== current) {
+        current = turn.baseRevision;
+        messages.push({
+          role: 'assistant',
+          text: clip(restoredNote(builtAt(accepted, current))),
+        });
+      }
+      if (turn.status === 'accepted') {
+        accepted.push(turn);
+        if (turn.revision) current = turn.revision;
+      }
       if (turn.status === 'running') continue;
       const said: string[] = [];
       if (turn.agentMessage) said.push(turn.agentMessage);
@@ -1529,7 +1697,42 @@ export class BuilderSession {
         messages.push({ role: 'assistant', text: clip(said.join(' ')) });
       }
     }
+    // A checkpoint restored from History (D152) is not a turn, so the
+    // conversation alone would tell the agent the newest build is the code
+    // (Codex review of internal PR 360). Said last, where it is true: the code is now
+    // what that earlier build made, and what came after it is gone.
+    const restored = this.#restoredFrom();
+    if (restored) {
+      messages.push({
+        role: 'assistant',
+        text: clip(restoredNote(restored.turn)),
+      });
+    }
     return messages;
+  }
+
+  /**
+   * Whether the accepted code is no longer what the conversation has
+   * reached, because a checkpoint was restored from History (D152) since
+   * the last build, and if so, the turn that built it, where one recorded
+   * its revision (`null` for a checkpoint none did: a first attempt kept
+   * before its repair, or the code a copy started with). Undefined when the
+   * code is where the conversation left it. Read from the transcript and
+   * the accepted revision, so it survives a reload. A turn records the
+   * revision its build ended at, repaired or not, so a repair is never read
+   * as a restore.
+   */
+  #restoredFrom(): { turn: TranscriptTurn | null } | undefined {
+    const revision = this.#state.acceptedSnapshot?.revision;
+    if (!revision) return undefined;
+    const accepted = this.#state.transcript.filter(
+      (turn) => turn.status === 'accepted',
+    );
+    const current = reachedRevision(this.#state.transcript);
+    // A transcript from before turns recorded their revision says nothing
+    // either way, and is not read as a restore.
+    if (!current || current === revision) return undefined;
+    return { turn: builtAt(accepted, revision) ?? null };
   }
 
   /**
@@ -1541,9 +1744,14 @@ export class BuilderSession {
   #projectContext(): ChatProjectContext | null {
     const snapshot = this.#state.acceptedSnapshot;
     if (!snapshot) return null;
-    const accepted = [...this.#state.transcript]
-      .reverse()
-      .find((turn) => turn.status === 'accepted');
+    // The turn that built the code there is now, which after a restore
+    // from History is not the newest one (Codex review of internal PR 360).
+    const restored = this.#restoredFrom();
+    const accepted = restored
+      ? restored.turn
+      : [...this.#state.transcript]
+          .reverse()
+          .find((turn) => turn.status === 'accepted');
     const files: string[] = [];
     let total = 0;
     for (const file of snapshot.files) {
@@ -1575,7 +1783,14 @@ export class BuilderSession {
     display: { prompt: string; agentMessage: string } | null = null,
   ): Promise<void> {
     const trimmed = prompt.trim();
-    if (this.#disposed || this.#state.running || trimmed.length === 0) return;
+    if (
+      this.#disposed ||
+      this.#state.running ||
+      this.#state.restoring ||
+      trimmed.length === 0
+    ) {
+      return;
+    }
     const shown = display?.prompt ?? trimmed;
     const said = { agentMessage: display?.agentMessage ?? null };
 
@@ -2240,6 +2455,12 @@ export class BuilderSession {
         problem: null,
         providerId: null,
         agentMessage: null,
+        // The code this turn was asked about, a build's or a reply's, which
+        // the conversation reads to place a restore from History (D152)
+        // where it happened (Codex review of internal PR 360).
+        ...(this.#state.acceptedSnapshot
+          ? { baseRevision: this.#state.acceptedSnapshot.revision }
+          : {}),
         ...patch,
       },
     ];

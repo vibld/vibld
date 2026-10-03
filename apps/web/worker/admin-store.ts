@@ -735,7 +735,7 @@ export class AdminStore {
    * This account's most recent runs across its projects, with what each
    * ended as: the stage's state and, where the run wrote one, its trace's
    * stop. Top-level runs only; a repair or a check is part of the run it
-   * belongs to.
+   * belongs to, and a rollback (D152) is not a run.
    */
   async recentRuns(userId: string, limit = 20): Promise<AdminRunView[]> {
     const result = await this.#db
@@ -747,6 +747,7 @@ export class AdminStore {
            JOIN projects AS p ON p.id = s.project_id
            LEFT JOIN generation_run_traces AS t ON t.run_id = s.run_id
           WHERE p.user_id = ?1 AND instr(s.run_id, ':') = 0
+            AND substr(s.run_id, 1, 9) <> 'rollback-'
           ORDER BY s.created_at DESC, s.run_id
           LIMIT ?2`,
       )

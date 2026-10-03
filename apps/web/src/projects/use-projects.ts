@@ -240,6 +240,11 @@ export function useProjects(
     const token = (openToken.current += 1);
     await leaveCurrent();
     session.setOpening(true);
+    // A checkpoint restore on its way lands first, so this reads the
+    // project after it rather than code it is replacing (Codex review of
+    // internal PR 360).
+    await session.whenRestored();
+    if (token !== openToken.current) return;
     const result = await openProject(id);
     if (token !== openToken.current) return;
     const settle = () => {

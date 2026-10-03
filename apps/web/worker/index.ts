@@ -1516,6 +1516,39 @@ async function handlePlan(
     }
   }
 
+  // The run's row, before the run exists rather than from the moment its
+  // model steps finish (`openStage`). Until then a bounded build has no
+  // row at all, and a builder reopening the project could not see that it
+  // was still going. Written before the Workflow is created, and required:
+  // a restore from History (D152) moves the accepted revision only while no
+  // run has a row, so a run without one could be overtaken by a restore and
+  // spend its budget on code that is no longer the project's, only to be
+  // refused as a conflict (Codex review of internal PR 360).
+  const runRows = new D1GenerationStore(env.DB!, env.PROJECT_CONTENT!);
+  try {
+    await runRows.openStage({
+      runId,
+      projectId,
+      baseRevision: parsed.value.baseRevision ?? null,
+    });
+  } catch (error) {
+    console.error('failed to record a new run', error);
+    await releaseWithoutCharging();
+    return json(
+      { error: 'Generation could not be started. Try again shortly.' },
+      503,
+    );
+  }
+  // A row for a run that never came to be, or was stopped before it could
+  // say so, is closed here rather than read as a build for half an hour.
+  const closeStage = (state: 'failed' | 'cancelled') =>
+    runRows.settleRun(runId, state).catch((error: unknown) => {
+      console.error(
+        'failed to close the row of a run that did not start',
+        error,
+      );
+    });
+
   let instance;
   try {
     instance = await env.GENERATION_WORKFLOW!.create({
@@ -1562,6 +1595,7 @@ async function handlePlan(
     });
   } catch (error) {
     console.error('failed to start generation workflow', error);
+    await closeStage('failed');
     return json(
       { error: 'Generation could not be started. Try again shortly.' },
       503,
@@ -1585,25 +1619,25 @@ async function handlePlan(
   // person it happens to, the under-charge is rare and ours. And it
   // corrects itself where it matters, because a run that does get as far as
   // `settle-budget` overwrites this row with what it really cost.
+  //
+  // Both wait for the termination to land (Codex review of internal PR 360). Closing
+  // the stage row makes the run invisible to a restore from another tab,
+  // which would then move the project under a Workflow still running; and a
+  // termination that failed leaves a run that settles its own reservation.
+  // So when it fails, the row stays open and the reservation held, and
+  // `buildInFlight` settles the row once the engine reports the run ended.
   if (clientGone) {
-    ctx.waitUntil(instance.terminate().catch(() => {}));
-    await releaseWithoutCharging();
+    const terminated = await instance.terminate().then(
+      () => true,
+      (error: unknown) => {
+        console.error('failed to terminate an abandoned workflow', error);
+        return false;
+      },
+    );
+    if (terminated) {
+      await Promise.all([releaseWithoutCharging(), closeStage('cancelled')]);
+    }
     return new Response(null, { status: 499 });
-  }
-
-  // The run's row, from the moment the run exists rather than from the
-  // moment its model steps finish (`openStage`). Until then a bounded build
-  // has no row at all, and a builder reopening the project could not see
-  // that it was still going. A write that fails costs only that: the run
-  // itself carries on, and stages itself as it always has.
-  try {
-    await new D1GenerationStore(env.DB!, env.PROJECT_CONTENT!).openStage({
-      runId,
-      projectId,
-      baseRevision: parsed.value.baseRevision ?? null,
-    });
-  } catch (error) {
-    console.error('failed to record a new run', error);
   }
 
   // Stream rather than buffer. A buffered response sends nothing until the
@@ -3784,7 +3818,7 @@ async function route(
     });
   }
 
-  // The caller's projects (`project-handlers.ts`). Four literal routes,
+  // The caller's projects (`project-handlers.ts`). Six literal routes,
   // one handler: the handler reads the id from the request's own path.
   const links: ProjectLinks = {
     origin: new URL(request.url).origin,
@@ -3823,6 +3857,12 @@ async function route(
     return handleProjects(request, env, projectDeps);
   }
   if (pathname === '/api/projects/:id/share') {
+    return handleProjects(request, env, projectDeps);
+  }
+  if (pathname === '/api/projects/:id/checkpoints') {
+    return handleProjects(request, env, projectDeps);
+  }
+  if (pathname === '/api/projects/:id/checkpoints/restore') {
     return handleProjects(request, env, projectDeps);
   }
 

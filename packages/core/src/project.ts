@@ -101,6 +101,14 @@ export interface TranscriptTurn {
    * every turn saved before builds outlived their page.
    */
   serverRunId?: string | null;
+  /**
+   * The accepted revision this turn was asked about, a build's starting
+   * point or the code a reply was about, so the conversation can say where
+   * a checkpoint restored from History came between two turns (D152).
+   * Absent before a project has code, and on every turn saved before
+   * restores.
+   */
+  baseRevision?: string | null;
 }
 
 export type TranscriptParse =
@@ -168,6 +176,7 @@ export function parseTranscript(value: unknown): TranscriptParse {
       problem,
       providerId,
       serverRunId,
+      baseRevision,
     } = raw;
     if (!finiteNumber(id) || !finiteNumber(at) || !finiteNumber(fileCount)) {
       return { ok: false, error: `${where} has a malformed number.` };
@@ -187,7 +196,8 @@ export function parseTranscript(value: unknown): TranscriptParse {
       !optionalText(revision) ||
       !optionalText(problem) ||
       !optionalText(providerId) ||
-      !optionalText(serverRunId)
+      !optionalText(serverRunId) ||
+      !optionalText(baseRevision)
     ) {
       return { ok: false, error: `${where} has a field that is too long.` };
     }
@@ -204,6 +214,7 @@ export function parseTranscript(value: unknown): TranscriptParse {
       problem: problem ?? null,
       providerId: providerId ?? null,
       ...(typeof serverRunId === 'string' ? { serverRunId } : {}),
+      ...(typeof baseRevision === 'string' ? { baseRevision } : {}),
     });
   }
   return { ok: true, turns };
@@ -240,6 +251,7 @@ export function clipTranscriptTurn(turn: TranscriptTurn): TranscriptTurn {
     problem: clipOptional(turn.problem),
     providerId: clipOptional(turn.providerId),
     ...(turn.serverRunId ? { serverRunId: clip(turn.serverRunId) } : {}),
+    ...(turn.baseRevision ? { baseRevision: clip(turn.baseRevision) } : {}),
   };
 }
 

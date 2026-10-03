@@ -260,6 +260,61 @@ describe('the workspace, as it is actually wired', () => {
     view.unmount();
   });
 
+  it('gives checkpoint history a tab of its own, beside Runs (D152)', async () => {
+    const view = await mount(
+      builder({ projectId: 'p1' } as Partial<BuilderState>),
+    );
+    await view.open(/History/);
+
+    assert.equal(view.panel()?.getAttribute('aria-labelledby'), 'tab-history');
+    const labels = [...view.container.querySelectorAll('[role="tab"]')].map(
+      (tab) => tab.textContent,
+    );
+    assert.equal(labels.indexOf('History') + 1, labels.indexOf('Runs'));
+    view.unmount();
+  });
+
+  it('offers no restore while the project is still opening (D152)', async () => {
+    // Codex review of internal PR 360: the project's read could land after a restore
+    // made meanwhile and put the older code back in the session.
+    const history = {
+      current: 'r2',
+      checkpoints: [
+        {
+          revision: 'r2',
+          runId: 'wf-2',
+          kind: 'build',
+          acceptedAt: '2026-10-03T10:00:00.000Z',
+        },
+        {
+          revision: 'r1',
+          runId: 'wf-1',
+          kind: 'build',
+          acceptedAt: '2026-10-03T09:00:00.000Z',
+        },
+      ],
+    };
+    const restore = (view: Awaited<ReturnType<typeof mount>>) =>
+      [...view.container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Restore',
+      ) as HTMLButtonElement | undefined;
+    const view = await mount(
+      builder({ projectId: 'p1', opening: true } as Partial<BuilderState>),
+    );
+    globalThis.fetch = (async () => reply(history)) as typeof fetch;
+    await view.open(/History/);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.equal(restore(view)?.disabled, true);
+
+    await view.render(
+      builder({ projectId: 'p1', opening: false } as Partial<BuilderState>),
+    );
+    assert.equal(restore(view)?.disabled, false);
+    view.unmount();
+  });
+
   it('flags a running sandbox on the tab nobody is looking at', async () => {
     const view = await mount(builder(), READY);
     await view.run();

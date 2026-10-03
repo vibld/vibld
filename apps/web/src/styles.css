@@ -1486,6 +1486,35 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* --- Checkpoint history (D152) -------------------------------------------
+ * The runs list's rows, with a way to put one back. The confirmation sits
+ * in the row it is about, so what is being restored stays in view. */
+.checkpoints__outcome:empty {
+  display: none;
+}
+
+.checkpoints__outcome {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.checkpoints__current {
+  margin-left: 0.5rem;
+}
+
+.checkpoints__restore,
+.checkpoints__confirm {
+  align-self: flex-start;
+  margin-top: 0.35rem;
+}
+
+.checkpoints__confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 /* --- GitHub push preview -------------------------------------------------
  * What a push would do, read before the push does it. Deletions are the
  * part this exists for, so they are the part that is coloured. */

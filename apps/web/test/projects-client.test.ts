@@ -5,8 +5,10 @@ import {
   createProject,
   deleteProject,
   duplicateProject,
+  fetchCheckpoints,
   listProjects,
   openProject,
+  restoreCheckpoint,
   saveProject,
 } from '../src/projects/projects-client.ts';
 
@@ -192,5 +194,69 @@ describe('what a failure is', () => {
         status: 413,
       },
     });
+  });
+});
+
+describe('the checkpoint history (D152)', () => {
+  it('reads the history, dropping a row it cannot read', async () => {
+    const { calls, deps } = server(() =>
+      reply({
+        current: 'r2',
+        checkpoints: [
+          {
+            revision: 'r2',
+            runId: 'run-2',
+            kind: 'build',
+            acceptedAt: '2026-10-03T10:00:00.000Z',
+          },
+          {
+            revision: 'r1',
+            runId: null,
+            kind: 'copy',
+            acceptedAt: '2026-10-03T09:00:00.000Z',
+          },
+          { revision: 'r0', kind: 'mystery' },
+        ],
+      }),
+    );
+    const history = await fetchCheckpoints('p 1', deps);
+    assert.ok(history.ok);
+    assert.equal(history.value.current, 'r2');
+    assert.deepEqual(
+      history.value.checkpoints.map((entry) => entry.revision),
+      ['r2', 'r1'],
+    );
+    assert.equal(calls[0]!.url, '/api/projects/p%201/checkpoints');
+    assert.equal(calls[0]!.method, 'GET');
+  });
+
+  it('restores with the revision and the base it was chosen from', async () => {
+    const { calls, deps } = server(() =>
+      reply({ snapshot: { revision: 'r1', files: [] } }),
+    );
+    const restored = await restoreCheckpoint('p1', 'r1', 'r2', deps);
+    assert.ok(restored.ok);
+    assert.equal(restored.value.revision, 'r1');
+    assert.equal(calls[0]!.url, '/api/projects/p1/checkpoints/restore');
+    assert.equal(calls[0]!.method, 'POST');
+    assert.deepEqual(calls[0]!.body, { revision: 'r1', base: 'r2' });
+    assert.equal(calls[0]!.headers.Authorization, 'Bearer token-1');
+  });
+
+  it('reads a restore from an out-of-date list as changed, with the reason', async () => {
+    const { deps } = server(() =>
+      reply(
+        {
+          error: 'This project has changed since its history was loaded.',
+          code: 'checkpoint-moved',
+          current: 'r3',
+        },
+        409,
+      ),
+    );
+    const refused = await restoreCheckpoint('p1', 'r1', 'r2', deps);
+    assert.ok(!refused.ok);
+    assert.equal(refused.failure.kind, 'changed');
+    assert.match(refused.failure.message, /changed since/);
   });
 });

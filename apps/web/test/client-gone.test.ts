@@ -277,13 +277,46 @@ describe('a build whose page goes away', () => {
     assert.ok(named < loop, 'the id is sent after the first progress');
   });
 
-  it('records the build as soon as it exists', async () => {
+  it('records the build before it exists, or does not start it', async () => {
     // A bounded build stages nothing until its model steps are over, so
-    // without this a reopened project could not see it running.
+    // without this a reopened project could not see it running, and a
+    // restore from History (D152) could move the project under it (Codex
+    // review of internal PR 360).
     const plan = await planSource();
     const create = plan.indexOf('GENERATION_WORKFLOW!.create(');
     const opened = plan.indexOf('.openStage(');
-    assert.ok(opened > create, 'the run is recorded before it exists');
-    assert.ok(opened < plan.indexOf('new TransformStream()'));
+    assert.ok(opened > 0 && opened < create, 'the run is recorded first');
+    // A row that could not be written refuses the build, with what was
+    // reserved for it given back.
+    const refused = plan.slice(opened, create);
+    assert.match(refused, /releaseWithoutCharging\(\)/);
+    assert.match(refused, /503/);
+    // And a run that then never starts, or is stopped at once, has its row
+    // closed rather than read as a build.
+    assert.match(plan.slice(create), /closeStage\('failed'\)/);
+    assert.match(plan.slice(create), /closeStage\('cancelled'\)/);
+  });
+
+  it('closes an abandoned run only once its termination has landed', async () => {
+    // Codex review of internal PR 360: a closed row is invisible to a restore, so
+    // closing it before the Workflow stops, or after a termination that
+    // failed, lets the project move under a run still spending budget.
+    const source = await readFile(workerSource(), 'utf8');
+    const create = source.indexOf('GENERATION_WORKFLOW!.create(');
+    const acted = source.indexOf('if (clientGone) {', create);
+    const stream = source.indexOf('new TransformStream()');
+    const block = source.slice(acted, stream);
+    assert.match(block, /await instance\.terminate\(\)/);
+    assert.doesNotMatch(block, /waitUntil/);
+    const guard = block.indexOf('if (terminated) {');
+    assert.ok(
+      guard > -1,
+      'the row is closed whether or not termination worked',
+    );
+    assert.ok(
+      block.indexOf("closeStage('cancelled')") > guard,
+      'the row is closed outside the check that termination worked',
+    );
+    assert.ok(block.indexOf('releaseWithoutCharging()') > guard);
   });
 });

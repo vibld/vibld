@@ -57,7 +57,7 @@ Track: M1 milestone and Hello Vibld tracker.
 
 Conversation-driven changes to saved projects, persistent conversation history, targeted patches, regression checks, visible repair/recovery, change summaries and rollback, with a history view that lists every accepted checkpoint and restores one in a single step. Reuse the M1 writer, indexing and checkpoint boundaries. M1 plus M2 proves the first usable build/edit loop. Validate a non-Cloudflare execution path and self-hosting instructions before claiming a complete independent OSS builder.
 
-Status: shipped: projects that keep their whole conversation and settings, follow-ups built as targeted patches, and a build check with one visible repair (D69). Not built: the checkpoint history view and rollback, the non-Cloudflare execution path (L47), and a validated self-hosting path.
+Status: shipped: projects that keep their whole conversation and settings, follow-ups built as targeted patches, a build check with one visible repair (D69), and a History tab that lists every accepted checkpoint and restores one in a single step (D152). Not built: the non-Cloudflare execution path (L47), and a validated self-hosting path.
 
 ## M3: Publish
 

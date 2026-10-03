@@ -147,6 +147,125 @@ describe('talking to the agent', () => {
     assert.ok(second.project.files.length > 0);
   });
 
+  it('tells the agent when a checkpoint was restored, and describes that code', async () => {
+    const { session, asked } = createSession([
+      build('Building it.', 'A bakery landing page.'),
+      build('Adding it.', 'Add a menu page.'),
+      reply('Happy to change the hero.'),
+    ]);
+    await session.send('a bakery site');
+    const first = session.getState().transcript[0]!;
+    const firstCode = session.getState().acceptedSnapshot!;
+    await session.send('add a menu page');
+    assert.notEqual(
+      session.getState().acceptedSnapshot?.revision,
+      first.revision,
+    );
+
+    // Restored from History to what the first build made (D152).
+    assert.equal(
+      await session.adoptCheckpoint('local-project', firstCode),
+      true,
+    );
+    await session.send('can the hero be navy?');
+
+    const third = asked[2]!;
+    const before = third.messages.at(-2)!;
+    assert.equal(before.role, 'assistant');
+    assert.match(before.text, /restored to an earlier checkpoint/);
+    assert.match(before.text, /a bakery site/);
+    assert.equal(third.project?.summary ?? null, first.summary ?? null);
+  });
+
+  it('keeps saying where a restore happened once a build follows it', async () => {
+    const { session, asked } = createSession([
+      build('Building it.', 'A bakery landing page.'),
+      build('Adding it.', 'Add a menu page.'),
+      build('Changing it.', 'Make the hero navy.'),
+      reply('Glad you like it.'),
+    ]);
+    await session.send('a bakery site');
+    const firstCode = session.getState().acceptedSnapshot!;
+    await session.send('add a menu page');
+    assert.equal(
+      await session.adoptCheckpoint('local-project', firstCode),
+      true,
+    );
+    await session.send('make the hero navy');
+    assert.equal(session.getState().transcript.at(-1)?.status, 'accepted');
+    await session.send('thanks');
+
+    const texts = asked[3]!.messages.map((message) => message.text);
+    const note = texts.findIndex((text) =>
+      /restored to an earlier checkpoint, the one built for "a bakery site"/.test(
+        text,
+      ),
+    );
+    assert.ok(note > 0, 'no restore said');
+    // Between the menu page and the navy hero, and said once.
+    assert.ok(note > texts.indexOf('add a menu page'));
+    assert.equal(texts[note + 1], 'make the hero navy');
+    assert.equal(
+      texts.filter((text) => /restored to an earlier checkpoint/.test(text))
+        .length,
+      1,
+    );
+  });
+
+  it('says a restore came before a reply that was about the restored code', async () => {
+    const { session, asked } = createSession([
+      build('Building it.', 'A bakery landing page.'),
+      build('Adding it.', 'Add a menu page.'),
+      reply('The hero is cream.'),
+      reply('Sure.'),
+    ]);
+    await session.send('a bakery site');
+    const firstCode = session.getState().acceptedSnapshot!;
+    await session.send('add a menu page');
+    assert.equal(
+      await session.adoptCheckpoint('local-project', firstCode),
+      true,
+    );
+    await session.send('what color is the hero?');
+    await session.send('ok');
+
+    const texts = asked[3]!.messages.map((message) => message.text);
+    const note = texts.findIndex((text) =>
+      /restored to an earlier checkpoint/.test(text),
+    );
+    // Before the reply that was about the restored code, and only there.
+    assert.equal(texts[note + 1], 'what color is the hero?');
+    assert.equal(
+      texts.filter((text) => /restored to an earlier checkpoint/.test(text))
+        .length,
+      1,
+    );
+  });
+
+  it('still says so for a checkpoint no turn recorded', async () => {
+    const { session, asked } = createSession([
+      build('Building it.', 'A bakery landing page.'),
+      reply('Happy to change the hero.'),
+    ]);
+    await session.send('a bakery site');
+    // A first attempt kept before its repair, or the code a copy started
+    // with: accepted once, but no turn's revision.
+    const kept = {
+      revision: 'r-first-attempt',
+      files: [{ path: 'index.html', content: '<h1>first</h1>' }],
+    };
+    assert.equal(await session.adoptCheckpoint('local-project', kept), true);
+    await session.send('can the hero be navy?');
+
+    const second = asked[1]!;
+    assert.match(
+      second.messages.at(-2)!.text,
+      /^The project was then restored to an earlier checkpoint\. /,
+    );
+    assert.equal(second.project?.summary, null);
+    assert.deepEqual(second.project?.files, ['index.html']);
+  });
+
   it('sends no project before there is one', async () => {
     const { session, asked } = createSession([reply('What is it for?')]);
     await session.send('a website');

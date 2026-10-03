@@ -296,7 +296,7 @@ function Builder() {
               mockups={state.mockups}
               onChoose={(mockup) => session.chooseMockup(mockup)}
               onDiscard={() => session.discardMockups()}
-              disabled={state.running}
+              disabled={state.running || state.opening || state.restoring}
             />
             <PromptPanel
               state={state}
@@ -355,7 +355,16 @@ function Builder() {
           technology the builder is not on screen; `hidden-attribute.test`
           holds the stylesheet to honouring it.
         */}
-        <Workspace state={state} hidden={onPage} />
+        <Workspace
+          state={state}
+          hidden={onPage}
+          onCheckpointRestored={(projectId, snapshot) =>
+            session.adoptCheckpoint(projectId, snapshot)
+          }
+          // Held the way opening a project holds it: a build sent while a
+          // restore is on its way would start from the code being replaced.
+          onCheckpointRestoring={() => session.holdForRestore()}
+        />
       </main>
 
       {/*

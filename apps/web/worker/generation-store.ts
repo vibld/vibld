@@ -38,6 +38,79 @@ export function checkRunId(runId: string): string {
   return `${runId}${CHECK_SUFFIX}`;
 }
 
+/**
+ * How long a run's stage may go unchanged and still be a run in flight.
+ *
+ * Twice a run's whole wall-clock budget (`RUN_WALL_CLOCK_BUDGET_MS`, fifteen
+ * minutes), because a repair turn can follow a build. A stage older than
+ * this and still not settled belongs to a run that was stopped between
+ * steps and never came back, and must not block a deletion for ever.
+ */
+export const RUN_IN_FLIGHT_MS = 30 * 60_000;
+
+/**
+ * The run id a rollback's stage row is recorded under (D152): its own id,
+ * with no `:`, so nothing that reads a run's rows by prefix (`settleRun`,
+ * `ProjectStore.runStages`) ever takes it for part of a build.
+ */
+export const ROLLBACK_PREFIX = 'rollback-';
+
+export function rollbackRunId(id: string): string {
+  return `${ROLLBACK_PREFIX}${id}`;
+}
+
+/** The most checkpoints a project's history lists (D152). */
+export const MAX_CHECKPOINTS = 100;
+
+/**
+ * What made a checkpoint the accepted one, read from its run id:
+ *
+ *   build      a build was promoted to it
+ *   repair     a build's repair turn was (D69, `runId:repair`)
+ *   restore    a repair was given up and the first attempt put back
+ *              (`runId:restore`)
+ *   rollback   somebody restored it from the history (D152)
+ *   copy       it came with the project, from a duplicate or a remix, and
+ *              no run in this project ever accepted it
+ */
+export type CheckpointKind =
+  'build' | 'repair' | 'restore' | 'rollback' | 'copy';
+
+export interface Checkpoint {
+  revision: string;
+  /** The stage row's run id; null for a `copy`, which has none. */
+  runId: string | null;
+  kind: CheckpointKind;
+  acceptedAt: string;
+}
+
+export interface CheckpointHistory {
+  /** The accepted revision now, or null for a project never built in. */
+  current: string | null;
+  /** Newest first. */
+  checkpoints: Checkpoint[];
+}
+
+export type RollbackResult =
+  | { outcome: 'restored'; snapshot: ProjectSnapshot }
+  /** The revision is not in R2: nothing to restore, and nothing written. */
+  | { outcome: 'missing' }
+  /** The project was deleted: nothing written. */
+  | { outcome: 'gone' }
+  /** The accepted revision was not `expectedBase`; it is `current`. */
+  | { outcome: 'stale'; current: string | null }
+  /** A build is running in the project: nothing moved. */
+  | { outcome: 'busy' }
+  /** The project was archived: nothing moved. */
+  | { outcome: 'archived' };
+
+function checkpointKind(runId: string): CheckpointKind {
+  if (runId.startsWith(ROLLBACK_PREFIX)) return 'rollback';
+  if (runId.endsWith(':repair')) return 'repair';
+  if (runId.endsWith(':restore')) return 'restore';
+  return 'build';
+}
+
 /** How a check ends: it builds, it does not, or nothing could say. */
 export type CheckStageState = 'accepted' | 'failed' | 'idle';
 
@@ -529,5 +602,206 @@ export class D1GenerationStore implements GenerationStore {
       .run();
 
     return { promoted: true, current: snapshot };
+  }
+
+  /**
+   * Every revision this project has accepted, newest first, at most
+   * `MAX_CHECKPOINTS` (D152): one entry per acceptance, so a checkpoint
+   * accepted twice (a rollback to it, or a first attempt restored after a
+   * repair) is listed each time it was.
+   *
+   * A check's own row (`runId:verify`, D69) is left out: it records what a
+   * build check found about a revision its run already accepted, not an
+   * acceptance of its own. The accepted revision is always in the list,
+   * even when no row here accepted it: a copied project starts at its
+   * source's revision with none of its source's runs, and a project whose
+   * last acceptance is older than the cap is still at that revision.
+   */
+  async listCheckpoints(
+    projectId: string,
+    limit = MAX_CHECKPOINTS,
+  ): Promise<CheckpointHistory> {
+    const [project, rows] = await Promise.all([
+      this.#db
+        .prepare(
+          `SELECT id, accepted_revision, updated_at FROM generation_projects
+            WHERE id = ?1`,
+        )
+        .bind(projectId)
+        .first<ProjectRow & { updated_at: string }>(),
+      this.#db
+        .prepare(
+          `SELECT run_id, snapshot_revision, updated_at FROM generation_stages
+            WHERE project_id = ?1
+              AND state = 'accepted'
+              AND snapshot_revision IS NOT NULL
+              AND substr(run_id, -length(?2)) <> ?2
+            ORDER BY updated_at DESC, run_id DESC
+            LIMIT ?3`,
+        )
+        .bind(projectId, CHECK_SUFFIX, limit)
+        .all<{
+          run_id: string;
+          snapshot_revision: string;
+          updated_at: string;
+        }>(),
+    ]);
+    const checkpoints: Checkpoint[] = (rows.results ?? []).map((row) => ({
+      revision: row.snapshot_revision,
+      runId: row.run_id,
+      kind: checkpointKind(row.run_id),
+      acceptedAt: row.updated_at,
+    }));
+    const current = project?.accepted_revision ?? null;
+    if (
+      current !== null &&
+      !checkpoints.some((checkpoint) => checkpoint.revision === current)
+    ) {
+      // Its own last acceptance, when there is one past the cap, or else
+      // when the pointer was set without a run: the copy's creation.
+      const older = await this.#db
+        .prepare(
+          `SELECT run_id, updated_at FROM generation_stages
+            WHERE project_id = ?1 AND state = 'accepted'
+              AND snapshot_revision = ?2
+              AND substr(run_id, -length(?3)) <> ?3
+            ORDER BY updated_at DESC, run_id DESC
+            LIMIT 1`,
+        )
+        .bind(projectId, current, CHECK_SUFFIX)
+        .first<{ run_id: string; updated_at: string }>();
+      const entry: Checkpoint = older
+        ? {
+            revision: current,
+            runId: older.run_id,
+            kind: checkpointKind(older.run_id),
+            acceptedAt: older.updated_at,
+          }
+        : {
+            revision: current,
+            runId: null,
+            kind: 'copy',
+            acceptedAt: project!.updated_at,
+          };
+      checkpoints.unshift(entry);
+      if (checkpoints.length > limit) checkpoints.pop();
+    }
+    return { current, checkpoints };
+  }
+
+  /**
+   * Make `revision`, one this project has accepted before, the accepted
+   * one again (D152), if the accepted revision is still `expectedBase`.
+   *
+   * A promotion like `restoreFirstAttempt`'s: a stage row of its own, under
+   * `runId`, and a compare-and-set against the revision the caller was
+   * looking at, so a build or another tab that has moved the project since
+   * wins and this changes nothing. Unlike a promotion, nothing is written
+   * to R2: the snapshot is already there, under its own key, and
+   * rewriting it would only risk the one copy of it. No row is deleted
+   * either: the history this restores from is kept whole, and the rollback
+   * joins it as one more acceptance.
+   *
+   * One batch, so the row and the pointer move together or not at all: the
+   * row is written, `accepted`, only when the pointer moves, and a refused
+   * attempt leaves nothing behind (Codex review of internal PR 360: a `failed` row per
+   * lost race let a burst of restores grow the table without bound, and no
+   * row is ever left at `validating` for `runInFlight` to read as a
+   * build).
+   *
+   * And a restore to a revision restored before replaces that earlier
+   * rollback row rather than adding to it (Codex review of internal PR 360). Restores
+   * cost nothing, so rows added per restore would let anyone alternating
+   * between two checkpoints grow the table without bound; one per revision
+   * is bounded by the builds, which do cost. The history shows each
+   * restored revision once, at the last time it was restored.
+   *
+   * No build may be running and the project may not be archived, and both
+   * are asked inside the same batch (Codex review of internal PR 360): asked first and
+   * separately, a build that started in between would be based on the
+   * revision this moves away from, and would spend its budget only to be
+   * refused as a conflict, and an archive in between would be overridden.
+   *
+   * A build is any stage row that has not ended, whatever its age, unlike
+   * `ProjectStore.runInFlight`'s thirty minutes: a repair can work longer
+   * than that without touching its row. The caller settles the rows of
+   * runs whose Workflow has stopped first (`buildInFlight`), so a run the
+   * engine abandoned does not hold this off for good.
+   */
+  async rollback(
+    projectId: string,
+    revision: string,
+    expectedBase: string | null,
+    runId: string = rollbackRunId(crypto.randomUUID()),
+  ): Promise<RollbackResult> {
+    const snapshot = await readSnapshot(this.#bucket, projectId, revision);
+    if (!snapshot) return { outcome: 'missing' };
+
+    const now = new Date().toISOString();
+    // No build running (the rollback's own row is `accepted`, so the update
+    // after it never counts it), and the project still there
+    // and not archived, which leaves it read-only. Asked here, in the batch,
+    // rather than only by the handler beforehand (Codex review of internal PR 360). A
+    // project deleted meanwhile gets no row at all: its rows go in one batch
+    // (`ProjectStore.remove`), so this lands wholly before that, and is
+    // deleted with it, or wholly after, and finds no project, so the `idle`
+    // test fails.
+    const idle = `NOT EXISTS (
+      SELECT 1 FROM generation_stages
+       WHERE project_id = ?2
+         AND state NOT IN ('accepted', 'failed', 'cancelled', 'idle')
+    ) AND EXISTS (
+      SELECT 1 FROM projects WHERE id = ?2 AND archived_at IS NULL
+    )`;
+    const [, moved] = await this.#db.batch([
+      this.#db
+        .prepare(
+          `INSERT INTO generation_stages
+             (run_id, project_id, base_revision, state, snapshot_revision,
+              created_at, updated_at)
+           SELECT ?1, ?2, ?3, 'accepted', ?4, ?5, ?5
+            WHERE EXISTS (
+                    SELECT 1 FROM generation_projects
+                     WHERE id = ?2 AND accepted_revision IS ?3
+                  ) AND ${idle}`,
+        )
+        .bind(runId, projectId, expectedBase, revision, now),
+      this.#db
+        .prepare(
+          `UPDATE generation_projects
+              SET accepted_revision = ?4, updated_at = ?5
+            WHERE id = ?2 AND accepted_revision IS ?3 AND ${idle}`,
+        )
+        // ?1 is the row insert's run id, unused here; bound so the shared
+        // `idle` text means the same numbers in both statements.
+        .bind(null, projectId, expectedBase, revision, now),
+      // The earlier rollback rows for the same revision, only once this
+      // one's row has been written.
+      this.#db
+        .prepare(
+          `DELETE FROM generation_stages
+            WHERE project_id = ?2
+              AND snapshot_revision = ?3
+              AND run_id LIKE '${ROLLBACK_PREFIX}%'
+              AND run_id != ?1
+              AND EXISTS (SELECT 1 FROM generation_stages WHERE run_id = ?1)`,
+        )
+        .bind(runId, projectId, revision),
+    ]);
+    if (moved?.meta.changes === 1) return { outcome: 'restored', snapshot };
+    const row = await this.#db
+      .prepare(
+        `SELECT accepted_revision FROM generation_projects WHERE id = ?1`,
+      )
+      .bind(projectId)
+      .first<Pick<ProjectRow, 'accepted_revision'>>();
+    const project = await this.#db
+      .prepare(`SELECT archived_at FROM projects WHERE id = ?1`)
+      .bind(projectId)
+      .first<{ archived_at: string | null }>();
+    if (!project) return { outcome: 'gone' };
+    const current = row?.accepted_revision ?? null;
+    if (current !== expectedBase) return { outcome: 'stale', current };
+    return { outcome: project.archived_at !== null ? 'archived' : 'busy' };
   }
 }

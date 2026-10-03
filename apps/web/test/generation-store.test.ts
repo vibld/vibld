@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { describe, it } from 'node:test';
 
 import { testGenerationStoreContract } from '@vibld/core/test-contract';
 import type { ProjectSnapshot, RunTrace } from '@vibld/core';
@@ -30,6 +30,8 @@ const SCHEMA = [
   migration('0001_generation_store.sql'),
   migration('0014_run_traces.sql'),
   migration('0037_run_trace_steps.sql'),
+  // Read by `rollback`, which refuses an archived project.
+  migration('0033_projects.sql'),
 ].join('\n');
 
 function newStore(): D1GenerationStore {
@@ -257,4 +259,312 @@ test('the steps column is compact JSON, and read back defensively', () => {
       { name: 'r', ms: 3, outputTokens: 0, reasoningTokens: 2 },
     ],
   );
+});
+
+describe('[d1] checkpoint history (D152)', () => {
+  const snapshot = (revision: string): ProjectSnapshot => ({
+    revision,
+    files: [{ path: 'index.html', content: revision }],
+  });
+
+  /** A build accepted at `revision`, from whatever is accepted now. */
+  async function accept(
+    store: D1GenerationStore,
+    runId: string,
+    revision: string,
+  ): Promise<void> {
+    const base = (await store.loadAccepted('project-1'))?.revision ?? null;
+    await store.saveStage({
+      runId,
+      projectId: 'project-1',
+      baseRevision: base,
+      state: 'validating',
+      snapshot: snapshot(revision),
+    });
+    const promoted = await store.promote(
+      'project-1',
+      runId,
+      base,
+      snapshot(revision),
+    );
+    assert.ok(promoted.promoted);
+  }
+
+  /** Lets the clock move, so newest-first is a real ordering. */
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+  it('lists every accepted checkpoint newest first, leaving out build checks', async () => {
+    const store = newStore();
+    await accept(store, 'run-1', 'r1');
+    // The check row D69 writes for run-1, accepted because it builds.
+    await store.openCheck({
+      runId: 'run-1',
+      projectId: 'project-1',
+      baseRevision: null,
+      revision: 'r1',
+    });
+    await store.closeCheck('run-1', 'accepted', 'r1');
+    await tick();
+    await accept(store, 'run-2', 'r2');
+    // A run that failed is not a checkpoint.
+    await store.saveStage({
+      runId: 'run-3',
+      projectId: 'project-1',
+      baseRevision: 'r2',
+      state: 'failed',
+    });
+
+    const history = await store.listCheckpoints('project-1');
+    assert.equal(history.current, 'r2');
+    assert.deepEqual(
+      history.checkpoints.map(({ runId, revision, kind }) => ({
+        runId,
+        revision,
+        kind,
+      })),
+      [
+        { runId: 'run-2', revision: 'r2', kind: 'build' },
+        { runId: 'run-1', revision: 'r1', kind: 'build' },
+      ],
+    );
+  });
+
+  it('lists the accepted revision of a project no run here accepted, as a copy', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    const bucket = new InMemoryR2Bucket();
+    await bucket.put(
+      'projects/copy-1/snapshots/r9.json',
+      JSON.stringify(snapshot('r9')),
+    );
+    await db
+      .prepare(
+        `INSERT INTO generation_projects VALUES ('copy-1', 'r9', ?1, ?1)`,
+      )
+      .bind('2026-10-01T00:00:00.000Z')
+      .run();
+    const history = await new D1GenerationStore(db, bucket).listCheckpoints(
+      'copy-1',
+    );
+    assert.deepEqual(history, {
+      current: 'r9',
+      checkpoints: [
+        {
+          revision: 'r9',
+          runId: null,
+          kind: 'copy',
+          acceptedAt: '2026-10-01T00:00:00.000Z',
+        },
+      ],
+    });
+  });
+
+  /** A store whose project-1 has its `projects` row, as every real one does. */
+  async function owned(archivedAt: string | null = null) {
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new D1GenerationStore(db, new InMemoryR2Bucket());
+    await db
+      .prepare(
+        `INSERT INTO projects
+           (id, user_id, name, archived_at, created_at, updated_at, last_opened_at)
+         VALUES ('project-1', 'user-1', 'Bakery', ?1, ?2, ?2, ?2)`,
+      )
+      .bind(archivedAt, '2026-10-01T00:00:00.000Z')
+      .run();
+    return { db, store };
+  }
+
+  it('moves the pointer to an earlier checkpoint and records it as one more acceptance', async () => {
+    const { store } = await owned();
+    await accept(store, 'run-1', 'r1');
+    await tick();
+    await accept(store, 'run-2', 'r2');
+    await tick();
+
+    const result = await store.rollback(
+      'project-1',
+      'r1',
+      'r2',
+      'rollback-one',
+    );
+    assert.equal(result.outcome, 'restored');
+    assert.equal((await store.loadAccepted('project-1'))?.revision, 'r1');
+    const row = await store.loadStage('rollback-one');
+    assert.equal(row?.state, 'accepted');
+    assert.equal(row?.baseRevision, 'r2');
+
+    // Nothing is lost: r2 is still in the history, and can be put back.
+    const history = await store.listCheckpoints('project-1');
+    assert.deepEqual(
+      history.checkpoints.map(({ revision, kind }) => `${revision} ${kind}`),
+      ['r1 rollback', 'r2 build', 'r1 build'],
+    );
+    assert.equal((await store.loadRevision('project-1', 'r2'))?.revision, 'r2');
+  });
+
+  it('keeps one rollback row per revision, however often it is restored', async () => {
+    // Codex review of internal PR 360: restores are free, so a row per restore would
+    // let two checkpoints traded back and forth grow the table for ever.
+    const { db, store } = await owned();
+    await accept(store, 'run-1', 'r1');
+    await tick();
+    await accept(store, 'run-2', 'r2');
+    await tick();
+    let current = 'r2';
+    for (let round = 0; round < 6; round += 1) {
+      const target = current === 'r2' ? 'r1' : 'r2';
+      const result = await store.rollback(
+        'project-1',
+        target,
+        current,
+        `rollback-${round}`,
+      );
+      assert.equal(result.outcome, 'restored');
+      current = target;
+      await tick();
+    }
+
+    const rows = await db
+      .prepare(
+        `SELECT run_id FROM generation_stages WHERE project_id = 'project-1'`,
+      )
+      .all<{ run_id: string }>();
+    assert.deepEqual(rows.results.map((row) => row.run_id).sort(), [
+      'rollback-4',
+      'rollback-5',
+      'run-1',
+      'run-2',
+    ]);
+    assert.equal((await store.loadAccepted('project-1'))?.revision, 'r2');
+    const history = await store.listCheckpoints('project-1');
+    assert.deepEqual(
+      history.checkpoints.map(({ revision, kind }) => `${revision} ${kind}`),
+      ['r2 rollback', 'r1 rollback', 'r2 build', 'r1 build'],
+    );
+  });
+
+  it('changes nothing from a stale base, and leaves no row behind', async () => {
+    const { store } = await owned();
+    await accept(store, 'run-1', 'r1');
+    await accept(store, 'run-2', 'r2');
+    await accept(store, 'run-3', 'r3');
+
+    const result = await store.rollback(
+      'project-1',
+      'r1',
+      'r2',
+      'rollback-late',
+    );
+    assert.deepEqual(result, { outcome: 'stale', current: 'r3' });
+    assert.equal((await store.loadAccepted('project-1'))?.revision, 'r3');
+    assert.equal(await store.loadStage('rollback-late'), undefined);
+  });
+
+  it('changes nothing while a build is running, even one that started after the handler looked', async () => {
+    const { store } = await owned();
+    await accept(store, 'run-1', 'r1');
+    await accept(store, 'run-2', 'r2');
+    // A build based on r2 that has written its stage row and not ended.
+    await store.saveStage({
+      runId: 'run-3',
+      projectId: 'project-1',
+      baseRevision: 'r2',
+      state: 'validating',
+      snapshot: snapshot('r3'),
+    });
+
+    const result = await store.rollback(
+      'project-1',
+      'r1',
+      'r2',
+      'rollback-busy',
+    );
+    assert.deepEqual(result, { outcome: 'busy' });
+    assert.equal((await store.loadAccepted('project-1'))?.revision, 'r2');
+    assert.equal(await store.loadStage('rollback-busy'), undefined);
+  });
+
+  it('counts a build whose row has not moved for longer than half an hour', async () => {
+    // A repair can work past `RUN_IN_FLIGHT_MS` without touching its row;
+    // runs the engine abandoned are the handler's to settle first.
+    const { db, store } = await owned();
+    await accept(store, 'run-1', 'r1');
+    await accept(store, 'run-2', 'r2');
+    await store.saveStage({
+      runId: 'run-3:verify',
+      projectId: 'project-1',
+      baseRevision: 'r2',
+      state: 'validating',
+      snapshot: snapshot('r3'),
+    });
+    await db
+      .prepare(`UPDATE generation_stages SET updated_at = ?1 WHERE run_id = ?2`)
+      .bind('2026-01-01T00:00:00.000Z', 'run-3:verify')
+      .run();
+
+    const result = await store.rollback(
+      'project-1',
+      'r1',
+      'r2',
+      'rollback-long',
+    );
+    assert.deepEqual(result, { outcome: 'busy' });
+    assert.equal((await store.loadAccepted('project-1'))?.revision, 'r2');
+  });
+
+  it('changes nothing in a project archived since the handler looked', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new D1GenerationStore(db, new InMemoryR2Bucket());
+    await accept(store, 'run-1', 'r1');
+    await accept(store, 'run-2', 'r2');
+    await db
+      .prepare(
+        `INSERT INTO projects
+           (id, user_id, name, archived_at, created_at, updated_at, last_opened_at)
+         VALUES ('project-1', 'user-1', 'Bakery', ?1, ?1, ?1, ?1)`,
+      )
+      .bind('2026-10-03T12:00:00.000Z')
+      .run();
+
+    const result = await store.rollback(
+      'project-1',
+      'r1',
+      'r2',
+      'rollback-archived',
+    );
+    assert.deepEqual(result, { outcome: 'archived' });
+    assert.equal((await store.loadAccepted('project-1'))?.revision, 'r2');
+    assert.equal(await store.loadStage('rollback-archived'), undefined);
+  });
+
+  it('writes nothing for a project deleted since the handler looked', async () => {
+    const { db, store } = await owned();
+    await accept(store, 'run-1', 'r1');
+    await accept(store, 'run-2', 'r2');
+    await db.prepare(`DELETE FROM projects WHERE id = 'project-1'`).run();
+
+    const result = await store.rollback(
+      'project-1',
+      'r1',
+      'r2',
+      'rollback-deleted',
+    );
+    assert.deepEqual(result, { outcome: 'gone' });
+    assert.equal(await store.loadStage('rollback-deleted'), undefined);
+    assert.equal((await store.loadAccepted('project-1'))?.revision, 'r2');
+  });
+
+  it('refuses a revision that is not stored, and writes nothing', async () => {
+    const { store } = await owned();
+    await accept(store, 'run-1', 'r1');
+
+    const result = await store.rollback(
+      'project-1',
+      'r-gone',
+      'r1',
+      'rollback-gone',
+    );
+    assert.deepEqual(result, { outcome: 'missing' });
+    assert.equal(await store.loadStage('rollback-gone'), undefined);
+    assert.equal((await store.loadAccepted('project-1'))?.revision, 'r1');
+  });
 });

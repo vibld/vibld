@@ -149,6 +149,21 @@ describe('a transcript read back after the page that wrote it has gone', () => {
     assert.ok(plain.ok);
     assert.equal('serverRunId' in plain.turns[0]!, false);
   });
+
+  it('keeps the revision a build started from through a save and a read', () => {
+    const read = parseTranscript([
+      clipTranscriptTurn(turn({ baseRevision: 'r1' })),
+    ]);
+    assert.ok(read.ok);
+    assert.equal(read.turns[0]!.baseRevision, 'r1');
+    const plain = parseTranscript([turn()]);
+    assert.ok(plain.ok);
+    assert.equal('baseRevision' in plain.turns[0]!, false);
+    assert.equal(
+      parseTranscript([turn({ baseRevision: 7 as never })]).ok,
+      false,
+    );
+  });
 });
 
 describe('settling a build the page did not see finish', () => {

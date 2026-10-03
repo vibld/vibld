@@ -316,6 +316,18 @@ async function readStatus(
 }
 
 /**
+ * How long a run whose Workflow instance cannot be read is still taken to
+ * be running, where being wrong costs a build its budget rather than a
+ * spinner: a restore from History (D152) moving the project under it.
+ *
+ * Far longer than any run can last, steps' retries included, so an instance
+ * that is only briefly unreadable is never settled under a live build
+ * (Codex review of internal PR 360); and finite, so a row whose instance the engine no
+ * longer keeps does not hold restores off for good.
+ */
+export const UNREADABLE_RUN_HELD_MS = 24 * 60 * 60_000;
+
+/**
  * A run, with its stages settled first if it stopped without saying so.
  *
  * A Workflow terminated or errored between steps writes nothing: its row
@@ -335,13 +347,15 @@ export async function describeRun(
   runId: string,
   now: Date,
   deps: Pick<RunControlDeps, 'instanceStatus'>,
+  /** How old a run whose instance cannot be read must be to be settled. */
+  unreadableAfterMs: number = RUN_IN_FLIGHT_MS,
 ): Promise<RunView | null> {
   let rows = await load();
   if (rows.length === 0) return null;
   const going = rows.filter(unended);
   if (going.length > 0) {
     const status = await readStatus(deps, runId);
-    const cutoff = now.getTime() - RUN_IN_FLIGHT_MS;
+    const cutoff = now.getTime() - unreadableAfterMs;
     const stale = going.every((row) => Date.parse(row.updated_at) <= cutoff);
     const ended = status !== undefined && INSTANCE_ENDED.has(status);
     if (ended || (stale && status === undefined)) {
@@ -402,6 +416,8 @@ export async function buildInFlight(
   projectId: string,
   now: Date,
   deps: Pick<RunControlDeps, 'instanceStatus'>,
+  /** As `describeRun` takes it. */
+  unreadableAfterMs: number = RUN_IN_FLIGHT_MS,
 ): Promise<{ runId: string; startedAt: string } | null> {
   for (const runId of await projects.unendedRuns(projectId)) {
     const view = await describeRun(
@@ -410,6 +426,7 @@ export async function buildInFlight(
       runId,
       now,
       deps,
+      unreadableAfterMs,
     );
     if (view?.state === 'running') {
       return { runId, startedAt: view.startedAt };

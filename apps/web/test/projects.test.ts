@@ -36,6 +36,8 @@ interface World {
   bucket: InMemoryR2Bucket;
   tiers: Map<string, Tier>;
   clock: { now: Date };
+  /** What each run's Workflow instance says of itself, where it says. */
+  statuses: Map<string, string>;
   call(
     user: string,
     method: string,
@@ -49,6 +51,7 @@ function world(db = new SqliteD1Database(schemaSql())): World {
   const bucket = new InMemoryR2Bucket();
   const tiers = new Map<string, Tier>();
   const clock = { now: new Date('2026-09-28T12:00:00.000Z') };
+  const statuses = new Map<string, string>();
   let ids = 0;
   const deps = (user: string): ProjectsDeps => ({
     resolvePrincipal: async () =>
@@ -56,12 +59,18 @@ function world(db = new SqliteD1Database(schemaSql())): World {
     now: () => clock.now,
     newId: () => `project-${String((ids += 1)).padStart(3, '0')}`,
     tierOf: async (who) => tiers.get(who) ?? 'free',
+    instanceStatus: async (runId) => {
+      const status = statuses.get(runId);
+      if (status === undefined) throw new Error('no such instance');
+      return status;
+    },
   });
   return {
     db,
     bucket,
     tiers,
     clock,
+    statuses,
     async call(user, method, path, body, headers = {}) {
       const response = await handleProjects(
         new Request(`${ORIGIN}${path}`, {
@@ -1055,5 +1064,287 @@ describe('the difference between unset and cleared', () => {
     const cleared = await w.call(ALICE, 'GET', `/api/projects/${made.id}`);
     assert.equal(cleared.body.project.settings.knowledge, '');
     assert.deepEqual(cleared.body.project.settings.styleDna, {});
+  });
+});
+
+describe('checkpoint history (D152)', () => {
+  /** Lets the clock move, so newest-first is a real ordering. */
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+  /** A project built three times: r1, r2, then r3, which is accepted. */
+  async function built(w: World) {
+    const project = await create(w, ALICE);
+    for (const revision of ['r1', 'r2', 'r3']) {
+      await build(w, project.id, revision);
+      await tick();
+    }
+    return project;
+  }
+
+  /** Every row of what a run spends or records, which a restore must not touch. */
+  async function ledgerRows(w: World): Promise<number> {
+    let total = 0;
+    for (const table of [
+      'generation_run_traces',
+      'billing_payments',
+      'billing_topups',
+      'billing_admin_credits',
+      'billing_clawbacks',
+    ]) {
+      total += await count(w.db, `SELECT COUNT(*) AS n FROM ${table}`);
+    }
+    return total;
+  }
+
+  it('lists every accepted checkpoint, newest first, with the current one', async () => {
+    const w = world();
+    const project = await built(w);
+    const listed = await w.call(
+      ALICE,
+      'GET',
+      `/api/projects/${project.id}/checkpoints`,
+    );
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.current, 'r3');
+    assert.deepEqual(
+      listed.body.checkpoints.map((entry: any) => entry.revision),
+      ['r3', 'r2', 'r1'],
+    );
+    assert.equal(listed.body.checkpoints[0].kind, 'build');
+    assert.equal(typeof listed.body.checkpoints[0].acceptedAt, 'string');
+  });
+
+  it('restores one in a single step, and opening the project then shows it', async () => {
+    const w = world();
+    const project = await built(w);
+    const before = await ledgerRows(w);
+
+    const restored = await w.call(
+      ALICE,
+      'POST',
+      `/api/projects/${project.id}/checkpoints/restore`,
+      { revision: 'r1', base: 'r3' },
+    );
+    assert.equal(restored.status, 200, JSON.stringify(restored.body));
+    assert.equal(restored.body.snapshot.revision, 'r1');
+    assert.ok(Array.isArray(restored.body.snapshot.files));
+
+    const opened = await w.call(ALICE, 'GET', `/api/projects/${project.id}`);
+    assert.equal(opened.body.snapshot.revision, 'r1');
+    // Nothing was spent or traced, and every checkpoint is still there.
+    assert.equal(await ledgerRows(w), before);
+    const listed = await w.call(
+      ALICE,
+      'GET',
+      `/api/projects/${project.id}/checkpoints`,
+    );
+    assert.equal(listed.body.current, 'r1');
+    assert.deepEqual(
+      listed.body.checkpoints.map((entry: any) => entry.kind),
+      ['rollback', 'build', 'build', 'build'],
+    );
+    assert.match(listed.body.checkpoints[0].runId, /^rollback-[^:]+$/);
+  });
+
+  it("answers 404, not 403, on somebody else's project", async () => {
+    const w = world();
+    const project = await built(w);
+    const listed = await w.call(
+      BOB,
+      'GET',
+      `/api/projects/${project.id}/checkpoints`,
+    );
+    assert.equal(listed.status, 404);
+    const restored = await w.call(
+      BOB,
+      'POST',
+      `/api/projects/${project.id}/checkpoints/restore`,
+      { revision: 'r1', base: 'r3' },
+    );
+    assert.equal(restored.status, 404);
+    assert.equal(restored.body.error, 'That project does not exist.');
+    const opened = await w.call(ALICE, 'GET', `/api/projects/${project.id}`);
+    assert.equal(opened.body.snapshot.revision, 'r3');
+  });
+
+  it('refuses a cross-site restore before looking anyone up', async () => {
+    const w = world();
+    const project = await built(w);
+    const refused = await w.call(
+      ALICE,
+      'POST',
+      `/api/projects/${project.id}/checkpoints/restore`,
+      { revision: 'r1', base: 'r3' },
+      { origin: 'https://evil.example' },
+    );
+    assert.equal(refused.status, 403);
+    const opened = await w.call(ALICE, 'GET', `/api/projects/${project.id}`);
+    assert.equal(opened.body.snapshot.revision, 'r3');
+  });
+
+  it('asks a long-quiet build of its Workflow before restoring past it', async () => {
+    const w = world();
+    const project = await built(w);
+    const path = `/api/projects/${project.id}/checkpoints/restore`;
+    // A repair can go longer than half an hour without touching its row.
+    await new D1GenerationStore(w.db, w.bucket).saveStage({
+      runId: 'run-long:verify',
+      projectId: project.id,
+      baseRevision: 'r3',
+      state: 'validating',
+    });
+    w.clock.now = new Date(Date.now() + 45 * 60_000);
+
+    // An instance that cannot be read is not taken to have stopped.
+    const unreadable = await w.call(ALICE, 'POST', path, {
+      revision: 'r1',
+      base: 'r3',
+    });
+    assert.equal(unreadable.status, 409);
+    assert.match(unreadable.body.error, /build is still running/);
+
+    w.statuses.set('run-long', 'running');
+    const busy = await w.call(ALICE, 'POST', path, {
+      revision: 'r1',
+      base: 'r3',
+    });
+    assert.equal(busy.status, 409);
+    assert.match(busy.body.error, /build is still running/);
+
+    // Once the engine says it has stopped, its row is settled and the
+    // restore goes ahead.
+    w.statuses.set('run-long', 'errored');
+    const restored = await w.call(ALICE, 'POST', path, {
+      revision: 'r1',
+      base: 'r3',
+    });
+    assert.equal(restored.status, 200);
+    assert.equal(restored.body.snapshot.revision, 'r1');
+  });
+
+  it('settles a run whose instance cannot be read only after a day', async () => {
+    const w = world();
+    const project = await built(w);
+    const path = `/api/projects/${project.id}/checkpoints/restore`;
+    await new D1GenerationStore(w.db, w.bucket).saveStage({
+      runId: 'run-lost',
+      projectId: project.id,
+      baseRevision: 'r3',
+      state: 'planning',
+    });
+    w.clock.now = new Date(Date.now() + 25 * 60 * 60_000);
+    const restored = await w.call(ALICE, 'POST', path, {
+      revision: 'r1',
+      base: 'r3',
+    });
+    assert.equal(restored.status, 200);
+  });
+
+  it('refuses a revision that is not one of the checkpoints, or not one at all', async () => {
+    const w = world();
+    const project = await built(w);
+    const path = `/api/projects/${project.id}/checkpoints/restore`;
+    const unknown = await w.call(ALICE, 'POST', path, {
+      revision: 'r-other',
+      base: 'r3',
+    });
+    assert.equal(unknown.status, 404);
+    for (const body of [
+      { revision: '../r1', base: 'r3' },
+      { revision: 'r1' },
+      { revision: 'r1', base: 7 },
+      [],
+    ]) {
+      const refused = await w.call(ALICE, 'POST', path, body);
+      assert.equal(refused.status, 400, JSON.stringify(body));
+    }
+  });
+
+  it('refuses while a build runs, for an archived project, and from a stale list', async () => {
+    const w = world();
+    const project = await built(w);
+    const path = `/api/projects/${project.id}/checkpoints/restore`;
+
+    // Stale: the list said r2 was current, and r3 has been accepted since.
+    const stale = await w.call(ALICE, 'POST', path, {
+      revision: 'r1',
+      base: 'r2',
+    });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.code, 'checkpoint-moved');
+    assert.equal(stale.body.current, 'r3');
+
+    await new D1GenerationStore(w.db, w.bucket).saveStage({
+      runId: 'run-live',
+      projectId: project.id,
+      baseRevision: 'r3',
+      state: 'planning',
+    });
+    w.clock.now = new Date(Date.now());
+    const busy = await w.call(ALICE, 'POST', path, {
+      revision: 'r1',
+      base: 'r3',
+    });
+    assert.equal(busy.status, 409);
+    assert.match(busy.body.error, /build is still running/);
+
+    w.clock.now = new Date(Date.now() + 31 * 60_000);
+    await w.call(ALICE, 'PATCH', `/api/projects/${project.id}`, {
+      archived: true,
+    });
+    const archived = await w.call(ALICE, 'POST', path, {
+      revision: 'r1',
+      base: 'r3',
+    });
+    assert.equal(archived.status, 409);
+    assert.match(archived.body.error, /archived/);
+
+    const opened = await w.call(ALICE, 'GET', `/api/projects/${project.id}`);
+    assert.equal(opened.body.snapshot.revision, 'r3');
+    assert.equal(
+      await count(
+        w.db,
+        `SELECT COUNT(*) AS n FROM generation_stages WHERE run_id LIKE 'rollback-%'`,
+      ),
+      0,
+    );
+  });
+
+  it('answers a restore to the checkpoint already current as done, writing nothing', async () => {
+    const w = world();
+    const project = await built(w);
+    const again = await w.call(
+      ALICE,
+      'POST',
+      `/api/projects/${project.id}/checkpoints/restore`,
+      { revision: 'r3', base: 'r2' },
+    );
+    assert.equal(again.status, 200);
+    assert.equal(again.body.snapshot.revision, 'r3');
+    assert.equal(
+      await count(
+        w.db,
+        `SELECT COUNT(*) AS n FROM generation_stages WHERE run_id LIKE 'rollback-%'`,
+      ),
+      0,
+    );
+  });
+
+  it('answers 405 for a method the routes do not have', async () => {
+    const w = world();
+    const project = await built(w);
+    const posted = await w.call(
+      ALICE,
+      'POST',
+      `/api/projects/${project.id}/checkpoints`,
+      {},
+    );
+    assert.equal(posted.status, 405);
+    const read = await w.call(
+      ALICE,
+      'GET',
+      `/api/projects/${project.id}/checkpoints/restore`,
+    );
+    assert.equal(read.status, 405);
   });
 });

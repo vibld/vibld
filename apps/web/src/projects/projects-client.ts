@@ -122,7 +122,11 @@ export interface ProjectPatch {
 export type ProjectFailure =
   /** The free tier's limit on active projects (`project-limit`). */
   | { kind: 'limit'; message: string; limit: number }
-  /** Saved from another tab since this one read it (`project-changed`). */
+  /**
+   * Saved from another tab since this one read it (`project-changed`), or,
+   * for a restore, accepted something else since the history was loaded
+   * (`checkpoint-moved`, D152).
+   */
   | { kind: 'changed'; message: string }
   /** Gone, or never the caller's: the Worker answers both the same. */
   | { kind: 'not-found'; message: string }
@@ -199,7 +203,10 @@ async function call(
       failure: { kind: 'limit', message, limit: record.limit },
     };
   }
-  if (response.status === 409 && record.code === 'project-changed') {
+  if (
+    response.status === 409 &&
+    (record.code === 'project-changed' || record.code === 'checkpoint-moved')
+  ) {
     return { ok: false, failure: { kind: 'changed', message } };
   }
   if (response.status === 404) {
@@ -379,4 +386,99 @@ export async function setProjectShared(
       deps,
     ),
   );
+}
+
+/**
+ * What made a checkpoint the accepted one (D152): a build, its repair, the
+ * first attempt put back after a repair, a restore from the history, or the
+ * copy the project was made from.
+ */
+export type CheckpointKind =
+  'build' | 'repair' | 'restore' | 'rollback' | 'copy';
+
+export interface Checkpoint {
+  revision: string;
+  /** The Worker's id for the run that accepted it; null for a copy. */
+  runId: string | null;
+  kind: CheckpointKind;
+  acceptedAt: string;
+}
+
+export interface CheckpointHistory {
+  /** The accepted revision now, or null for a project never built in. */
+  current: string | null;
+  /** Newest first. */
+  checkpoints: Checkpoint[];
+}
+
+const KINDS: readonly string[] = [
+  'build',
+  'repair',
+  'restore',
+  'rollback',
+  'copy',
+];
+
+function isCheckpoint(value: unknown): value is Checkpoint {
+  const entry = value as Checkpoint;
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof entry.revision === 'string' &&
+    (entry.runId === null || typeof entry.runId === 'string') &&
+    KINDS.includes(entry.kind) &&
+    typeof entry.acceptedAt === 'string'
+  );
+}
+
+/** Every checkpoint the project has accepted, newest first (D152). */
+export async function fetchCheckpoints(
+  id: string,
+  deps: ClientDeps = {},
+): Promise<ProjectResult<CheckpointHistory>> {
+  const result = await call(
+    `/api/projects/${encodeURIComponent(id)}/checkpoints`,
+    {},
+    deps,
+  );
+  if (!result.ok) return result;
+  const { current, checkpoints } = result.value as {
+    current?: unknown;
+    checkpoints?: unknown;
+  };
+  if (
+    !(current === null || typeof current === 'string') ||
+    !Array.isArray(checkpoints)
+  ) {
+    return MALFORMED;
+  }
+  // As the project list does: one unreadable row does not hide the rest.
+  return {
+    ok: true,
+    value: { current, checkpoints: checkpoints.filter(isCheckpoint) },
+  };
+}
+
+/**
+ * Make `revision` the project's accepted checkpoint again (D152), if
+ * `base` is still the accepted one; `changed` when it is not. Answers with
+ * the restored code, which the builder then holds as opening a project
+ * does.
+ */
+export async function restoreCheckpoint(
+  id: string,
+  revision: string,
+  base: string | null,
+  deps: ClientDeps = {},
+): Promise<ProjectResult<ProjectSnapshot>> {
+  const result = await call(
+    `/api/projects/${encodeURIComponent(id)}/checkpoints/restore`,
+    { method: 'POST', body: { revision, base } },
+    deps,
+  );
+  if (!result.ok) return result;
+  const code = (result.value as { snapshot?: ProjectSnapshot }).snapshot;
+  return code && typeof code.revision === 'string' && Array.isArray(code.files)
+    ? { ok: true, value: code }
+    : MALFORMED;
 }

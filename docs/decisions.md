@@ -205,6 +205,42 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
+### Checkpoint history, 2026-10-03
+
+ROADMAP M2 asks for "a history view that lists every accepted checkpoint and
+restores one in a single step". It is built on what was already stored: R2
+keeps every revision a project has accepted (`projects/{id}/snapshots/{rev}.json`),
+and `generation_stages` records each acceptance, so no migration was needed.
+The builder gets a History tab beside Runs; the Worker gets
+`GET /api/projects/:id/checkpoints` and
+`POST /api/projects/:id/checkpoints/restore`.
+
+- **D152. How rollback behaves (Chris confirmed these defaults,
+  2026-10-03).**
+  - **Refused while a build runs** in the project (409, the check DELETE
+    makes), because the build would then promote over the restored code or
+    be refused as a conflict with it. Also refused for an archived project,
+    and when the accepted revision is no longer the one the list was loaded
+    with (409, `checkpoint-moved`), so a restore chosen from a stale list
+    never undoes a build or another tab's restore.
+  - **Every checkpoint is kept.** A restore moves the accepted pointer by
+    compare-and-set and records itself as one more accepted stage row
+    (`rollback-<uuid>`); it never rewrites a snapshot in R2 and never
+    deletes a row, so the checkpoint restored from stays in the list and
+    can be put back in turn.
+  - **It never re-publishes or pushes.** The published site and the
+    connected GitHub repository stay as they were until the person ships
+    again. It spends nothing either: no budget is reserved or charged and
+    no run trace is written.
+  - **Open to the project's owner like GET.** Both routes are ungated, as
+    `/api/projects/:id` is: putting back code the project already had is
+    tidying it, and a revoked account keeps what it made. Another
+    account's project answers 404, not 403.
+  - **Accepted checkpoints only.** The list is the project's accepted
+    revisions, newest first and capped at 100, leaving out a build check's
+    own row (D69); a copied or remixed project's starting code is listed as
+    a copy. Staged or failed runs are not offered.
+
 ### What comes next, 2026-10-03
 
 Chris asked what to tackle next and took all six suggestions, in the order
@@ -221,6 +257,11 @@ suggested.
   model, previews in the browser and has an admin panel and the style
   gallery, which is more than a patch. Notes in `docs/releases/v0.4.0.md`;
   the Public release workflow tags it after the export of the merge.
+- **D151. Close what is one check short, and say what is left on the rest
+  (Chris, 2026-10-03).** None of the 24 open M0 and M1 issues met every
+  acceptance criterion on main at 0fd7dd8. Internal issue 3 (only "renders correctly on
+  GitHub" unchecked) and internal issue 17 (no reporter-side test recorded) are closed;
+  each of the other 22 has a comment saying exactly what is left.
 
 ### The style gallery, 2026-10-02
 
