@@ -4,7 +4,13 @@ import { FakeModelProvider, InMemoryGenerationStore } from '@vibld/core';
 import type { ProjectSnapshot } from '@vibld/core';
 import { EVAL_RESULTS_FILE } from '../src/bakeoff.ts';
 import type { CandidateRecord, EvalResults } from '../src/bakeoff.ts';
-import { CASES, PROMPT_SET_VERSION, stubPlan } from '../src/cases.ts';
+import {
+  CASES,
+  GALLERY_CASES,
+  PROMPT_SET_VERSION,
+  findCase,
+  stubPlan,
+} from '../src/cases.ts';
 import { runCase } from '../src/harness.ts';
 import type { CaseResult } from '../src/harness.ts';
 import {
@@ -98,11 +104,14 @@ async function main(): Promise<number> {
     return 1;
   }
   const wanted = selection.ids;
+  // A blank selection is the set; the gallery (D153) runs only when named.
   const cases =
-    wanted.length > 0 ? CASES.filter((c) => wanted.includes(c.id)) : CASES;
+    wanted.length > 0
+      ? [...new Set(wanted)].flatMap((id) => findCase(id) ?? [])
+      : CASES;
 
-  if (wanted.length > 0 && cases.length !== wanted.length) {
-    const known = CASES.map((c) => c.id).join(', ');
+  if (wanted.length > 0 && cases.length !== new Set(wanted).size) {
+    const known = [...CASES, ...GALLERY_CASES].map((c) => c.id).join(', ');
     console.error(`No such case. The set contains: ${known}`);
     return 1;
   }

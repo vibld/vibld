@@ -1,0 +1,96 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Source+Sans+3:wght@400;600&display=swap');
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --display: clamp(3rem, 6vw, 5rem);
+  --display-line-height: 1.1;
+  --display-letter-spacing: -0.02em;
+  --heading: clamp(2rem, 4vw, 3rem);
+  --heading-line-height: 1.2;
+  --heading-letter-spacing: -0.01em;
+  --subheading: 1.25rem;
+  --subheading-line-height: 1.4;
+  --subheading-letter-spacing: 0;
+  --body: 1rem;
+  --body-line-height: 1.6;
+  --body-letter-spacing: 0;
+  --small: 0.875rem;
+  --small-line-height: 1.5;
+  --small-letter-spacing: 0;
+  --background: #F9F7F2;
+  --foreground: #1A1A1A;
+  --primary: #0F2A3F;
+  --primary-foreground: #FFFFFF;
+  --muted: #EAE6DF;
+  --muted-foreground: #5A5A5A;
+  --accent: #B05C3B;
+  --border: #D1CCC3;
+  --ring: #0F2A3F;
+}
+
+@theme inline {
+  --text-display: var(--display);
+  --text-display--line-height: var(--display-line-height);
+  --text-display--letter-spacing: var(--display-letter-spacing);
+  --text-heading: var(--heading);
+  --text-heading--line-height: var(--heading-line-height);
+  --text-heading--letter-spacing: var(--heading-letter-spacing);
+  --text-subheading: var(--subheading);
+  --text-subheading--line-height: var(--subheading-line-height);
+  --text-subheading--letter-spacing: var(--subheading-letter-spacing);
+  --text-body: var(--body);
+  --text-body--line-height: var(--body-line-height);
+  --text-body--letter-spacing: var(--body-letter-spacing);
+  --text-small: var(--small);
+  --text-small--line-height: var(--small-line-height);
+  --text-small--letter-spacing: var(--small-letter-spacing);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-body: 'Source Sans 3', system-ui, sans-serif;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-body);
+    font-size: 1rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

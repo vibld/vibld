@@ -1,0 +1,124 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Work+Sans:wght@400;500;600&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-glass-bg: var(--glass-bg);
+  --color-glass-border: var(--glass-border);
+  --color-code-bg: var(--code-bg);
+  --shadow-glass: var(--glass-shadow);
+  --font-display: "Sora", 'Segoe UI', sans-serif;
+  --font-body: "Work Sans", Arial, sans-serif;
+  --radius-glass: 16px;
+  --radius-pill: 999px;
+}
+
+:root {
+  --background: #0f172a;
+  --foreground: #f8fafc;
+  --primary: #a78bfa;
+  --primary-foreground: #0f172a;
+  --muted: #1e293b;
+  --muted-foreground: #cbd5e1;
+  --accent: #38bdf8;
+  --accent-foreground: #0f172a;
+  --border: rgba(255, 255, 255, 0.12);
+  --ring: rgba(167, 139, 250, 0.6);
+  --glass-bg: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.16);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --code-bg: #0b1120;
+  color-scheme: dark;
+}
+
+.dark {
+  --background: #0f172a;
+  --foreground: #f8fafc;
+  --primary: #a78bfa;
+  --primary-foreground: #0f172a;
+  --muted: #1e293b;
+  --muted-foreground: #cbd5e1;
+  --accent: #38bdf8;
+  --accent-foreground: #0f172a;
+  --border: rgba(255, 255, 255, 0.12);
+  --ring: rgba(167, 139, 250, 0.6);
+  --glass-bg: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.16);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --code-bg: #0b1120;
+}
+
+@layer base {
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-body);
+    font-size: 1rem;
+    line-height: 1.6;
+    min-height: 100vh;
+    position: relative;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(ellipse at 20% 20%, color-mix(in oklab, var(--primary) 18%, transparent), transparent 60%),
+      radial-gradient(ellipse at 80% 80%, color-mix(in oklab, var(--accent) 14%, transparent), transparent 60%),
+      radial-gradient(ellipse at 50% 50%, rgba(255, 255, 255, 0.03), transparent 70%);
+    background-size: 200% 200%;
+    animation: drift 40s ease-in-out infinite alternate;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+
+  a, button {
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+  }
+}
+
+@keyframes drift {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 100% 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    animation: none;
+  }
+  .glass-panel {
+    backdrop-filter: blur(8px) saturate(100%);
+    -webkit-backdrop-filter: blur(8px) saturate(100%);
+  }
+}

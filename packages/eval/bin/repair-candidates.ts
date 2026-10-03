@@ -10,7 +10,7 @@ import {
   selectForRepair,
 } from '../src/bakeoff.ts';
 import type { RepairRecord, RepairResults } from '../src/bakeoff.ts';
-import { CASES } from '../src/cases.ts';
+import { findCase } from '../src/cases.ts';
 import {
   containedPath,
   createLiveRun,
@@ -119,7 +119,7 @@ async function main(): Promise<number> {
   let totalCents = 0;
   for (const { candidate, error } of jobs) {
     const label = `${candidate.model} ${candidate.case} run ${candidate.run}`;
-    const testCase = CASES.find((entry) => entry.id === candidate.case);
+    const testCase = findCase(candidate.case);
     const root = join(candidates, candidate.dir);
     const files = (candidate.files ?? []).map((path) => {
       const at = containedPath(root, path);

@@ -4,6 +4,8 @@ import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
 import { Page } from '../components/SiteChrome';
 import { examples } from '../examples';
 import type { Example } from '../examples';
+import { galleryRows } from '../gallery';
+import type { GalleryRow } from '../gallery';
 import { metaFor } from '../site';
 import { TEMPLATES } from '../templates';
 import type { Template } from '../templates';
@@ -26,6 +28,7 @@ export function meta() {
  */
 export default function Examples() {
   const all = examples();
+  const rows = galleryRows(all);
   return (
     <Page
       eyebrow="Examples"
@@ -33,9 +36,11 @@ export default function Examples() {
       lead="The sites and apps in the first section are exactly what vibld generated from the prompt shown, with no hand edits. Open the live copy, or download the source and run it yourself."
     >
       <ul className="mt-12 grid gap-8 md:grid-cols-2">
-        {all.map((example) => (
-          <ExampleCard key={example.slug} example={example} />
-        ))}
+        {all
+          .filter((example) => !example.gallery)
+          .map((example) => (
+            <ExampleCard key={example.slug} example={example} />
+          ))}
       </ul>
       <p className="mt-12 max-w-2xl text-sm text-[var(--color-ink-muted)] text-pretty">
         The live copies are published by vibld at{' '}
@@ -43,6 +48,8 @@ export default function Examples() {
         They are shown as generated, so some load fonts from Google Fonts, which
         vibld.com itself does not.
       </p>
+
+      {rows.length > 0 ? <Gallery rows={rows} /> : null}
 
       {/*
         After the generated examples and apart from them, so the promise at
@@ -202,5 +209,98 @@ function ExampleCard({ example }: { example: Example }) {
         </div>
       </div>
     </li>
+  );
+}
+
+/**
+ * The sample gallery (internal issue 186, D153): one brief per kind of site, built in
+ * each style, so the difference between two cells in a row is the style and
+ * nothing else. Generated and published like the examples above, with no
+ * hand edits.
+ */
+function Gallery({ rows }: { rows: GalleryRow[] }) {
+  return (
+    <section
+      id="gallery"
+      aria-labelledby="gallery-title"
+      className="mt-20 border-t border-[var(--color-edge)] pt-14"
+    >
+      <p className="lb-eyebrow">Sample gallery</p>
+      <h2
+        id="gallery-title"
+        className="mt-3 font-display text-3xl font-bold tracking-tight text-balance sm:text-4xl"
+      >
+        One request, built in each style
+      </h2>
+      <p className="mt-4 max-w-2xl text-lg text-[var(--color-ink-muted)] text-pretty">
+        Each row is one prompt, sent once per style. These are generated like
+        the examples above and shown as generated, so what you see is what a
+        build in that style gives you today. A style missing from a row did not
+        build, even after the one automatic repair the builder makes, and is
+        left out rather than fixed by hand.
+      </p>
+      {rows.map((row) => (
+        <GalleryRowView key={row.siteType} row={row} />
+      ))}
+    </section>
+  );
+}
+
+function GalleryRowView({ row }: { row: GalleryRow }) {
+  const titleId = `gallery-${row.siteType}`;
+  return (
+    <section aria-labelledby={titleId} className="mt-12">
+      <h3 id={titleId} className="font-display text-xl font-bold">
+        {row.title}
+      </h3>
+      <p className="mt-2 max-w-3xl text-sm text-[var(--color-ink-muted)] text-pretty">
+        {row.prompt}
+      </p>
+      <ul className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+        {row.cells.map((cell) => (
+          <li
+            key={cell.slug}
+            id={`example-${cell.slug}`}
+            className="flex flex-col gap-2"
+          >
+            <a
+              href={cell.liveUrl}
+              className="block overflow-hidden rounded-xl border border-[var(--color-edge)] bg-[var(--color-paper)]"
+              aria-label={`Open the live ${row.title.toLowerCase()} in the ${cell.styleName} style, built by ${cell.modelLabel}`}
+            >
+              <img
+                src={cell.screenshot}
+                alt=""
+                width={1440}
+                height={900}
+                loading="lazy"
+                decoding="async"
+                className="aspect-[16/10] w-full object-cover object-top"
+              />
+            </a>
+            <p className="text-sm font-medium">{cell.styleName}</p>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              Built by {cell.modelLabel} on{' '}
+              <time dateTime={cell.generatedOn}>
+                {formatDate(cell.generatedOn)}
+              </time>
+            </p>
+            <p className="flex flex-wrap gap-x-3 text-xs text-[var(--color-ink-muted)]">
+              <a href={cell.liveUrl} className="text-link">
+                Live copy
+              </a>
+              <a href={cell.sourceZip} download className="text-link">
+                Source
+              </a>
+            </p>
+            {cell.notes.map((note) => (
+              <p key={note} className="text-xs text-[var(--color-ink-muted)]">
+                {note}
+              </p>
+            ))}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

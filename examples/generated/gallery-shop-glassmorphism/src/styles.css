@@ -1,0 +1,103 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600&family=Inter:wght@400;500;600&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #0b0714;
+  --foreground: #f5f1ea;
+  --primary: #f59e0b;
+  --primary-foreground: #0b0714;
+  --muted: #1e1429;
+  --muted-foreground: #a89bb0;
+  --accent: #fbbf24;
+  --border: rgba(255, 255, 255, 0.15);
+  --ring: #f59e0b;
+  --glass: rgba(255, 255, 255, 0.08);
+  --glass-strong: rgba(255, 255, 255, 0.14);
+  --shadow: rgba(0, 0, 0, 0.3);
+
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-sans: 'Inter', system-ui, sans-serif;
+
+  --radius-card: 16px;
+  --radius-pill: 999px;
+  --radius-button: 8px;
+  --radius-dialog: 20px;
+}
+
+.dark {
+  --background: #0b0714;
+  --foreground: #f5f1ea;
+  --primary: #f59e0b;
+  --primary-foreground: #0b0714;
+  --muted: #1e1429;
+  --muted-foreground: #a89bb0;
+  --accent: #fbbf24;
+  --border: rgba(255, 255, 255, 0.15);
+  --ring: #f59e0b;
+  --glass: rgba(255, 255, 255, 0.08);
+  --glass-strong: rgba(255, 255, 255, 0.14);
+  --shadow: rgba(0, 0, 0, 0.3);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-glass: var(--glass);
+  --color-glass-strong: var(--glass-strong);
+  --color-shadow: var(--shadow);
+
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    background-image: radial-gradient(circle at 20% 20%, rgba(245, 158, 11, 0.12), transparent 45%),
+                      radial-gradient(circle at 80% 80%, rgba(245, 158, 11, 0.08), transparent 40%);
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer utilities {
+  .glass {
+    background: var(--glass);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid var(--border);
+    box-shadow: 0 8px 32px var(--shadow);
+  }
+  .glass-hover {
+    background: var(--glass-strong);
+    box-shadow: 0 12px 40px var(--shadow);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  }
+  .animate-in,
+  .animate-out,
+  .animate-spin,
+  .animate-pulse {
+    animation: none !important;
+  }
+}

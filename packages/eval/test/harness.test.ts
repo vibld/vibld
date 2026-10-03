@@ -2,7 +2,15 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { FakeModelProvider } from '@vibld/core';
 import { findStylePreset } from '@vibld/ai/style-presets';
-import { CASES, PROMPT_SET_VERSION, stubPlan } from '../src/cases.ts';
+import {
+  CASES,
+  GALLERY_CASES,
+  GALLERY_SITE_TYPES,
+  GALLERY_STYLES,
+  PROMPT_SET_VERSION,
+  findCase,
+  stubPlan,
+} from '../src/cases.ts';
 import { runCase } from '../src/harness.ts';
 import { formatReport, summarise } from '../src/report.ts';
 
@@ -196,5 +204,35 @@ describe('the style each case asks for', () => {
       assert.ok(findStylePreset(style), `${style} is not a preset`);
     }
     assert.equal(new Set(styles).size, styles.length);
+  });
+});
+
+describe('the sample gallery (D153)', () => {
+  it('is every site type in every style, once', () => {
+    assert.equal(GALLERY_SITE_TYPES.length, 5);
+    assert.equal(GALLERY_STYLES.length, 6);
+    assert.equal(GALLERY_CASES.length, 30);
+    const ids = GALLERY_CASES.map((testCase) => testCase.id);
+    assert.equal(new Set(ids).size, ids.length);
+    for (const testCase of GALLERY_CASES) {
+      assert.match(testCase.id, /^gallery-[a-z]+-[a-z]+$/);
+      assert.ok(findStylePreset(testCase.style!), `${testCase.style}`);
+    }
+  });
+
+  it('sends one brief per site type, whatever the style', () => {
+    for (const type of GALLERY_SITE_TYPES) {
+      const prompts = GALLERY_CASES.filter((testCase) =>
+        testCase.id.startsWith(`gallery-${type.id}-`),
+      ).map((testCase) => testCase.prompt);
+      assert.deepEqual(new Set(prompts), new Set([type.prompt]));
+    }
+  });
+
+  it('stays out of the set a blank selection runs', () => {
+    for (const testCase of GALLERY_CASES) {
+      assert.ok(!CASES.some((entry) => entry.id === testCase.id));
+      assert.equal(findCase(testCase.id), testCase);
+    }
   });
 });

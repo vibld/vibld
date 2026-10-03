@@ -79,6 +79,269 @@
       "notes": [
         "It keeps recipes in the browser's storage and reads it without a fallback, so with site data blocked, or a stored value it cannot parse, the page stays blank."
       ]
+    },
+    {
+      "slug": "gallery-consultancy-minimalist",
+      "case": "gallery-consultancy-minimalist",
+      "title": "A consultancy",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37144400710,
+      "generatedOn": "2026-10-03",
+      "prompt": "A site for a small management consultancy with its services, two short case studies and a contact form",
+      "notes": [],
+      "gallery": {
+        "siteType": "consultancy",
+        "style": "minimalist"
+      }
+    },
+    {
+      "slug": "gallery-consultancy-editorial",
+      "case": "gallery-consultancy-editorial",
+      "title": "A consultancy",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37144400710,
+      "generatedOn": "2026-10-03",
+      "prompt": "A site for a small management consultancy with its services, two short case studies and a contact form",
+      "notes": [
+        "It did not build as first generated. This is the copy after the bakeoff's one automatic repair turn."
+      ],
+      "gallery": {
+        "siteType": "consultancy",
+        "style": "editorial"
+      }
+    },
+    {
+      "slug": "gallery-consultancy-brutalism",
+      "case": "gallery-consultancy-brutalism",
+      "title": "A consultancy",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37144400710,
+      "generatedOn": "2026-10-03",
+      "prompt": "A site for a small management consultancy with its services, two short case studies and a contact form",
+      "notes": [
+        "It did not build as first generated. This is the copy after the bakeoff's one automatic repair turn."
+      ],
+      "gallery": {
+        "siteType": "consultancy",
+        "style": "brutalism"
+      }
+    },
+    {
+      "slug": "gallery-portfolio-minimalist",
+      "case": "gallery-portfolio-minimalist",
+      "title": "A portfolio",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37146742627,
+      "generatedOn": "2026-10-03",
+      "prompt": "A portfolio for a freelance photographer with a gallery of recent work, a short bio and a way to get in touch",
+      "notes": [],
+      "gallery": {
+        "siteType": "portfolio",
+        "style": "minimalist"
+      }
+    },
+    {
+      "slug": "gallery-portfolio-brutalism",
+      "case": "gallery-portfolio-brutalism",
+      "title": "A portfolio",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37146742627,
+      "generatedOn": "2026-10-03",
+      "prompt": "A portfolio for a freelance photographer with a gallery of recent work, a short bio and a way to get in touch",
+      "notes": [],
+      "gallery": {
+        "siteType": "portfolio",
+        "style": "brutalism"
+      }
+    },
+    {
+      "slug": "gallery-portfolio-glassmorphism",
+      "case": "gallery-portfolio-glassmorphism",
+      "title": "A portfolio",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37146742627,
+      "generatedOn": "2026-10-03",
+      "prompt": "A portfolio for a freelance photographer with a gallery of recent work, a short bio and a way to get in touch",
+      "notes": [],
+      "gallery": {
+        "siteType": "portfolio",
+        "style": "glassmorphism"
+      }
+    },
+    {
+      "slug": "gallery-portfolio-aciddark",
+      "case": "gallery-portfolio-aciddark",
+      "title": "A portfolio",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37146742627,
+      "generatedOn": "2026-10-03",
+      "prompt": "A portfolio for a freelance photographer with a gallery of recent work, a short bio and a way to get in touch",
+      "notes": [
+        "It did not build as first generated. This is the copy after the bakeoff's one automatic repair turn."
+      ],
+      "gallery": {
+        "siteType": "portfolio",
+        "style": "acidDark"
+      }
+    },
+    {
+      "slug": "gallery-shop-minimalist",
+      "case": "gallery-shop-minimalist",
+      "title": "A shop",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37148226431,
+      "generatedOn": "2026-10-03",
+      "prompt": "A storefront for a small candle maker with products, prices and a cart. There is no checkout backend, so the cart is kept in the browser, and the site says so plainly.",
+      "notes": [],
+      "gallery": {
+        "siteType": "shop",
+        "style": "minimalist"
+      }
+    },
+    {
+      "slug": "gallery-shop-glassmorphism",
+      "case": "gallery-shop-glassmorphism",
+      "title": "A shop",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37148226431,
+      "generatedOn": "2026-10-03",
+      "prompt": "A storefront for a small candle maker with products, prices and a cart. There is no checkout backend, so the cart is kept in the browser, and the site says so plainly.",
+      "notes": [],
+      "gallery": {
+        "siteType": "shop",
+        "style": "glassmorphism"
+      }
+    },
+    {
+      "slug": "gallery-shop-aciddark",
+      "case": "gallery-shop-aciddark",
+      "title": "A shop",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37148226431,
+      "generatedOn": "2026-10-03",
+      "prompt": "A storefront for a small candle maker with products, prices and a cart. There is no checkout backend, so the cart is kept in the browser, and the site says so plainly.",
+      "notes": [],
+      "gallery": {
+        "siteType": "shop",
+        "style": "acidDark"
+      }
+    },
+    {
+      "slug": "gallery-docs-minimalist",
+      "case": "gallery-docs-minimalist",
+      "title": "A docs site",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37150547051,
+      "generatedOn": "2026-10-03",
+      "prompt": "A documentation site for an open-source command-line tool with installation, a quick start and a command reference",
+      "notes": [],
+      "gallery": {
+        "siteType": "docs",
+        "style": "minimalist"
+      }
+    },
+    {
+      "slug": "gallery-docs-brutalism",
+      "case": "gallery-docs-brutalism",
+      "title": "A docs site",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37150547051,
+      "generatedOn": "2026-10-03",
+      "prompt": "A documentation site for an open-source command-line tool with installation, a quick start and a command reference",
+      "notes": [],
+      "gallery": {
+        "siteType": "docs",
+        "style": "brutalism"
+      }
+    },
+    {
+      "slug": "gallery-docs-glassmorphism",
+      "case": "gallery-docs-glassmorphism",
+      "title": "A docs site",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37150547051,
+      "generatedOn": "2026-10-03",
+      "prompt": "A documentation site for an open-source command-line tool with installation, a quick start and a command reference",
+      "notes": [],
+      "gallery": {
+        "siteType": "docs",
+        "style": "glassmorphism"
+      }
+    },
+    {
+      "slug": "gallery-event-minimalist",
+      "case": "gallery-event-minimalist",
+      "title": "An event",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37153138437,
+      "generatedOn": "2026-10-03",
+      "prompt": "A site for a weekend food festival with the lineup, a schedule, tickets and directions",
+      "notes": [],
+      "gallery": {
+        "siteType": "event",
+        "style": "minimalist"
+      }
+    },
+    {
+      "slug": "gallery-event-brutalism",
+      "case": "gallery-event-brutalism",
+      "title": "An event",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37153138437,
+      "generatedOn": "2026-10-03",
+      "prompt": "A site for a weekend food festival with the lineup, a schedule, tickets and directions",
+      "notes": [],
+      "gallery": {
+        "siteType": "event",
+        "style": "brutalism"
+      }
+    },
+    {
+      "slug": "gallery-event-warmpaper",
+      "case": "gallery-event-warmpaper",
+      "title": "An event",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37153138437,
+      "generatedOn": "2026-10-03",
+      "prompt": "A site for a weekend food festival with the lineup, a schedule, tickets and directions",
+      "notes": [
+        "It did not build as first generated. This is the copy after the bakeoff's one automatic repair turn."
+      ],
+      "gallery": {
+        "siteType": "event",
+        "style": "warmPaper"
+      }
+    },
+    {
+      "slug": "gallery-event-aciddark",
+      "case": "gallery-event-aciddark",
+      "title": "An event",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37153138437,
+      "generatedOn": "2026-10-03",
+      "prompt": "A site for a weekend food festival with the lineup, a schedule, tickets and directions",
+      "notes": [],
+      "gallery": {
+        "siteType": "event",
+        "style": "acidDark"
+      }
     }
   ]
 }

@@ -1,0 +1,99 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600&family=Work+Sans:wght@400;500;600&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #FAFAF7;
+  --foreground: #1C1C1A;
+  --muted: #F3F1EC;
+  --muted-foreground: #6B6B66;
+  --accent: #9A3412;
+  --accent-foreground: #FFFFFF;
+  --border: #E5E5DF;
+  --ring: #9A3412;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+}
+
+@theme {
+  --font-display: "Fraunces", Georgia, serif;
+  --font-body: "Work Sans", system-ui, sans-serif;
+
+  --text-display: clamp(3.5rem, 8vw, 6.5rem);
+  --text-display--line-height: 0.95;
+  --text-display--letter-spacing: -0.03em;
+
+  --text-h1: clamp(2.25rem, 5vw, 3.5rem);
+  --text-h1--line-height: 1.1;
+  --text-h1--letter-spacing: -0.01em;
+
+  --text-h2: clamp(1.75rem, 4vw, 2.25rem);
+  --text-h2--line-height: 1.2;
+  --text-h2--letter-spacing: -0.01em;
+
+  --text-h3: 1.25rem;
+  --text-h3--line-height: 1.35;
+  --text-h3--letter-spacing: 0;
+
+  --text-body: 1rem;
+  --text-body--line-height: 1.6;
+  --text-body--letter-spacing: 0;
+
+  --text-small: 0.875rem;
+  --text-small--line-height: 1.5;
+  --text-small--letter-spacing: 0;
+
+  --text-button: 0.875rem;
+  --text-button--line-height: 1.2;
+  --text-button--letter-spacing: 0.05em;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-body);
+    font-size: 1rem;
+    line-height: 1.6;
+    letter-spacing: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

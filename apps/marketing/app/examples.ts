@@ -1,4 +1,5 @@
 import { findModel } from '@vibld/ai/model-catalogue';
+import type { StylePresetId } from '@vibld/ai/style-presets';
 
 import catalogueFile from '../../../examples/catalogue.json';
 
@@ -27,6 +28,11 @@ export interface CatalogueEntry {
   prompt: string;
   /** Anything a visitor should know before believing the page, as generated. */
   notes: string[];
+  /**
+   * Set on a sample gallery entry (internal issue 186, D153): one cell of the grid of
+   * site types by styles, built from the case `gallery-<siteType>-<style>`.
+   */
+  gallery?: { siteType: string; style: StylePresetId };
 }
 
 export interface Example extends CatalogueEntry {

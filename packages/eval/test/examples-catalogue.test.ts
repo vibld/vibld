@@ -5,7 +5,8 @@ import { describe, it } from 'node:test';
 
 import { findModel } from '@vibld/ai/model-catalogue';
 
-import { CASES } from '../src/cases.ts';
+import { findCase, galleryCaseId } from '../src/cases.ts';
+import type { GallerySiteType, GalleryStyle } from '../src/cases.ts';
 
 /**
  * examples/catalogue.json drives vibld.com/examples and the publish
@@ -26,6 +27,7 @@ const { examples } = JSON.parse(
     generatedOn: string;
     prompt: string;
     notes: string[];
+    gallery?: { siteType: string; style: string };
   }[];
 };
 
@@ -37,9 +39,28 @@ describe('the examples catalogue', () => {
   for (const example of examples) {
     describe(example.slug, () => {
       it('shows the prompt its eval case actually sends', () => {
-        const testCase = CASES.find((c) => c.id === example.case);
+        const testCase = findCase(example.case);
         assert.ok(testCase, `no eval case named ${example.case}`);
         assert.equal(example.prompt, testCase.prompt);
+      });
+
+      it('is placed in the gallery exactly when its case is a gallery cell', () => {
+        // The page groups the gallery by these fields (D153), so a cell
+        // filed under the wrong row or style would show one brief's output
+        // as another's.
+        const testCase = findCase(example.case);
+        if (!example.gallery) {
+          assert.doesNotMatch(example.case, /^gallery-/);
+          return;
+        }
+        assert.equal(
+          example.case,
+          galleryCaseId(
+            example.gallery.siteType as GallerySiteType,
+            example.gallery.style as GalleryStyle,
+          ),
+        );
+        assert.equal(testCase?.style, example.gallery.style);
       });
 
       it('credits a model the catalogue knows', () => {

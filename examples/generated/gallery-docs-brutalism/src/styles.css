@@ -1,0 +1,145 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:wght@400;700&display=swap');
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #f7f3e8;
+  --foreground: #111111;
+  --card: #ffffff;
+  --card-foreground: #111111;
+  --primary: #ff3b30;
+  --primary-foreground: #111111;
+  --secondary: #ffd500;
+  --secondary-foreground: #111111;
+  --muted: #e5e0d1;
+  --muted-foreground: #555555;
+  --accent: #ffd500;
+  --border: #111111;
+  --input: #111111;
+  --ring: #111111;
+  --radius: 0px;
+  --shadow-hard: 6px 6px 0 0 #111111;
+  --shadow-soft: 4px 4px 0 0 #111111;
+  --space-gutter: clamp(24px, 5vw, 48px);
+  --space-section: clamp(48px, 10vw, 96px);
+  --space-stack: 16px;
+  --font-display: 'Archivo Black', 'Arial Black', sans-serif;
+  --font-body: 'Space Mono', 'Courier New', monospace;
+  --font-mono: 'Space Mono', 'Courier New', monospace;
+  --text-display-size: clamp(3rem, 8vw, 6rem);
+  --text-display-line-height: 0.95;
+  --text-display-letter-spacing: -0.02em;
+  --text-section-size: clamp(2rem, 5vw, 3.5rem);
+  --text-section-line-height: 1.1;
+  --text-section-letter-spacing: -0.01em;
+  --text-body-size: 1rem;
+  --text-body-line-height: 1.7;
+  --text-body-letter-spacing: 0;
+  --text-small-size: 0.875rem;
+  --text-small-line-height: 1.5;
+  --text-small-letter-spacing: 0.02em;
+  --text-code-size: 0.9rem;
+  --text-code-line-height: 1.6;
+  --text-code-letter-spacing: 0;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+  --text-display: var(--text-display-size);
+  --text-display--line-height: var(--text-display-line-height);
+  --text-display--letter-spacing: var(--text-display-letter-spacing);
+  --text-section: var(--text-section-size);
+  --text-section--line-height: var(--text-section-line-height);
+  --text-section--letter-spacing: var(--text-section-letter-spacing);
+  --text-body: var(--text-body-size);
+  --text-body--line-height: var(--text-body-line-height);
+  --text-body--letter-spacing: var(--text-body-letter-spacing);
+  --text-small: var(--text-small-size);
+  --text-small--line-height: var(--text-small-line-height);
+  --text-small--letter-spacing: var(--text-small-letter-spacing);
+  --text-code: var(--text-code-size);
+  --text-code--line-height: var(--text-code-line-height);
+  --text-code--letter-spacing: var(--text-code-letter-spacing);
+  --shadow-hard: var(--shadow-hard);
+  --shadow-soft: var(--shadow-soft);
+  --spacing-gutter: var(--space-gutter);
+  --spacing-section: var(--space-section);
+  --spacing-stack: var(--space-stack);
+}
+
+@layer base {
+  * {
+    border-radius: 0 !important;
+    transition: none !important;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-body);
+    font-size: var(--text-body-size);
+    line-height: var(--text-body-line-height);
+    letter-spacing: var(--text-body-letter-spacing);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+  }
+  code, pre, kbd, samp {
+    font-family: var(--font-mono);
+    font-size: var(--text-code-size);
+    line-height: var(--text-code-line-height);
+    letter-spacing: var(--text-code-letter-spacing);
+  }
+  a {
+    color: var(--primary);
+    text-decoration: underline;
+  }
+  button {
+    cursor: pointer;
+  }
+  ::selection {
+    background: var(--secondary);
+    color: var(--secondary-foreground);
+  }
+}
+
+@layer components {
+  .hard-shadow {
+    box-shadow: var(--shadow-hard);
+  }
+  .soft-shadow {
+    box-shadow: var(--shadow-soft);
+  }
+  .code-block {
+    background-color: var(--card);
+    border: 2px solid var(--border);
+    box-shadow: var(--soft-shadow);
+    padding: var(--space-stack);
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-code-size);
+    line-height: var(--text-code-line-height);
+    letter-spacing: var(--text-code-letter-spacing);
+  }
+}

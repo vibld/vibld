@@ -1,0 +1,187 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #ff2b2b;
+  --primary-foreground: #ffffff;
+  --secondary: #ffd600;
+  --secondary-foreground: #0a0a0a;
+  --muted: #f0f0f0;
+  --muted-foreground: #4a4a4a;
+  --accent: #ffd600;
+  --accent-foreground: #0a0a0a;
+  --destructive: #b91c1c;
+  --destructive-foreground: #ffffff;
+  --border: #0a0a0a;
+  --input: #0a0a0a;
+  --ring: #ff2b2b;
+  --radius: 0px;
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ffffff;
+  --card: #0a0a0a;
+  --card-foreground: #ffffff;
+  --popover: #0a0a0a;
+  --popover-foreground: #ffffff;
+  --primary: #ff2b2b;
+  --primary-foreground: #ffffff;
+  --secondary: #ffd600;
+  --secondary-foreground: #0a0a0a;
+  --muted: #1a1a1a;
+  --muted-foreground: #b0b0b0;
+  --accent: #ffd600;
+  --accent-foreground: #0a0a0a;
+  --destructive: #ff5555;
+  --destructive-foreground: #ffffff;
+  --border: #ffffff;
+  --input: #ffffff;
+  --ring: #ff2b2b;
+  --radius: 0px;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-none: var(--radius);
+  --font-display: "Archivo Black", sans-serif;
+  --font-sans: "Archivo", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+}
+
+@utility shadow-hard {
+  box-shadow: 4px 4px 0 0 var(--foreground);
+}
+
+@utility shadow-hard-sm {
+  box-shadow: 2px 2px 0 0 var(--foreground);
+}
+
+@utility shadow-hard-lg {
+  box-shadow: 8px 8px 0 0 var(--foreground);
+}
+
+@utility shadow-hard-primary {
+  box-shadow: 4px 4px 0 0 var(--primary);
+}
+
+@layer base {
+  *, *::before, *::after {
+    border-color: var(--border);
+    border-radius: 0 !important;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    text-wrap: balance;
+  }
+
+  code, kbd, samp, pre {
+    font-family: var(--font-mono);
+  }
+
+  ::selection {
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  button,
+  [role="button"] {
+    cursor: pointer;
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  input,
+  textarea,
+  select {
+    font-family: inherit;
+    font-size: 1rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .gutter {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  @media (min-width: 640px) {
+    .gutter {
+      padding-left: 2rem;
+      padding-right: 2rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .gutter {
+      padding-left: 4rem;
+      padding-right: 4rem;
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .gutter {
+      padding-left: 6rem;
+      padding-right: 6rem;
+    }
+  }
+}

@@ -1,0 +1,148 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Manrope:wght@400;500;600&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #0d0b14;
+  --foreground: #f7f4f1;
+  --primary: #ff7a59;
+  --primary-foreground: #24100a;
+  --muted: #1a1626;
+  --muted-foreground: #c9c2d4;
+  --accent: #2a2240;
+  --border: rgba(255, 255, 255, 0.22);
+  --ring: #ff7a59;
+  --glass-bg: rgba(24, 21, 34, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.24);
+  --scrim: rgba(13, 11, 20, 0.70);
+  --radius-glass: 24px;
+  --radius-pill: 999px;
+  --radius-image: 16px;
+  --spacing-gutter: clamp(20px, 4vw, 48px);
+  --spacing-section: clamp(72px, 10vw, 140px);
+  --spacing-stack-8: 8px;
+  --spacing-stack-16: 16px;
+  --spacing-stack-24: 24px;
+  --spacing-stack-32: 32px;
+  --spacing-stack-48: 48px;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-body: "Manrope", system-ui, sans-serif;
+  --text-hero: clamp(3.25rem, 8vw, 7rem);
+  --text-hero--line-height: 0.98;
+  --text-hero--letter-spacing: -0.04em;
+  --text-section: clamp(2rem, 4vw, 3.5rem);
+  --text-section--line-height: 1.05;
+  --text-section--letter-spacing: -0.025em;
+  --text-body: 1rem;
+  --text-body--line-height: 1.6;
+  --text-body--letter-spacing: 0.01em;
+  --text-small: 0.875rem;
+  --text-small--line-height: 1.5;
+  --text-small--letter-spacing: 0.01em;
+  --text-eyebrow: 0.75rem;
+  --text-eyebrow--line-height: 1.4;
+  --text-eyebrow--letter-spacing: 0.14em;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-glass-bg: var(--glass-bg);
+  --color-glass-border: var(--glass-border);
+  --color-scrim: var(--scrim);
+  --radius-glass: var(--radius-glass);
+  --radius-pill: var(--radius-pill);
+  --radius-image: var(--radius-image);
+  --spacing-gutter: var(--spacing-gutter);
+  --spacing-section: var(--spacing-section);
+  --spacing-stack-8: var(--spacing-stack-8);
+  --spacing-stack-16: var(--spacing-stack-16);
+  --spacing-stack-24: var(--spacing-stack-24);
+  --spacing-stack-32: var(--spacing-stack-32);
+  --spacing-stack-48: var(--spacing-stack-48);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --text-hero: var(--text-hero);
+  --text-hero--line-height: var(--text-hero--line-height);
+  --text-hero--letter-spacing: var(--text-hero--letter-spacing);
+  --text-section: var(--text-section);
+  --text-section--line-height: var(--text-section--line-height);
+  --text-section--letter-spacing: var(--text-section--letter-spacing);
+  --text-body: var(--text-body);
+  --text-body--line-height: var(--text-body--line-height);
+  --text-body--letter-spacing: var(--text-body--letter-spacing);
+  --text-small: var(--text-small);
+  --text-small--line-height: var(--text-small--line-height);
+  --text-small--letter-spacing: var(--text-small--letter-spacing);
+  --text-eyebrow: var(--text-eyebrow);
+  --text-eyebrow--line-height: var(--text-eyebrow--line-height);
+  --text-eyebrow--letter-spacing: var(--text-eyebrow--letter-spacing);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-body);
+    font-size: 1rem;
+    line-height: 1.6;
+    letter-spacing: 0.01em;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+.glass {
+  backdrop-filter: blur(18px) saturate(1.4);
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-glass);
+}
+
+.glass-strong {
+  backdrop-filter: blur(24px) saturate(1.3);
+  background: rgba(20, 18, 28, 0.72);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 32px 64px -16px rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius-glass);
+}
+
+.scrim {
+  background: linear-gradient(to bottom right, rgba(13, 11, 20, 0.86), rgba(13, 11, 20, 0.55) 55%, rgba(13, 11, 20, 0.35));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .glass, .glass-strong {
+    backdrop-filter: none;
+  }
+}

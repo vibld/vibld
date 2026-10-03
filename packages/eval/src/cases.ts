@@ -10,7 +10,7 @@ import { tokenCss, withScaffold } from '@vibld/ai';
  * the number, so `PROMPT_SET_VERSION` moves with it and every report carries
  * it. Comparing runs across versions is comparing different exams.
  */
-export const PROMPT_SET_VERSION = '1.8.0';
+export const PROMPT_SET_VERSION = '1.9.0';
 
 export interface EvalCase {
   id: string;
@@ -208,6 +208,100 @@ export const CASES: EvalCase[] = [
     },
   },
 ];
+
+/**
+ * The sample gallery on vibld.com/examples (internal issue 186, D153): one brief per site
+ * type, each built in six styles, so a visitor can see what a style does to
+ * the same request and what each kind of site comes out as.
+ *
+ * Apart from `CASES` on purpose. Those ask for a different style each
+ * (ADR-0014) and are what a blank selection runs; this grid shares its
+ * styles by design and is 30 paid builds, run only when named.
+ */
+export const GALLERY_SITE_TYPES = [
+  {
+    id: 'consultancy',
+    title: 'A consultancy',
+    prompt:
+      'A site for a small management consultancy with its services, two short case studies and a contact form',
+    content: [['consult', 'advis']],
+  },
+  {
+    id: 'portfolio',
+    title: 'A portfolio',
+    prompt:
+      'A portfolio for a freelance photographer with a gallery of recent work, a short bio and a way to get in touch',
+    content: ['photo'],
+  },
+  {
+    id: 'shop',
+    title: 'A shop',
+    prompt:
+      'A storefront for a small candle maker with products, prices and a cart. There is no checkout backend, so the cart is kept in the browser, and the site says so plainly.',
+    content: ['cart', 'browser'],
+  },
+  {
+    id: 'docs',
+    title: 'A docs site',
+    prompt:
+      'A documentation site for an open-source command-line tool with installation, a quick start and a command reference',
+    content: ['install', 'command'],
+  },
+  {
+    id: 'event',
+    title: 'An event',
+    prompt:
+      'A site for a weekend food festival with the lineup, a schedule, tickets and directions',
+    content: ['schedule', 'ticket'],
+  },
+] as const satisfies readonly {
+  id: string;
+  title: string;
+  prompt: string;
+  content: readonly Expectation[];
+}[];
+
+export type GallerySiteType = (typeof GALLERY_SITE_TYPES)[number]['id'];
+
+/** The six styles each brief is built in (D153). */
+export const GALLERY_STYLES = [
+  'minimalist',
+  'editorial',
+  'brutalism',
+  'glassmorphism',
+  'warmPaper',
+  'acidDark',
+] as const satisfies readonly StylePresetId[];
+
+export type GalleryStyle = (typeof GALLERY_STYLES)[number];
+
+/** The case id for one cell of the grid. */
+export function galleryCaseId(
+  siteType: GallerySiteType,
+  style: GalleryStyle,
+): string {
+  return `gallery-${siteType}-${style.toLowerCase()}`;
+}
+
+export const GALLERY_CASES: EvalCase[] = GALLERY_SITE_TYPES.flatMap((type) =>
+  GALLERY_STYLES.map((style) => ({
+    id: galleryCaseId(type.id, style),
+    style,
+    prompt: type.prompt,
+    expects: {
+      files: ['package.json', 'README.md', 'index.html'],
+      content: [...type.content],
+    },
+  })),
+);
+
+/** A case by id, from the set or the gallery. */
+export function findCase(id: string): EvalCase | undefined {
+  return (
+    CASES.find((entry) => entry.id === id) ??
+    GALLERY_CASES.find((entry) => entry.id === id)
+  );
+}
 
 /**
  * A deterministic stand-in for a model, used so CI can exercise the harness

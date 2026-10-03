@@ -27,7 +27,16 @@ export type {
   RunRow,
   Verdict,
 } from './bakeoff.ts';
-export { CASES, PROMPT_SET_VERSION, stubPlan } from './cases.ts';
+export {
+  CASES,
+  GALLERY_CASES,
+  GALLERY_SITE_TYPES,
+  GALLERY_STYLES,
+  PROMPT_SET_VERSION,
+  findCase,
+  galleryCaseId,
+  stubPlan,
+} from './cases.ts';
 export type { EvalCase, Expectation } from './cases.ts';
 export {
   expectationProblems,

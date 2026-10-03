@@ -226,8 +226,10 @@ The builder gets a History tab beside Runs; the Worker gets
   - **Every checkpoint is kept.** A restore moves the accepted pointer by
     compare-and-set and records itself as one more accepted stage row
     (`rollback-<uuid>`); it never rewrites a snapshot in R2 and never
-    deletes a row, so the checkpoint restored from stays in the list and
-    can be put back in turn.
+    deletes a build's row, so the checkpoint restored from stays in the
+    list and can be put back in turn. A revision restored again replaces
+    its own earlier rollback row, so restores, which are free, cannot grow
+    the table past the builds (Codex review of internal PR 360).
   - **It never re-publishes or pushes.** The published site and the
     connected GitHub repository stay as they were until the person ships
     again. It spends nothing either: no budget is reserved or charged and
@@ -240,6 +242,40 @@ The builder gets a History tab beside Runs; the Worker gets
     revisions, newest first and capped at 100, leaving out a build check's
     own row (D69); a copied or remixed project's starting code is listed as
     a copy. Staged or failed runs are not offered.
+
+### Sample gallery, 2026-10-03
+
+Internal issue 186 asks for real output per style and site type on
+vibld.com, generated through the normal path and recorded with the prompt
+that produced it. It is built on the examples catalog
+(`examples/catalogue.json`): the same file, the same publish workflow, the
+same no-hand-edits rule, and a new section of /examples.
+
+- **D153. The full grid (Chris, 2026-10-03: "Full grid").** Five site
+  types (consultancy, portfolio, shop, docs, event), each one brief, built
+  in six styles: 30 builds, estimated at $5 to $10. The briefs and styles
+  are `GALLERY_SITE_TYPES` and `GALLERY_STYLES` in
+  `packages/eval/src/cases.ts`, as eval cases named
+  `gallery-<type>-<style>` that a blank selection does not run, so the
+  Model bakeoff workflow regenerates any cell. Defaults taken on Chris's
+  behalf, each changed by editing that file and rerunning:
+  - **The styles:** Minimalist, Editorial, Brutalism, Glassmorphism, Warm
+    Paper and Acid Dark, chosen to look as unlike each other as the
+    presets allow.
+  - **The model:** DeepSeek V4 Pro, the model the estimate was made on.
+    The production default, GPT-6 Sol, was not costed for this.
+  - **One run per cell,** with the bakeoff's single repair turn, the one
+    the product itself makes. A cell that still does not build is left out
+    and the page shows the rest, never a patched copy.
+
+  The first run (five bakeoff runs, 37144400710 to 37153138437) cost
+  $9.46 and kept 17 of the 30 cells, 7 of them after the repair turn:
+  consultancy 3, portfolio 4, shop 3, docs 3 and event 4. Ten cells did
+  not build, eight of them on the same typecheck error: a Radix primitive
+  imported as a module and used as a component (`Slot` in `button.tsx`,
+  or `Tooltip` or `Sheet`), which the repair turn did not fix. Three more
+  built but threw on load (React error 130, an element type that is an
+  object) and are left out too, per `examples/README.md`.
 
 ### What comes next, 2026-10-03
 
