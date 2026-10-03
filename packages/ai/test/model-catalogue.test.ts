@@ -75,6 +75,7 @@ describe('the model catalogue', () => {
       'claude-opus-4-8',
       'claude-opus-4-7',
       'claude-opus-4-6',
+      'claude-sonnet-5-5',
       'claude-sonnet-5',
       'claude-sonnet-4-6',
       'claude-haiku-4-5',
@@ -114,6 +115,7 @@ describe('effort support', () => {
     for (const id of [
       'claude-opus-5-5',
       'claude-opus-5',
+      'claude-sonnet-5-5',
       'claude-sonnet-5',
       'claude-fable-5-1',
     ]) {

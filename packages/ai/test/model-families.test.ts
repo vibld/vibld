@@ -53,7 +53,7 @@ describe('the version a family opens on', () => {
   it('opens Opus on 5.5, and every family on its newest version', () => {
     assert.equal(defaults['claude-opus'], 'claude-opus-5-5');
     assert.equal(defaults['claude-fable'], 'claude-fable-5-1');
-    assert.equal(defaults['claude-sonnet'], 'claude-sonnet-5');
+    assert.equal(defaults['claude-sonnet'], 'claude-sonnet-5-5');
     assert.equal(defaults['gpt-sol'], 'gpt-6-sol');
     assert.equal(defaults['gpt-luna'], 'gpt-6-luna');
   });

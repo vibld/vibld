@@ -11,7 +11,7 @@ import type { ModelChoice } from './model-catalogue.ts';
  *
  * A family's default is its newest version. Among the models offered that
  * is also never the dearer choice: Opus 5.5 costs less than Opus 5 and the
- * 4.x Opuses, Sonnet 5 less than Sonnet 4.6, Fable 5.1 the same as Fable 5,
+ * 4.x Opuses, Sonnet 5.5 the same as Sonnet 5 and Sonnet 5 less than Sonnet 4.6, Fable 5.1 the same as Fable 5,
  * and each GPT-6 tier less than its GPT-5.6 namesake. `model-families.test.ts`
  * says so if a newer version ever costs more, because then "newest" and "best
  * value" have come apart and which one a family should open on is a decision

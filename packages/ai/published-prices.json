@@ -25,6 +25,17 @@
     },
     {
       "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "rates": {
+        "input": 2,
+        "output": 10,
+        "cache-read": 0.2,
+        "cache-write": 2.5
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
       "model": "claude-sonnet-5",
       "rates": {
         "input": 2,
