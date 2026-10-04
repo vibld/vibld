@@ -1300,7 +1300,7 @@ async function main() {
       const pressedAt = Date.now();
       await cancelButton().click();
       await page
-        .getByText('Cancelled. Nothing was changed.')
+        .getByText('Canceled. Nothing was changed.')
         .last()
         .waitFor({ timeout: 60_000 });
       const run = await until(
