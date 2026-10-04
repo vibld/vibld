@@ -8,6 +8,7 @@ import {
   PURPOSE_METADATA_KEY,
   SIGNUP_CARD_PURPOSE,
   TOPUP_CREDIT_USD_CENTS,
+  planKeyOf,
   tierForLookupKey,
 } from './stripe-client.ts';
 import { grantSignupCreditForCard } from './signup-grant.ts';
@@ -463,7 +464,7 @@ export function subscriptionRecordFrom(
 
   const item = subscription.items.data[0];
   const price = item?.price;
-  const tier = tierForLookupKey(price?.lookup_key ?? null);
+  const tier = tierForLookupKey(price ? planKeyOf(price) : null);
   if (!item || !price || !tier) return undefined;
 
   return {

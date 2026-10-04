@@ -47,7 +47,7 @@ describe('monthlyAllowanceMicroUsd', () => {
       monthlyAllowanceMicroUsd('build', 0),
       TIER_INCLUDED_MICRO_USD.build,
     );
-    assert.equal(TIER_INCLUDED_MICRO_USD.build, 10_000_000);
+    assert.equal(TIER_INCLUDED_MICRO_USD.build, 14_000_000);
     assert.equal(
       monthlyAllowanceMicroUsd('ship', 0),
       TIER_INCLUDED_MICRO_USD.ship,

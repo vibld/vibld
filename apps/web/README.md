@@ -991,11 +991,14 @@ Stripe Tax is off (L15, confirmed 2026-09-27): no Checkout Session sets
 `test/billing-checkout.test.ts` fails if a plan, top-up or card-setup session
 asks for any of them.
 
-The five prices this deployment sells (L36/L38: Build $29/mo or $290/yr,
-Ship $99/mo or $990/yr, Top-up $20 one-time) already exist in the live
-Stripe account, referenced here by `lookup_key` (`stripe-client.ts`'s
-`PRICE_LOOKUP_KEYS`) rather than by id -- correcting a price in the Stripe
-Dashboard needs no code change, only the amount to change.
+The five prices this deployment sells (L36/L38 as amended by D155/D156:
+Build $19/mo or $190/yr, Ship $49/mo or $490/yr, Top-up $10 one-time) are
+referenced here by `lookup_key` (`stripe-client.ts`'s `PRICE_LOOKUP_KEYS`)
+rather than by id. To change one, change `PRICE_USD_CENTS` and
+`scripts/configure-accounts.mjs`'s `PRICE_AMOUNTS` together (a test holds
+them equal), then run the "Configure Stripe and Clerk" workflow with
+`apply`: it moves each mismatched key to a new price and archives the old
+one. Existing subscriptions stay on the price they bought.
 
 - `GET /api/billing/status` -- authenticated, no body. Returns the caller's
   own tier, this period's spend against their allowance, remaining top-up

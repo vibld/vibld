@@ -30,9 +30,10 @@ export type Tier = 'build' | 'ship';
 /**
  * Stripe `lookup_key`s, not price ids -- the ids are free to change (a price
  * correction, say) without a code change, which is the entire point of
- * naming a price at all. These five already exist in the live Vibld Stripe
- * account, created to match docs/decisions.md L36/L38 exactly:
- * Build $29/mo or $290/yr, Ship $99/mo or $990/yr, Top-up $20 one-time.
+ * naming a price at all. `scripts/configure-accounts.mjs` (apply) keeps the
+ * live Vibld Stripe account's five prices at `PRICE_USD_CENTS` below, which
+ * matches docs/decisions.md L36/L38 (amended by D155, D156):
+ * Build $19/mo or $190/yr, Ship $49/mo or $490/yr, Top-up $10 one-time.
  */
 export const PRICE_LOOKUP_KEYS = {
   buildMonthly: 'vibld_build_monthly',
@@ -55,11 +56,11 @@ export const PRICE_LOOKUP_KEYS = {
  * so does a decision nobody carried into Stripe and this file.
  */
 export const PRICE_USD_CENTS = {
-  buildMonthly: 2900,
-  buildAnnual: 29000,
-  shipMonthly: 9900,
-  shipAnnual: 99000,
-  topup: 2000,
+  buildMonthly: 1900,
+  buildAnnual: 19000,
+  shipMonthly: 4900,
+  shipAnnual: 49000,
+  topup: 1000,
 } as const satisfies Record<keyof typeof PRICE_LOOKUP_KEYS, number>;
 
 /**
@@ -78,6 +79,27 @@ export const PRICE_USD_CENTS = {
  */
 export const RETENTION_COUPON_ID = 'vibld-retention-50-1mo';
 
+/**
+ * The price metadata key that remembers which lookup key a price was sold
+ * under. A Stripe price's amount cannot change, so a new amount is a new
+ * price that takes the lookup key over (`transfer_lookup_key`), and the old
+ * price, which existing subscriptions stay on, is left with none.
+ * `scripts/configure-accounts.mjs` stamps this on every plan price, old and
+ * new, so those subscriptions keep their tier; a test there pins the name.
+ */
+export const PLAN_KEY_METADATA = 'vibld_lookup_key';
+
+/**
+ * Which of `PRICE_LOOKUP_KEYS` a price was sold under: its lookup key, or,
+ * once that has moved to a newer price, the one stamped in its metadata.
+ */
+export function planKeyOf(price: {
+  lookup_key: string | null;
+  metadata?: Record<string, string> | null;
+}): string | null {
+  return price.lookup_key ?? price.metadata?.[PLAN_KEY_METADATA] ?? null;
+}
+
 const MONTHLY_PLAN_LOOKUP_KEYS: readonly string[] = [
   PRICE_LOOKUP_KEYS.buildMonthly,
   PRICE_LOOKUP_KEYS.shipMonthly,
@@ -94,12 +116,14 @@ const MONTHLY_PLAN_LOOKUP_KEYS: readonly string[] = [
  */
 export function isMonthlyPlanPrice(price: {
   lookup_key: string | null;
+  metadata?: Record<string, string> | null;
   recurring: { interval: string } | null;
 }): boolean {
+  const key = planKeyOf(price);
   return (
     price.recurring?.interval === 'month' &&
-    price.lookup_key !== null &&
-    MONTHLY_PLAN_LOOKUP_KEYS.includes(price.lookup_key)
+    key !== null &&
+    MONTHLY_PLAN_LOOKUP_KEYS.includes(key)
   );
 }
 
@@ -140,7 +164,7 @@ export function lookupKeyFor(option: PurchaseOption): string {
   return PRICE_LOOKUP_KEYS[key];
 }
 
-/** L36's top-up: $20 for $8 of included model spend, expiring in 12 months. */
+/** L36's top-up (D155): $10 for $8 of included model spend, expiring in 12 months. */
 export const TOPUP_CREDIT_USD_CENTS = 800;
 
 /**

@@ -3,7 +3,7 @@ import { DOC_GUIDES, metaFor } from '../site';
 import { FREE_PLAN } from '../plan-sources';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'credits-and-plans')!;
-const CHECKED = '2026-09-30';
+const CHECKED = '2026-10-04';
 
 export function meta() {
   return metaFor('/docs/credits-and-plans');
@@ -25,11 +25,11 @@ export default function CreditsAndPlans() {
           month.
         </li>
         <li>
-          <strong>Build</strong>: $29 a month, or $290 a year. Includes $10.00
+          <strong>Build</strong>: $19 a month, or $190 a year. Includes $14.00
           of model spend per month.
         </li>
         <li>
-          <strong>Ship</strong>: $99 a month, or $990 a year. Includes $40.00 of
+          <strong>Ship</strong>: $49 a month, or $490 a year. Includes $40.00 of
           model spend per month.
         </li>
       </ul>
@@ -63,7 +63,7 @@ export default function CreditsAndPlans() {
 
       <h2>Top-up credit</h2>
       <p>
-        A top-up costs $20 and adds $8.00 of model spend. Top-ups are one-time
+        A top-up costs $10 and adds $8.00 of model spend. Top-ups are one-time
         purchases and are not tied to a month. They are tried whenever what is
         left of the monthly allowance cannot hold a run’s reservation. A run is
         drawn from one or the other, never from both at once. Top-up credit is

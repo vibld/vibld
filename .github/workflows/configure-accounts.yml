@@ -1,8 +1,8 @@
 # Brings the live Stripe and Clerk accounts to the settings vibld relies on,
-# as far as each API reaches: the retention coupon, the webhook endpoint's
-# events, the customer portal's default configuration, and Clerk's support
-# email. `inspect` only reads; `apply` writes and is safe to repeat. See
-# scripts/configure-accounts.mjs.
+# as far as each API reaches: the plan prices, the retention coupon, the
+# webhook endpoint's events, the customer portal's default configuration,
+# and Clerk's support email. `inspect` only reads; `apply` writes and is
+# safe to repeat. See scripts/configure-accounts.mjs.
 name: Configure Stripe and Clerk
 
 on:

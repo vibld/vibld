@@ -4,8 +4,9 @@
 // Run by .github/workflows/configure-accounts.yml, which holds the keys.
 // `inspect` only reads and prints; `apply` writes, and is safe to repeat:
 // every write sets a value rather than adding one, the coupon is created
-// under a fixed id only when it does not exist yet, and the webhook
-// endpoint's events are only ever added to.
+// under a fixed id only when it does not exist yet, the webhook endpoint's
+// events are only ever added to, and a price is replaced only while its
+// amount differs from `PRICE_AMOUNTS`.
 //
 // What the APIs do not reach (Stripe's own-account branding, public details
 // and statement descriptor, Clerk's logo and application name) is a
@@ -26,6 +27,127 @@ export const PRICE_LOOKUP_KEYS = [
   'vibld_ship_annual',
   'vibld_topup',
 ];
+
+/**
+ * What each lookup key's price charges, in US cents (docs/decisions.md L36
+ * and L38, amended by D155 and D156). The same figures as
+ * `PRICE_USD_CENTS` in `apps/web/worker/stripe-client.ts`, which this
+ * script's test holds them to.
+ *
+ * A Stripe price's amount cannot be edited, so `apply` moves a mismatched
+ * key to a new price on the same product, currency and interval
+ * (`transfer_lookup_key`) and archives the old one. A subscription already
+ * on the old price keeps it; checkout reads the key, so new ones get the new
+ * amount.
+ */
+/**
+ * Price metadata naming the lookup key a price was sold under, so a
+ * subscription left on an old price after its key moves still resolves to
+ * its plan (`stripe-client.ts`'s `PLAN_KEY_METADATA` and `planKeyOf`).
+ */
+export const PLAN_KEY_METADATA = 'vibld_lookup_key';
+
+export const PRICE_AMOUNTS = {
+  vibld_build_monthly: 1900,
+  vibld_build_annual: 19000,
+  vibld_ship_monthly: 4900,
+  vibld_ship_annual: 49000,
+  vibld_topup: 1000,
+};
+
+/**
+ * The prices `apply` has to replace, from what Stripe listed: one entry per
+ * key whose amount differs, with the body of the replacement. A key Stripe
+ * does not have is reported, not created, since nothing here knows which
+ * product it belongs on.
+ */
+export function plannedPriceMoves(prices) {
+  const byKey = new Map(prices.map((price) => [price.lookup_key, price]));
+  const missing = [];
+  const moves = [];
+  for (const [key, amount] of Object.entries(PRICE_AMOUNTS)) {
+    const current = byKey.get(key);
+    if (!current) {
+      missing.push(key);
+      continue;
+    }
+    if (current.unit_amount === amount) continue;
+    const productId =
+      typeof current.product === 'string'
+        ? current.product
+        : current.product?.id;
+    moves.push({
+      key,
+      from: current,
+      body: {
+        product: productId,
+        currency: current.currency,
+        unit_amount: amount,
+        ...(current.recurring
+          ? {
+              recurring: {
+                interval: current.recurring.interval,
+                interval_count: current.recurring.interval_count ?? 1,
+              },
+            }
+          : {}),
+        ...(current.tax_behavior && current.tax_behavior !== 'unspecified'
+          ? { tax_behavior: current.tax_behavior }
+          : {}),
+        ...(current.nickname ? { nickname: current.nickname } : {}),
+        metadata: { [PLAN_KEY_METADATA]: key },
+        lookup_key: key,
+        transfer_lookup_key: true,
+      },
+    });
+  }
+  return { missing, moves };
+}
+
+/**
+ * What retiring superseded plan prices takes, from one product's active
+ * prices: each active price stamped with a plan key it no longer holds (its
+ * key moved to a newer price) is archived, and if it is the product's
+ * default price, the default first moves to the price that holds the key
+ * now, since Stripe refuses to archive a default price.
+ *
+ * Worked out from Stripe's current state rather than remembered from the
+ * move, so a run that moved a key and then failed to tidy up is finished by
+ * the next run.
+ */
+export function plannedRetirements(product, activePrices) {
+  const holder = new Map(
+    activePrices
+      .filter((price) => price.lookup_key in PRICE_AMOUNTS)
+      .map((price) => [price.lookup_key, price.id]),
+  );
+  const defaultPrice =
+    typeof product.default_price === 'string'
+      ? product.default_price
+      : product.default_price?.id;
+  const retire = [];
+  let newDefault = null;
+  for (const price of activePrices) {
+    const stamped = price.metadata?.[PLAN_KEY_METADATA];
+    if (!stamped || price.lookup_key === stamped) continue;
+    const successor = holder.get(stamped);
+    // Never archive a plan price nothing replaces: checkout would have no
+    // price for the key at all.
+    if (!successor) continue;
+    retire.push(price.id);
+    if (price.id === defaultPrice) newDefault = successor;
+  }
+  return { retire, newDefault };
+}
+
+/** The listed prices not yet stamped with the lookup key they carry. */
+export function unstampedPrices(prices) {
+  return prices.filter(
+    (price) =>
+      price.lookup_key in PRICE_AMOUNTS &&
+      price.metadata?.[PLAN_KEY_METADATA] !== price.lookup_key,
+  );
+}
 
 /**
  * The offer made to somebody cancelling a monthly plan: half off one month.
@@ -179,6 +301,72 @@ function stripeError(result) {
   return result.json?.error?.message ?? `HTTP ${result.status}`;
 }
 
+async function retirePredecessors(key, apply, report) {
+  const query = new URLSearchParams(
+    PRICE_LOOKUP_KEYS.map((k) => ['lookup_keys[]', k]),
+  );
+  query.set('limit', '10');
+  const keyed = await stripe(key, 'GET', `/prices?${query}`);
+  if (keyed.status !== 200) {
+    report.fail(`Stripe prices could not be re-read: ${stripeError(keyed)}`);
+    return;
+  }
+  const productIds = [
+    ...new Set(
+      keyed.json.data.map((price) =>
+        typeof price.product === 'string' ? price.product : price.product?.id,
+      ),
+    ),
+  ];
+  for (const productId of productIds) {
+    const product = await stripe(key, 'GET', `/products/${productId}`);
+    const active = await stripe(
+      key,
+      'GET',
+      `/prices?product=${productId}&active=true&limit=100`,
+    );
+    if (product.status !== 200 || active.status !== 200) {
+      report.fail(
+        `Product ${productId}'s prices could not be read: ${stripeError(product.status !== 200 ? product : active)}`,
+      );
+      continue;
+    }
+    const { retire, newDefault } = plannedRetirements(
+      product.json,
+      active.json.data,
+    );
+    if (retire.length === 0) continue;
+    if (!apply) {
+      report.line(
+        `- Would archive ${retire.map((id) => `\`${id}\``).join(', ')} on ${productId}` +
+          (newDefault ? `, default price moving to \`${newDefault}\`.` : '.'),
+      );
+      continue;
+    }
+    if (newDefault) {
+      const updated = await stripe(key, 'POST', `/products/${productId}`, {
+        default_price: newDefault,
+      });
+      if (updated.status !== 200) {
+        report.fail(
+          `Product ${productId}'s default price was not moved to ${newDefault}, so nothing on it was archived: ${stripeError(updated)}`,
+        );
+        continue;
+      }
+    }
+    for (const id of retire) {
+      const archived = await stripe(key, 'POST', `/prices/${id}`, {
+        active: false,
+      });
+      if (archived.status === 200) {
+        report.line(`- Archived superseded price \`${id}\`.`);
+      } else {
+        report.fail(`\`${id}\` was not archived: ${stripeError(archived)}`);
+      }
+    }
+  }
+}
+
 async function configureStripe(key, apply, report) {
   const query = new URLSearchParams(
     PRICE_LOOKUP_KEYS.map((k) => ['lookup_keys[]', k]),
@@ -197,6 +385,46 @@ async function configureStripe(key, apply, report) {
         `${price.recurring ? ` per ${price.recurring.interval}` : ' one-time'}, product ${price.product?.id} (${price.product?.name})`,
     );
   }
+  // Stamped before any key moves: the stamp is what keeps a subscription on
+  // the old price resolvable once the key has left it.
+  for (const price of unstampedPrices(prices.json.data)) {
+    if (!apply) {
+      report.line(
+        `- Would stamp \`${price.id}\` with ${PLAN_KEY_METADATA}=${price.lookup_key}.`,
+      );
+      continue;
+    }
+    const stamped = await stripe(key, 'POST', `/prices/${price.id}`, {
+      metadata: { [PLAN_KEY_METADATA]: price.lookup_key },
+    });
+    if (stamped.status !== 200) {
+      report.fail(
+        `\`${price.id}\` was not stamped, so no key was moved: ${stripeError(stamped)}`,
+      );
+      return;
+    }
+    report.line(
+      `- Stamped \`${price.id}\` with ${PLAN_KEY_METADATA}=${price.lookup_key}.`,
+    );
+  }
+  const { missing, moves } = plannedPriceMoves(prices.json.data);
+  for (const key of missing) {
+    report.fail(`No Stripe price has lookup key \`${key}\`.`);
+  }
+  for (const move of moves) {
+    const what = `\`${move.key}\` from ${move.from.unit_amount / 100} to ${move.body.unit_amount / 100} ${move.body.currency.toUpperCase()}`;
+    if (!apply) {
+      report.line(`- Would move ${what}.`);
+      continue;
+    }
+    const created = await stripe(key, 'POST', '/prices', move.body);
+    if (created.status !== 200) {
+      report.fail(`Could not move ${what}: ${stripeError(created)}`);
+      continue;
+    }
+    report.line(`- Moved ${what}: ${created.json.id} now holds the key.`);
+  }
+  await retirePredecessors(key, apply, report);
 
   report.line('### Retention coupon');
   const existing = await stripe(key, 'GET', `/coupons/${RETENTION_COUPON.id}`);

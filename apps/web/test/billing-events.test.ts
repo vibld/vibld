@@ -496,6 +496,27 @@ describe('subscriptionRecordFrom', () => {
     );
   });
 
+  it('keeps the tier of a price whose lookup key moved to a newer price', () => {
+    // A price change moves the key with `transfer_lookup_key`; the old price
+    // keeps only the key stamped in its metadata, and a subscriber still on
+    // it must stay on their plan (and be downgraded when it cancels).
+    const old = subscription({
+      items: {
+        data: [
+          {
+            current_period_end: 1_800_000_000,
+            price: {
+              id: 'price_old_ship_annual',
+              lookup_key: null,
+              metadata: { vibld_lookup_key: 'vibld_ship_annual' },
+            },
+          },
+        ],
+      },
+    }) as Stripe.Subscription;
+    assert.equal(subscriptionRecordFrom(old, 'user_1')?.tier, 'ship');
+  });
+
   it('is undefined for a subscription with no items', () => {
     assert.equal(
       subscriptionRecordFrom(

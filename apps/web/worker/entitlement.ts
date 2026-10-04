@@ -15,7 +15,7 @@ export type Tier = 'free' | 'build' | 'ship';
  * means changing the Stripe price too, not just this number.
  */
 export const TIER_INCLUDED_MICRO_USD: Record<Exclude<Tier, 'free'>, number> = {
-  build: 10_000_000,
+  build: 14_000_000,
   ship: 40_000_000,
 };
 

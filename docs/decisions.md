@@ -82,9 +82,9 @@ Accepted 2026-09-09 (internal PR 70). L1 and L24 amend D30 -- D23 is untouched b
 | L33  | **b**          | Security scanning is run directly, and a trust center is stood up separately.                                                                                                                                                                                                                                                                                                                                                                |
 | L34  | a              | Hosted model access runs on one shared platform key per provider, gated by our own credit ledger.                                                                                                                                                                                                                                                                                                                                            |
 | L35  | a              | One credit = 1¢ of model spend; the user sees a plain "generations remaining" for the model they chose.                                                                                                                                                                                                                                                                                                                                      |
-| L36  | --             | Free $0/$1 spend, Build $29/$10, Ship $99/$40, top-up $20/$8 expiring 12 months. Recorded in full below.                                                                                                                                                                                                                                                                                                                                     |
+| L36  | --             | Free $0/$1 spend, Build $19/$14, Ship $49/$40, top-up $10/$8 expiring 12 months (D155, 2026-10-04; was Build $29/$10, Ship $99/$40, top-up $20/$8). Recorded in full below.                                                                                                                                                                                                                                                                  |
 | L37  | a              | Hard stop at the allowance, with one-click top-up. No auto-charged overage.                                                                                                                                                                                                                                                                                                                                                                  |
-| L38  | a              | Annual billing at two months free -- Build $290, Ship $990.                                                                                                                                                                                                                                                                                                                                                                                  |
+| L38  | a              | Annual billing at two months free -- Build $190, Ship $490 (D156, 2026-10-04; was $290 and $990).                                                                                                                                                                                                                                                                                                                                            |
 | L39  | a              | Opus is available inside a paid tier, drawn from the same allowance. _(Extended under "Resolved 2026-09-09": more providers are to be added as they ship, and hosted BYOK stays off per L45.)_                                                                                                                                                                                                                                               |
 | L40  | **b**          | Vibld deploys into the user's own Cloudflare account to auto-publish exported sites, reversing the recommendation against holding deploy credentials. Resolved: a scoped API Token the user pastes in (not OAuth), stored in Cloudflare Secrets Store, Cloudflare only for now, and the primary path is a Vibld-provided subdomain auto-configured on the user's behalf -- not merely a fallback. See "Resolved" below for the exact scheme. |
 | L41  | a              | Cloudflare, Vercel and Netlify at launch; DigitalOcean and a container path after.                                                                                                                                                                                                                                                                                                                                                           |
@@ -115,9 +115,9 @@ Accepted 2026-09-09 (internal PR 70). L1 and L24 amend D30 -- D23 is untouched b
 | Public mailing address         | 285 W Wieuca Rd NE STE 62715, Atlanta, GA 30342          |
 | Data retention after deletion  | project content 30 days; audit log 12 months, tombstoned |
 | Free tier                      | $0 -- $1/mo model spend                                  |
-| Build tier                     | $29/mo -- $10/mo model spend                             |
-| Ship tier                      | $99/mo -- $40/mo model spend                             |
-| Top-up                         | $20 -- $8 model spend, expires 12 months                 |
+| Build tier                     | $19/mo -- $14/mo model spend                             |
+| Ship tier                      | $49/mo -- $40/mo model spend                             |
+| Top-up                         | $10 -- $8 model spend, expires 12 months                 |
 | GA4 measurement ID             | `G-JCWXRRM8R9` (wired into apps/marketing 2026-09-16)    |
 
 `apps/marketing` now measures page views twice: with its own first-party,
@@ -204,6 +204,29 @@ exactly this path.
 - **Legal pages to draft:** Terms of Service, Privacy Policy, Acceptable Use, Security & Vulnerability Disclosure + `security.txt`, Subprocessors, Cookie Notice, Refund Policy, Open-Source Notices.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
+
+### Pricing, 2026-10-04
+
+Chris asked for pricing that covers costs plus a small margin for his time.
+The proposal measured what a build costs from production run traces (GPT-6
+Luna about $0.02, from three runs; GPT-6 Sol about $0.70; one Opus 5.5 run
+$2.62) and put fixed infrastructure at about $10 a month. Model spend is
+the only cost that grows with use, and the allowance is already metered at
+cost (L35), so a plan's margin is the gap between its price and its
+allowance, less Stripe's 2.9% + $0.30. Production had 16 accounts and no
+paid subscription or top-up when this was decided, so no subscriber's price
+changes.
+
+- **D155. Cost-plus prices (Chris, 2026-10-04: "D155a").** Build $19 a
+  month with $14 of model spend, Ship $49 with $40, top-up $10 for $8. At
+  full use of the allowance that leaves $4.15 (22%), $7.28 (15%) and $1.41
+  (14%) after Stripe; it was $17.86, $55.83 and $11.12. Free is unchanged.
+  Amends L36. The amounts are `PRICE_USD_CENTS` in
+  `apps/web/worker/stripe-client.ts` and `TIER_INCLUDED_MICRO_USD` in
+  `entitlement.ts`; `scripts/configure-accounts.mjs` (apply) moves each
+  Stripe lookup key to a new price at that amount and archives the old one.
+- **D156. Annual plans stay, at two months free (Chris, 2026-10-04).**
+  Build $190 a year, Ship $490. Amends L38.
 
 ### Checkpoint history, 2026-10-03
 
