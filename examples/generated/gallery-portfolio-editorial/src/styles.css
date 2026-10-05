@@ -1,0 +1,121 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Public+Sans:wght@400;500;600&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Public Sans", system-ui, sans-serif;
+
+  --text-hero: clamp(3.5rem, 8vw, 6.5rem);
+  --text-hero--line-height: 1.0;
+  --text-hero--letter-spacing: -0.04em;
+
+  --text-section-title: clamp(2.25rem, 4.5vw, 3.75rem);
+  --text-section-title--line-height: 1.05;
+  --text-section-title--letter-spacing: -0.03em;
+
+  --text-pullquote: clamp(1.75rem, 3vw, 2.5rem);
+  --text-pullquote--line-height: 1.2;
+  --text-pullquote--letter-spacing: -0.01em;
+
+  --text-body: 1.0625rem;
+  --text-body--line-height: 1.6;
+  --text-body--letter-spacing: 0;
+
+  --text-small: 0.875rem;
+  --text-small--line-height: 1.5;
+  --text-small--letter-spacing: 0.01em;
+
+  --text-caption: 0.8125rem;
+  --text-caption--line-height: 1.4;
+  --text-caption--letter-spacing: 0.02em;
+
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-pill: 0px;
+}
+
+:root {
+  --background: #F7F3EC;
+  --foreground: #1B1712;
+  --card: #FFFFFF;
+  --card-foreground: #1B1712;
+  --primary: #1B1712;
+  --primary-foreground: #F7F3EC;
+  --secondary: #EAE3D8;
+  --secondary-foreground: #1B1712;
+  --muted: #EAE3D8;
+  --muted-foreground: #6B6257;
+  --accent: #8A2E2E;
+  --accent-foreground: #F7F3EC;
+  --destructive: #B3261E;
+  --border: #D8CFC3;
+  --input: #D8CFC3;
+  --ring: #8A2E2E;
+  --overlay: rgba(27,23,18,0.55);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    letter-spacing: var(--text-body--letter-spacing);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: var(--text-hero--letter-spacing);
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--accent) 20%, transparent);
+    color: var(--foreground);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

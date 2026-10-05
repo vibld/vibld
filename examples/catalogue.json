@@ -342,6 +342,173 @@
         "siteType": "event",
         "style": "acidDark"
       }
+    },
+    {
+      "slug": "gallery-consultancy-glassmorphism",
+      "case": "gallery-consultancy-glassmorphism",
+      "title": "A consultancy",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37263180128,
+      "generatedOn": "2026-10-05",
+      "prompt": "A site for a small management consultancy with its services, two short case studies and a contact form",
+      "notes": [],
+      "gallery": {
+        "siteType": "consultancy",
+        "style": "glassmorphism"
+      }
+    },
+    {
+      "slug": "gallery-consultancy-warmpaper",
+      "case": "gallery-consultancy-warmpaper",
+      "title": "A consultancy",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37263180128,
+      "generatedOn": "2026-10-05",
+      "prompt": "A site for a small management consultancy with its services, two short case studies and a contact form",
+      "notes": [],
+      "gallery": {
+        "siteType": "consultancy",
+        "style": "warmPaper"
+      }
+    },
+    {
+      "slug": "gallery-consultancy-aciddark",
+      "case": "gallery-consultancy-aciddark",
+      "title": "A consultancy",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37263180128,
+      "generatedOn": "2026-10-05",
+      "prompt": "A site for a small management consultancy with its services, two short case studies and a contact form",
+      "notes": [],
+      "gallery": {
+        "siteType": "consultancy",
+        "style": "acidDark"
+      }
+    },
+    {
+      "slug": "gallery-docs-editorial",
+      "case": "gallery-docs-editorial",
+      "title": "A docs site",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37265024381,
+      "generatedOn": "2026-10-05",
+      "prompt": "A documentation site for an open-source command-line tool with installation, a quick start and a command reference",
+      "notes": [
+        "It did not build as first generated. This is the copy after the bakeoff's one automatic repair turn."
+      ],
+      "gallery": {
+        "siteType": "docs",
+        "style": "editorial"
+      }
+    },
+    {
+      "slug": "gallery-docs-aciddark",
+      "case": "gallery-docs-aciddark",
+      "title": "A docs site",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37265024381,
+      "generatedOn": "2026-10-05",
+      "prompt": "A documentation site for an open-source command-line tool with installation, a quick start and a command reference",
+      "notes": [],
+      "gallery": {
+        "siteType": "docs",
+        "style": "acidDark"
+      }
+    },
+    {
+      "slug": "gallery-event-editorial",
+      "case": "gallery-event-editorial",
+      "title": "An event",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37266714820,
+      "generatedOn": "2026-10-05",
+      "prompt": "A site for a weekend food festival with the lineup, a schedule, tickets and directions",
+      "notes": [],
+      "gallery": {
+        "siteType": "event",
+        "style": "editorial"
+      }
+    },
+    {
+      "slug": "gallery-event-glassmorphism",
+      "case": "gallery-event-glassmorphism",
+      "title": "An event",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37266714820,
+      "generatedOn": "2026-10-05",
+      "prompt": "A site for a weekend food festival with the lineup, a schedule, tickets and directions",
+      "notes": [],
+      "gallery": {
+        "siteType": "event",
+        "style": "glassmorphism"
+      }
+    },
+    {
+      "slug": "gallery-portfolio-editorial",
+      "case": "gallery-portfolio-editorial",
+      "title": "A portfolio",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37268269067,
+      "generatedOn": "2026-10-05",
+      "prompt": "A portfolio for a freelance photographer with a gallery of recent work, a short bio and a way to get in touch",
+      "notes": [],
+      "gallery": {
+        "siteType": "portfolio",
+        "style": "editorial"
+      }
+    },
+    {
+      "slug": "gallery-portfolio-warmpaper",
+      "case": "gallery-portfolio-warmpaper",
+      "title": "A portfolio",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37268269067,
+      "generatedOn": "2026-10-05",
+      "prompt": "A portfolio for a freelance photographer with a gallery of recent work, a short bio and a way to get in touch",
+      "notes": [],
+      "gallery": {
+        "siteType": "portfolio",
+        "style": "warmPaper"
+      }
+    },
+    {
+      "slug": "gallery-shop-editorial",
+      "case": "gallery-shop-editorial",
+      "title": "A shop",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37269459713,
+      "generatedOn": "2026-10-05",
+      "prompt": "A storefront for a small candle maker with products, prices and a cart. There is no checkout backend, so the cart is kept in the browser, and the site says so plainly.",
+      "notes": [],
+      "gallery": {
+        "siteType": "shop",
+        "style": "editorial"
+      }
+    },
+    {
+      "slug": "gallery-shop-warmpaper",
+      "case": "gallery-shop-warmpaper",
+      "title": "A shop",
+      "kind": "site",
+      "model": "deepseek-v4-pro",
+      "run": 37269459713,
+      "generatedOn": "2026-10-05",
+      "prompt": "A storefront for a small candle maker with products, prices and a cart. There is no checkout backend, so the cart is kept in the browser, and the site says so plainly.",
+      "notes": [],
+      "gallery": {
+        "siteType": "shop",
+        "style": "warmPaper"
+      }
     }
   ]
 }

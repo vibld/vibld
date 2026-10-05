@@ -303,6 +303,15 @@ same no-hand-edits rule, and a new section of /examples.
   export is a namespace of parts, and that Button's `asChild` renders
   `Slot.Root`.
 
+- **D157. Re-run the 13 dropped cells (Chris, 2026-10-05: "Re-run all
+  13").** After that prompt change, the same cases on the same model, one
+  run each (bakeoff runs 37263180128 to 37269459713), cost $3.56. Twelve
+  built, one of them after the repair turn. Shop in Brutalism did not: it
+  imported a `Sheet` that `radix-ui` does not export (a sheet is
+  `Dialog`), then gave `Dialog.Content` a `side` prop it does not take.
+  Docs in Warm Paper built but threw on load (React error 310, a hook
+  called conditionally) and is left out too, so the gallery keeps 28 of 30.
+
 ### What comes next, 2026-10-03
 
 Chris asked what to tackle next and took all six suggestions, in the order

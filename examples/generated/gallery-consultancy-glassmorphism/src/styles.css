@@ -1,0 +1,160 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Manrope:wght@400;500;600;700&display=swap');
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  color-scheme: dark;
+  --background: #0b1121;
+  --foreground: #eef2f9;
+  --card: #0f172a;
+  --card-foreground: #eef2f9;
+  --popover: #0f172a;
+  --popover-foreground: #eef2f9;
+  --primary: #7dd3fc;
+  --primary-foreground: #0b1121;
+  --secondary: #1e293b;
+  --secondary-foreground: #eef2f9;
+  --muted: #1a2336;
+  --muted-foreground: #a6b0c5;
+  --accent: #f0abfc;
+  --accent-foreground: #0b1121;
+  --destructive: #f87171;
+  --border: rgba(255, 255, 255, 0.12);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #7dd3fc;
+  --font-sans: 'Manrope', sans-serif;
+  --font-display: 'Fraunces', serif;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  html,
+  body {
+    overflow-x: hidden;
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    text-wrap: balance;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+  button,
+  [role='button'] {
+    cursor: pointer;
+  }
+  :where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 4px;
+    border-radius: 0.25rem;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 45%, transparent);
+    color: var(--foreground);
+  }
+}
+
+.glass-panel {
+  background: linear-gradient(
+    165deg,
+    color-mix(in oklab, var(--card) 76%, transparent),
+    color-mix(in oklab, var(--card) 55%, transparent)
+  );
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
+  box-shadow:
+    0 24px 60px -32px color-mix(in oklab, var(--foreground) 28%, transparent),
+    inset 0 1px 0 0 color-mix(in oklab, var(--foreground) 12%, transparent);
+}
+
+.aurora-bg {
+  position: absolute;
+  inset: -25%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 22% 32%, color-mix(in oklab, var(--primary) 38%, transparent) 0%, transparent 42%),
+    radial-gradient(circle at 78% 58%, color-mix(in oklab, var(--accent) 30%, transparent) 0%, transparent 45%),
+    radial-gradient(circle at 50% 88%, color-mix(in oklab, var(--ring) 28%, transparent) 0%, transparent 40%);
+  filter: blur(72px);
+  opacity: 0.75;
+  animation: aurora-drift 28s ease-in-out infinite alternate;
+}
+
+@keyframes aurora-drift {
+  0% {
+    transform: translate3d(-3%, -2%, 0) scale(1);
+    filter: blur(72px);
+  }
+  50% {
+    transform: translate3d(4%, 3%, 0) scale(1.06);
+    filter: blur(88px);
+  }
+  100% {
+    transform: translate3d(-1%, -4%, 0) scale(0.98);
+    filter: blur(68px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .aurora-bg,
+  .glass-panel {
+    animation: none;
+    transition: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
