@@ -19,7 +19,7 @@ import {
   ProviderShapeError,
   ProviderTruncationError,
 } from '../src/errors.ts';
-import { PLAN_SYSTEM_PROMPT } from '../src/plan-schema.ts';
+import { GROUP_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT } from '../src/plan-schema.ts';
 import { readDesignSpec } from '../src/design-spec.ts';
 import { SPEC } from './fixtures/design-spec.ts';
 import { PLAN_JSON_INSTRUCTION, jsonSchemaFor } from '../src/plan-output.ts';
@@ -724,6 +724,16 @@ describe('the rules the examples catalogue exposed', () => {
     // page, and the build stopped there: 1.x ships no brand icons.
     assert.match(PLAN_SYSTEM_PROMPT, /lucide-react ships no brand logos/);
     assert.match(PLAN_SYSTEM_PROMPT, /no Github, Twitter, Linkedin/);
+  });
+
+  it('says a radix-ui export is a namespace, with Slot.Root for asChild', () => {
+    // DeepSeek V4 Pro rendered `Slot` (and `Tooltip`, and `Dialog` in a
+    // sheet) from 'radix-ui' as a component in 8 of the 10 sample gallery
+    // cells that did not build (D153), and the repair turn kept it.
+    for (const prompt of [PLAN_SYSTEM_PROMPT, GROUP_SYSTEM_PROMPT]) {
+      assert.match(prompt, /Every export of 'radix-ui' is a namespace/);
+      assert.match(prompt, /asChild \? Slot\.Root : 'button'/);
+    }
   });
 
   it('asks for a build that runs the type check', () => {

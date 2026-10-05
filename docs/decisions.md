@@ -299,6 +299,9 @@ same no-hand-edits rule, and a new section of /examples.
   or `Tooltip` or `Sheet`), which the repair turn did not fix. Three more
   built but threw on load (React error 130, an element type that is an
   object) and are left out too, per `examples/README.md`.
+  The generation prompt's stack rules now say that every `radix-ui`
+  export is a namespace of parts, and that Button's `asChild` renders
+  `Slot.Root`.
 
 ### What comes next, 2026-10-03
 

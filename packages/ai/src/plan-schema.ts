@@ -199,6 +199,11 @@ const STACK_RULES = `- Tailwind v4 is configured in CSS, through the @tailwindcs
   tailwind-merge) and make variants with class-variance-authority. Write only
   the components the page uses; there is no CLI step, the files are the
   components.
+- Every export of 'radix-ui' is a namespace of parts, never a component:
+  render DialogPrimitive.Root, TooltipPrimitive.Content and so on, never
+  <Dialog>, <Tooltip> or <Slot> imported from 'radix-ui', which fails the
+  type check. Button's asChild is the one people get wrong: \`import { Slot }
+  from 'radix-ui'\`, then \`const Comp = asChild ? Slot.Root : 'button'\`.
 - A dialog, sheet, popover, dropdown menu, select, combobox, tooltip, tabs or
   accordion is always the shadcn/ui component on Radix, never divs. These
   controls need focus trapping, roving focus, typeahead, outside-dismissal
