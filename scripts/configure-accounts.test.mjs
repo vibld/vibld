@@ -8,12 +8,14 @@ import {
   PORTAL_SETTINGS,
   PRICE_AMOUNTS,
   PRICE_LOOKUP_KEYS,
+  PRODUCT_COPY,
   REQUIRED_WEBHOOK_EVENTS,
   RETENTION_COUPON,
   WEBHOOK_URL,
   formPairs,
   missingWebhookEvents,
   plannedPriceMoves,
+  plannedProductCopy,
   plannedRetirements,
   unstampedPrices,
 } from './configure-accounts.mjs';
@@ -266,4 +268,43 @@ test('a superseded price is retired from current state, so a partial run is fini
     retire: [],
     newDefault: null,
   });
+});
+
+test('product copy states the included spend the Worker grants', () => {
+  const entitlement = worker('entitlement.ts');
+  const tiers = /TIER_INCLUDED_MICRO_USD[^{]*\{([^}]*)\}/.exec(entitlement);
+  assert.ok(tiers, 'entitlement.ts no longer declares TIER_INCLUDED_MICRO_USD');
+  for (const tier of ['build', 'ship']) {
+    const micro = new RegExp(`${tier}:\\s*([\\d_]+)`).exec(tiers[1]);
+    assert.ok(micro, `no ${tier} allowance in entitlement.ts`);
+    const usd = String(Number(micro[1].replace(/_/g, '')) / 1_000_000);
+    assert.equal(PRODUCT_COPY[tier].included_credit_usd, usd);
+    assert.match(PRODUCT_COPY[tier].description, new RegExp(`\\$${usd}/mo`));
+  }
+  const topup = /TOPUP_CREDIT_USD_CENTS = (\d+)/.exec(
+    worker('stripe-client.ts'),
+  );
+  assert.ok(topup);
+  const usd = String(Number(topup[1]) / 100);
+  assert.equal(PRODUCT_COPY.topup.included_credit_usd, usd);
+  assert.match(PRODUCT_COPY.topup.description, new RegExp(`\\$${usd} `));
+});
+
+test('a product is updated only when its copy differs', () => {
+  const stale = {
+    description: 'All models. $10/mo included model spend.',
+    metadata: { vibld_tier: 'build', included_credit_usd: '10' },
+  };
+  assert.deepEqual(plannedProductCopy(stale), {
+    description: PRODUCT_COPY.build.description,
+    metadata: { included_credit_usd: '14' },
+  });
+  assert.equal(
+    plannedProductCopy({
+      description: PRODUCT_COPY.ship.description,
+      metadata: { vibld_tier: 'ship', included_credit_usd: '40' },
+    }),
+    null,
+  );
+  assert.equal(plannedProductCopy({ description: 'x', metadata: {} }), null);
 });

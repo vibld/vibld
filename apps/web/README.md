@@ -1272,7 +1272,7 @@ ceilings each run against three layers, in order:
 
 1. **The account-wide daily ceiling** (L29) -- unchanged, still a UTC day.
 2. **The caller's own monthly tier allowance** (L36): Free $1/mo, Build
-   $10/mo, Ship $40/mo, resetting on the UTC calendar month.
+   $14/mo, Ship $40/mo, resetting on the UTC calendar month.
 3. **Top-up credit** (L37), tried only once the monthly allowance is
    genuinely exhausted, not merely low. A top-up is not period-scoped --
    it persists until spent, tracked as its own `USER_BUDGET` instance keyed

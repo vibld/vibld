@@ -23,7 +23,7 @@ export interface Answer {
   answer: string;
 }
 
-/** "$29 a month or $290 a year", for a paid plan. */
+/** "$19 a month or $190 a year", for a paid plan. */
 function planPrice(price: { monthly: number; annual: number }): string {
   return `${priceLabel(price.monthly)} a month or ${priceLabel(price.annual)} a year`;
 }

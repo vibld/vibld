@@ -379,7 +379,7 @@ function pageText(path: string): string {
         /<h([1-6])\b[^>]*>/g,
         (_, level) => `\n\n${'#'.repeat(Math.min(+level + 1, 6))} `,
       )
-      // Inline pieces set side by side ("$29" and "a month") need a space.
+      // Inline pieces set side by side ("$19" and "a month") need a space.
       .replace(/<\/(span|b|strong|em|code|a|small)>/g, '</$1> ')
       .replace(/<small\b/g, ' <small')
       .replace(/<li\b[^>]*>/g, '\n- ')

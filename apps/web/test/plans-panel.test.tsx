@@ -28,8 +28,8 @@ const PLANS = [
   },
   {
     tier: 'build',
-    limits: { activeProjectLimit: null, monthlyAllowanceMicroUsd: 10_000_000 },
-    code: { activeProjectLimit: null, monthlyAllowanceMicroUsd: 10_000_000 },
+    limits: { activeProjectLimit: null, monthlyAllowanceMicroUsd: 14_000_000 },
+    code: { activeProjectLimit: null, monthlyAllowanceMicroUsd: 14_000_000 },
     saved: null,
   },
   {
@@ -111,7 +111,7 @@ describe('the Plans panel', () => {
     );
     assert.match(
       panel.group('Build').textContent ?? '',
-      /Now: No project limit, \$10\.00 a month\. The limits in code\./,
+      /Now: No project limit, \$14\.00 a month\. The limits in code\./,
     );
     // Reset only where there is something to reset.
     assert.ok(panel.button('Free', /^Reset to code$/));
@@ -127,7 +127,7 @@ describe('the Plans panel', () => {
     const panel = await mount();
     const [limit, allowance] = panel.inputs('Build');
     assert.equal(limit!.value, '');
-    assert.equal(allowance!.value, '10.00');
+    assert.equal(allowance!.value, '14.00');
     await panel.type(limit!, '25');
     await panel.type(allowance!, '$12.5');
     await panel.click(panel.button('Build', /^Save$/)!);

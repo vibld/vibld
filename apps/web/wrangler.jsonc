@@ -132,7 +132,7 @@
     // cost once it finishes.
     //
     // What one user may spend now comes from their subscribed tier
-    // (docs/decisions.md L35-L39: Free $1/mo, Build $10/mo, Ship $40/mo,
+    // (docs/decisions.md L35-L39: Free $1/mo, Build $14/mo, Ship $40/mo,
     // plus top-up credit), not a flat env var -- see worker/entitlement.ts.
     // No VIBLD_FREE_MONTHLY_MICRO_USD here on purpose: its $1.00 default
     // already matches L36, and Build/Ship are not operator-configurable at

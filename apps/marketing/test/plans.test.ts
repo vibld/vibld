@@ -105,7 +105,7 @@ describe('the plans the pricing page states', () => {
       assert.equal(byId.get(id)!.monthlyCents, spend, `${id} included spend`);
     }
 
-    // L38: "Annual billing at two months free -- Build $290, Ship $990."
+    // L38: "Annual billing at two months free -- Build $190, Ship $490 ..."
     const annual = /Annual billing[^|]*Build \$(\d+), Ship \$(\d+)/.exec(
       DECISIONS,
     );
@@ -161,7 +161,7 @@ describe('the plans the pricing page states', () => {
 
   it('never presents an included allowance as a price', () => {
     // The mistake this replaces: "Build: $10.00 per month", where $10.00 is
-    // the model spend and the price is $29.
+    // the model spend and the price was $29.
     const guide = readFileSync(
       join(
         import.meta.dirname,

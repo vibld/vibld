@@ -105,6 +105,50 @@ export function plannedPriceMoves(prices) {
 }
 
 /**
+ * What each plan's Stripe product says, keyed by the product's `vibld_tier`
+ * metadata. Checkout and the Billing Portal show the description, so it has
+ * to carry the included model spend of `TIER_INCLUDED_MICRO_USD` in
+ * `apps/web/worker/entitlement.ts` and `TOPUP_CREDIT_USD_CENTS` in
+ * `stripe-client.ts` (D155), which this script's test holds it to.
+ */
+export const PRODUCT_COPY = {
+  build: {
+    description:
+      'All models, 30-minute previews, custom preview links. $14/mo included model spend.',
+    included_credit_usd: '14',
+  },
+  ship: {
+    description:
+      'Priority sandboxes, deploy to your own host, higher concurrency. $40/mo included model spend.',
+    included_credit_usd: '40',
+  },
+  topup: {
+    description:
+      'One-time credit top-up: $8 of included model spend, expires 12 months from purchase.',
+    included_credit_usd: '8',
+  },
+};
+
+/**
+ * The update a product needs to match `PRODUCT_COPY`, or null when it
+ * already does or is not one of vibld's plan products.
+ */
+export function plannedProductCopy(product) {
+  const copy = PRODUCT_COPY[product.metadata?.vibld_tier];
+  if (!copy) return null;
+  if (
+    product.description === copy.description &&
+    product.metadata?.included_credit_usd === copy.included_credit_usd
+  ) {
+    return null;
+  }
+  return {
+    description: copy.description,
+    metadata: { included_credit_usd: copy.included_credit_usd },
+  };
+}
+
+/**
  * What retiring superseded plan prices takes, from one product's active
  * prices: each active price stamped with a plan key it no longer holds (its
  * key moved to a newer price) is archived, and if it is the product's
@@ -330,6 +374,23 @@ async function retirePredecessors(key, apply, report) {
         `Product ${productId}'s prices could not be read: ${stripeError(product.status !== 200 ? product : active)}`,
       );
       continue;
+    }
+    const copy = plannedProductCopy(product.json);
+    if (copy && !apply) {
+      report.line(
+        `- Would set ${productId}'s description to "${copy.description}".`,
+      );
+    } else if (copy) {
+      const updated = await stripe(key, 'POST', `/products/${productId}`, copy);
+      if (updated.status === 200) {
+        report.line(
+          `- Set ${productId}'s description to "${copy.description}".`,
+        );
+      } else {
+        report.fail(
+          `${productId}'s description was not updated: ${stripeError(updated)}`,
+        );
+      }
     }
     const { retire, newDefault } = plannedRetirements(
       product.json,
