@@ -19,6 +19,7 @@ import { signShare, verifyShare } from './share-token.ts';
 import {
   isProjectFileArray,
   parseStartRequest,
+  parseStatusPlan,
   parseUpdateRequest,
 } from './start-request.ts';
 
@@ -93,7 +94,7 @@ async function handleStart(request: Request, env: Env): Promise<Response> {
   }
   const parsed = parseStartRequest(body);
   if (!parsed.ok) return json({ error: parsed.error }, 400);
-  const { userId, label, files, mediaOwner, revision } = parsed.value;
+  const { userId, label, files, mediaOwner, revision, free } = parsed.value;
 
   const sandbox = getSandbox(env.Sandbox, userId, { normalizeId: true });
   const result = await sandbox.startPreview(
@@ -102,6 +103,7 @@ async function handleStart(request: Request, env: Env): Promise<Response> {
     label,
     mediaOwner,
     revision,
+    free,
   );
   return json(result);
 }
@@ -134,8 +136,11 @@ async function handleStatus(request: Request, env: Env): Promise<Response> {
   const userId = new URL(request.url).searchParams.get('userId');
   if (!userId) return json({ error: '"userId" is required.' }, 400);
 
+  const parsed = parseStatusPlan(new URL(request.url).searchParams, userId);
+  if (!parsed.ok) return json({ error: parsed.error }, 400);
+
   const sandbox = getSandbox(env.Sandbox, userId, { normalizeId: true });
-  const result = await sandbox.getPreviewStatus();
+  const result = await sandbox.getPreviewStatus(parsed.plan);
   return json(result);
 }
 

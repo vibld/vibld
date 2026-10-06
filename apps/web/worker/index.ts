@@ -79,6 +79,7 @@ import { sharePreviewKey, shareTokenFromLink } from './share-link.ts';
 import { MediaStore } from './media-store.ts';
 import {
   freeAllowanceOf,
+  freePreviewFor,
   SUSPENDED_MESSAGE,
   planOf,
   spendableFor,
@@ -2514,7 +2515,11 @@ async function handlePreview(request: Request, env: Env): Promise<Response> {
     // synthesised failure: the browser reads any refusal as "ask again"
     // and a failed status as "the sandbox is not running", and only one of
     // those is established by an unreadable body.
-    const status = await previewStatus(env, principal.userId);
+    // With the plan as it is now, which a queued preview takes (D158).
+    const status = await previewStatus(env, principal.userId, {
+      free: await freePreviewFor(env, principal.userId),
+      account: principal.userId,
+    });
     return status
       ? json(status)
       : json({ error: UNREADABLE_PREVIEW.error }, 502);
@@ -2538,6 +2543,7 @@ async function handlePreview(request: Request, env: Env): Promise<Response> {
         files.value,
         undefined,
         revision.value ?? undefined,
+        await freePreviewFor(env, principal.userId),
       ),
     );
   }
@@ -3896,8 +3902,15 @@ async function route(
             key: string,
             files: { path: string; content: string }[],
             mediaOwner: string,
-          ) => startPreview(env, key, files, mediaOwner),
-          status: (key: string) => previewStatus(env, key),
+          ) =>
+            // The owner's plan decides, since the preview is theirs (D158).
+            freePreviewFor(env, mediaOwner).then((free) =>
+              startPreview(env, key, files, mediaOwner, undefined, free),
+            ),
+          status: (key: string, mediaOwner: string) =>
+            freePreviewFor(env, mediaOwner).then((free) =>
+              previewStatus(env, key, { free, account: mediaOwner }),
+            ),
         }
       : null,
   };

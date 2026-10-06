@@ -50,6 +50,16 @@ pnpm --filter @vibld/preview test
   a build only when every container is taken, and its position counts the
   previews ahead of it, because builds never wait in the queue. See
   `worker/capacity.ts`.
+- **`worker/free-previews.ts`** -- D158's limits on a Free account's
+  previews, which apps/web marks with `free: true` on
+  `/internal/preview/start`. Their time holding a container is counted per
+  UTC day by `PreviewFleet`, keyed by the account whose preview it is
+  (the builder and every share link of its projects share one day, and a
+  session crossing midnight counts its later part against the new day),
+  and a new start is refused past
+  `VIBLD_FREE_PREVIEW_DAILY_MINUTES` (120 by default; 0 turns Free previews
+  off), and the fleet never gives one the last `PAID_PREVIEW_RESERVED` (5)
+  containers, which are kept for paid plans.
 - **`worker/index.ts`** -- routes four kinds of traffic on one Worker:
   published sites, `<slug>.vibld-preview.dev`, handed to apps/publish over
   the `PUBLISH` service binding (`worker/publish-route.ts` decides which

@@ -28,6 +28,13 @@ export interface StartRequest {
    * serves, rather than the builder inferring it from what it last sent.
    */
   revision?: string;
+  /**
+   * The account is on the Free plan of a deployment that sells plans
+   * (D158): the start is held to the daily limit and may not take the
+   * containers kept for paid plans. apps/web decides it, behind the
+   * internal secret; absent, the start is paid, as every start was before.
+   */
+  free: boolean;
 }
 
 /** What `/internal/preview/update` is asked, checked. */
@@ -64,12 +71,13 @@ export function isProjectFileArray(value: unknown): value is ProjectFile[] {
 export function parseStartRequest(
   body: unknown,
 ): { ok: true; value: StartRequest } | { ok: false; error: string } {
-  const { userId, label, files, mediaOwner, revision } = (body ?? {}) as {
+  const { userId, label, files, mediaOwner, revision, free } = (body ?? {}) as {
     userId?: unknown;
     label?: unknown;
     files?: unknown;
     mediaOwner?: unknown;
     revision?: unknown;
+    free?: unknown;
   };
   if (typeof userId !== 'string' || userId.length === 0) {
     return { ok: false, error: '"userId" is required.' };
@@ -90,6 +98,9 @@ export function parseStartRequest(
     const problem = revisionProblem(revision);
     if (problem) return { ok: false, error: problem };
   }
+  if (free !== undefined && typeof free !== 'boolean') {
+    return { ok: false, error: '"free" must be true or false.' };
+  }
   return {
     ok: true,
     value: {
@@ -98,6 +109,7 @@ export function parseStartRequest(
       files,
       mediaOwner: typeof mediaOwner === 'string' ? mediaOwner : userId,
       ...(typeof revision === 'string' ? { revision } : {}),
+      free: free === true,
     },
   };
 }
@@ -135,4 +147,30 @@ export function parseUpdateRequest(
     ok: true,
     value: { userId, files, revision: revision as string },
   };
+}
+
+/**
+ * The plan a status poll carries, read from its query (D158). apps/web
+ * sends the account's plan as it is now with every poll, so a preview that
+ * is still waiting takes a change of plan without a second start (internal PR 376
+ * review). `free` is "true" or "false"; `account` is whose day a Free
+ * preview draws on, the sandbox's own name unless given. Without `free`
+ * the poll carries no plan, as every poll did before.
+ */
+export function parseStatusPlan(
+  params: URLSearchParams,
+  userId: string,
+):
+  | { ok: true; plan?: { free: boolean; account: string } }
+  | { ok: false; error: string } {
+  const free = params.get('free');
+  if (free === null) return { ok: true };
+  if (free !== 'true' && free !== 'false') {
+    return { ok: false, error: '"free" must be true or false.' };
+  }
+  const account = params.get('account') ?? userId;
+  if (account === '') {
+    return { ok: false, error: '"account" must not be empty.' };
+  }
+  return { ok: true, plan: { free: free === 'true', account } };
 }

@@ -112,7 +112,8 @@ export interface SharePreview {
     files: { path: string; content: string }[],
     mediaOwner: string,
   ): Promise<PreviewStatus>;
-  status(key: string): Promise<PreviewStatus | null>;
+  /** `mediaOwner` is whose plan a queued preview takes (D158). */
+  status(key: string, mediaOwner: string): Promise<PreviewStatus | null>;
 }
 
 export interface ShareDeps {
@@ -251,7 +252,7 @@ export async function handleShare(
   }
   const key = await sharePreviewKey(token);
   if (method === 'GET') {
-    const status = await deps.preview.status(key);
+    const status = await deps.preview.status(key, project.userId);
     return status
       ? json(status)
       : json(

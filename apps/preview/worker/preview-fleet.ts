@@ -3,6 +3,7 @@ import {
   ACCOUNT_MAX_IN_FLIGHT,
   BUILD_MAX_IN_FLIGHT,
   FLEET_NAME,
+  PAID_PREVIEW_RESERVED,
 } from './capacity.ts';
 import {
   HARD_LIFETIME_MS,
@@ -12,6 +13,8 @@ import {
   toActivate,
 } from './fleet.ts';
 import type { FleetKind, QueueRow } from './fleet.ts';
+import { countedSince, dailyLimitMs, mayStart } from './free-previews.ts';
+import type { PreviewSession } from './free-previews.ts';
 
 /**
  * The account-wide container gate (docs/decisions.md L9: 25 concurrent
@@ -47,15 +50,38 @@ export interface EnqueueResult {
    * in line to report.
    */
   position?: number;
+  /**
+   * A Free preview refused because its account's day is spent (D158). No
+   * row was written, so there is nothing to poll or give back, and `id` is
+   * zero.
+   */
+  limited?: true;
 }
+
+/** What the fleet reads from its deployment. */
+export interface FleetEnv {
+  /** Minutes a day a Free account's previews may hold a container (D158). */
+  VIBLD_FREE_PREVIEW_DAILY_MINUTES?: string;
+}
+
+/**
+ * How long a Free session is kept: two days, so a session that began
+ * before yesterday's midnight is still there to count today.
+ */
+const FREE_SESSION_KEPT_MS = 2 * 24 * 60 * 60_000;
 
 export interface StatusResult {
   active: boolean;
   position?: number;
+  /**
+   * A queued Free preview closed rather than admitted, because its
+   * account's day was spent while it waited (D158, internal PR 376 review).
+   */
+  limited?: true;
 }
 
-export class PreviewFleet extends DurableObject<unknown> {
-  constructor(ctx: DurableObjectState, env: unknown) {
+export class PreviewFleet extends DurableObject<FleetEnv> {
+  constructor(ctx: DurableObjectState, env: FleetEnv) {
     super(ctx, env);
     void ctx.blockConcurrencyWhile(async () => {
       ctx.storage.sql.exec(`
@@ -101,6 +127,39 @@ export class PreviewFleet extends DurableObject<unknown> {
           `ALTER TABLE queue ADD COLUMN kind TEXT NOT NULL DEFAULT 'preview'`,
         );
       }
+      // Whether a preview is for a Free account (D158), added the same way.
+      // Rows from before it are paid, which is how they were admitted.
+      if (!columns.some((column) => column.name === 'free')) {
+        ctx.storage.sql.exec(
+          `ALTER TABLE queue ADD COLUMN free INTEGER NOT NULL DEFAULT 0`,
+        );
+      }
+      // Whose day a Free preview draws on (D158): the account the preview
+      // belongs to, which a shared link's sandbox name is not (internal PR 376 review).
+      if (!columns.some((column) => column.name === 'account')) {
+        ctx.storage.sql.exec(`ALTER TABLE queue ADD COLUMN account TEXT`);
+      }
+      // A queued Free row closed because its account's day ran out before
+      // it reached the front, so a poll can say why rather than wait.
+      if (!columns.some((column) => column.name === 'limited')) {
+        ctx.storage.sql.exec(
+          `ALTER TABLE queue ADD COLUMN limited INTEGER NOT NULL DEFAULT 0`,
+        );
+      }
+      // Every Free admission, kept past its queue row (which goes half an
+      // hour after release) so an account's day can be added up. One row
+      // per ticket, begun at activation and ended at release or reclaim.
+      ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS free_sessions (
+          ticket  INTEGER PRIMARY KEY,
+          account TEXT    NOT NULL,
+          began   INTEGER NOT NULL,
+          ended   INTEGER
+        )
+      `);
+      ctx.storage.sql.exec(
+        `CREATE INDEX IF NOT EXISTS free_sessions_account ON free_sessions(account, began)`,
+      );
     });
   }
 
@@ -108,7 +167,10 @@ export class PreviewFleet extends DurableObject<unknown> {
    * `label` is metadata only (who is waiting, for observability) -- it is
    * never used as a limit key. `kind` is what decides which limits apply:
    * every row counts against the whole budget, and a build against the
-   * build bound as well.
+   * build bound as well. `free` marks a Free account's preview, which may
+   * not take the containers kept for paid plans and is refused as
+   * `limited` once `account`'s day is spent (D158); it means nothing on a
+   * build, which is bounded on its own.
    *
    * A build that is not admitted on the spot is refused rather than
    * queued, and its row is closed before this returns. Its caller has a
@@ -118,23 +180,35 @@ export class PreviewFleet extends DurableObject<unknown> {
    * Closing it here rather than trusting the caller's release means no
    * failure on that path can leave one behind.
    */
-  enqueue(label: string, kind: FleetKind): EnqueueResult {
+  enqueue(
+    label: string,
+    kind: FleetKind,
+    free = false,
+    account: string = label,
+  ): EnqueueResult {
     const checked = kindOf(kind);
+    const freeRow = checked === 'preview' && free === true ? 1 : 0;
     const now = Date.now();
     this.reclaimStale(now);
+    if (freeRow === 1 && !this.dayLeft(account, now)) {
+      return { id: 0, active: false, limited: true };
+    }
 
     const [inserted] = this.ctx.storage.sql
       .exec<{ id: number }>(
-        `INSERT INTO queue (label, requested, seen, kind) VALUES (?, ?, ?, ?) RETURNING id`,
+        `INSERT INTO queue (label, requested, seen, kind, free, account) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
         label,
         now,
         now,
         checked,
+        freeRow,
+        freeRow === 1 ? account : null,
       )
       .toArray();
     const id = inserted!.id;
 
     this.promote(now);
+    if (this.wasLimited(id)) return { id: 0, active: false, limited: true };
     const result = this.describe(id);
     if (checked === 'build' && !result.active) {
       this.ctx.storage.sql.exec(
@@ -147,8 +221,18 @@ export class PreviewFleet extends DurableObject<unknown> {
     return result;
   }
 
-  /** Re-check a previously enqueued row -- promotes first, so a poll can observe a just-freed slot. */
-  status(id: number): StatusResult {
+  /**
+   * Re-check a previously enqueued row -- promotes first, so a poll can
+   * observe a just-freed slot.
+   *
+   * `plan` is what a new start says about the account now (D158). A
+   * preview still waiting takes it in place of what it was queued with, so
+   * an account that upgraded while it waited is no longer held behind the
+   * paid reserve, and one that became Free is held to its day: refused at
+   * once when the day is spent, as a new start would be (internal PR 376 review). Its
+   * place in the line is kept either way.
+   */
+  status(id: number, plan?: { free: boolean; account: string }): StatusResult {
     const now = Date.now();
     // Somebody is still waiting on this one, so it is not abandoned (internal issue 199).
     // Before the reclaim rather than after it: a poll that arrives exactly
@@ -160,7 +244,9 @@ export class PreviewFleet extends DurableObject<unknown> {
       id,
     );
     this.reclaimStale(now);
+    if (plan) this.reclassify(id, plan.free === true, plan.account, now);
     this.promote(now);
+    if (this.wasLimited(id)) return { active: false, limited: true };
     const { active, position } = this.describe(id);
     return position === undefined ? { active } : { active, position };
   }
@@ -184,7 +270,66 @@ export class PreviewFleet extends DurableObject<unknown> {
       id,
       checked,
     );
+    // Only a release that freed this preview's row ends its session: a
+    // release naming the wrong kind leaves the row holding its slot, so its
+    // time is still being spent (internal PR 376 review).
+    if (checked === 'preview') this.endSession(id, now);
     this.promote(now);
+  }
+
+  /** A waiting preview's plan, as `status` describes; admitted rows keep theirs. */
+  private reclassify(
+    id: number,
+    free: boolean,
+    account: string,
+    now: number,
+  ): void {
+    const limited = free && !this.dayLeft(account, now);
+    this.ctx.storage.sql.exec(
+      `UPDATE queue SET free = ?, account = ?, limited = ?, released = ?
+         WHERE id = ? AND kind = 'preview' AND activated IS NULL AND released IS NULL`,
+      free ? 1 : 0,
+      free ? account : null,
+      limited ? 1 : 0,
+      limited ? now : null,
+      id,
+    );
+  }
+
+  /** Whether `account` has Free preview time left today (D158). */
+  private dayLeft(account: string, now: number): boolean {
+    const sessions = this.ctx.storage.sql
+      .exec<{ began: number; ended: number | null }>(
+        `SELECT began, ended FROM free_sessions WHERE account = ? AND began >= ?`,
+        account,
+        countedSince(now),
+      )
+      .toArray() as PreviewSession[];
+    return mayStart(
+      sessions,
+      now,
+      dailyLimitMs(this.env?.VIBLD_FREE_PREVIEW_DAILY_MINUTES),
+    );
+  }
+
+  /** Whether this row was closed because its account's day ran out. */
+  private wasLimited(id: number): boolean {
+    const [row] = this.ctx.storage.sql
+      .exec<{ limited: number }>(`SELECT limited FROM queue WHERE id = ?`, id)
+      .toArray();
+    return row?.limited === 1;
+  }
+
+  /** A Free session's end, the first time its ticket stops holding a slot. */
+  private endSession(ticket: number, now: number): void {
+    this.ctx.storage.sql.exec(
+      `UPDATE free_sessions SET ended = ?
+         WHERE ticket = ? AND ended IS NULL
+           AND EXISTS (SELECT 1 FROM queue WHERE id = ? AND released IS NOT NULL)`,
+      now,
+      ticket,
+      ticket,
+    );
   }
 
   /**
@@ -228,8 +373,13 @@ export class PreviewFleet extends DurableObject<unknown> {
           now,
           row.id,
         );
+        this.endSession(row.id, now);
       }
     }
+    this.ctx.storage.sql.exec(
+      `DELETE FROM free_sessions WHERE began < ?`,
+      now - FREE_SESSION_KEPT_MS,
+    );
 
     // Released rows were kept forever, so the table grew with all
     // historical usage and every query above paid for it (internal PR 200 review).
@@ -260,12 +410,44 @@ export class PreviewFleet extends DurableObject<unknown> {
   private promote(now: number): void {
     const { total, builds } = this.activeCounts();
     const waiting = this.waitingRows();
-    for (const row of toActivate(waiting, total, ACCOUNT_MAX_IN_FLIGHT, {
-      active: builds,
-      max: BUILD_MAX_IN_FLIGHT,
-    })) {
+    for (const row of toActivate(
+      waiting,
+      total,
+      ACCOUNT_MAX_IN_FLIGHT,
+      { active: builds, max: BUILD_MAX_IN_FLIGHT },
+      PAID_PREVIEW_RESERVED,
+    )) {
+      // Checked again here, one row at a time, because another of the
+      // account's previews may have spent the day while this one waited,
+      // and an admission before it in this same loop counts too (internal PR 376
+      // review). Its slot goes unused until the next call, which is the
+      // next poll.
+      if (row.free === true) {
+        const [owner] = this.ctx.storage.sql
+          .exec<{ account: string | null }>(
+            `SELECT account FROM queue WHERE id = ?`,
+            row.id,
+          )
+          .toArray();
+        if (owner?.account && !this.dayLeft(owner.account, now)) {
+          this.ctx.storage.sql.exec(
+            `UPDATE queue SET released = ?, limited = 1 WHERE id = ?`,
+            now,
+            row.id,
+          );
+          continue;
+        }
+      }
       this.ctx.storage.sql.exec(
         `UPDATE queue SET activated = ? WHERE id = ?`,
+        now,
+        row.id,
+      );
+      // A Free preview's day starts counting the moment it holds a slot.
+      this.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO free_sessions (ticket, account, began)
+           SELECT id, account, ? FROM queue
+            WHERE id = ? AND free = 1 AND account IS NOT NULL`,
         now,
         row.id,
       );
@@ -284,10 +466,11 @@ export class PreviewFleet extends DurableObject<unknown> {
 
   private waitingRows(): QueueRow[] {
     return this.ctx.storage.sql
-      .exec<Record<string, SqlStorageValue> & QueueRow>(
-        `SELECT id, requested, kind FROM queue WHERE activated IS NULL AND released IS NULL`,
+      .exec<{ id: number; requested: number; kind: FleetKind; free: number }>(
+        `SELECT id, requested, kind, free FROM queue WHERE activated IS NULL AND released IS NULL`,
       )
-      .toArray();
+      .toArray()
+      .map(({ free, ...row }) => (free === 1 ? { ...row, free: true } : row));
   }
 
   private describe(id: number): EnqueueResult {

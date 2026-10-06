@@ -143,6 +143,29 @@ export async function tierOf(
   return (await planOf(env.DB, principal.userId)).tier;
 }
 
+/**
+ * Whether a preview for this account is a Free one (D158): held to the
+ * preview service's daily limit, and kept out of the containers reserved
+ * for paid plans. Only on a deployment that sells plans, as with
+ * `freePool`. `userId` rather than a principal, because a shared project's
+ * preview is its owner's, whoever is viewing it.
+ *
+ * A plan that cannot be read is treated as Free: that only applies the
+ * limits, and paying accounts are the ones the limits protect.
+ */
+export async function freePreviewFor(
+  env: TierEnv,
+  userId: string,
+): Promise<boolean> {
+  if (!billingConfigured(env) || !env.DB) return false;
+  try {
+    return (await planOf(env.DB, userId)).tier === 'free';
+  } catch (error) {
+    console.error('preview plan read failed', error);
+    return true;
+  }
+}
+
 /** What `planOf` answers: the tier, and the two things it was read from. */
 export interface Plan extends EffectiveTier {
   subscription: SubscriptionRecord | undefined;

@@ -241,8 +241,20 @@ paying accounts until midnight UTC.
   day only, so they are never refused for free use. A Free run that draws on
   top-up credit leaves the share, since that is paid money. The share is a
   `pool` column in the account ledger (`apps/web/worker/budget.ts`), so
-  settlement is unchanged. A daily preview limit for Free and preview slots
-  kept for paid plans are the second half of D158, in their own change.
+  settlement is unchanged. Previews are the second half: a Free account's
+  previews hold a container for at most two hours a UTC day
+  (`VIBLD_FREE_PREVIEW_DAILY_MINUTES` on apps/preview, 120 by default),
+  counted from admission to release, per account rather than per sandbox
+  (so share links draw on the owner's day), with a session that crosses
+  midnight charged to the new day for its later part. It is checked when a
+  preview is asked for and again when a queued one is admitted, counting
+  every open session at its whole lifetime, so the one running keeps its
+  thirty minutes and parallel starts cannot each overrun. A Free preview never takes the
+  last five of the twenty-five containers (`PAID_PREVIEW_RESERVED`), so
+  Free use alone cannot fill the fleet for paid plans; a Free preview may therefore wait while
+  those five are idle, which is the one exception to L9's "queued only when
+  full". apps/web decides which previews are Free (`freePreviewFor`): the
+  account's own in the builder, the project owner's for a shared link.
 
 ### Checkpoint history, 2026-10-03
 

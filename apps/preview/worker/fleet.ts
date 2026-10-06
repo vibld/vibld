@@ -78,6 +78,12 @@ export interface QueueRow {
    * inserts, so a build is never read as a preview this way.
    */
   kind?: FleetKind;
+  /**
+   * A preview for an account on the Free plan (D158), which may not take
+   * the containers kept for paid plans (`PAID_PREVIEW_RESERVED`). Absent
+   * means paid, which is what every row was before the reserve existed.
+   */
+  free?: boolean;
 }
 
 /** How many builds hold a container now, and how many may. */
@@ -104,12 +110,22 @@ const NO_BUILD_ROOM: BuildRoom = { active: 0, max: 0 };
  * is a preview, and a container freed by either kind goes to the head of
  * the queue. A position of N therefore means N containers have to free up
  * first, whichever kind of work is holding them.
+ *
+ * A paid preview does not count the Free previews ahead of it (D158, internal PR 376
+ * review). A paid preview waits only while every container is taken, and
+ * a Free one may not start until five would stay free after it, so each
+ * container freed before then goes to the paid preview first. For the
+ * same reason a Free preview counts every paid preview waiting, wherever
+ * it is in line, and the Free previews ahead of it.
  */
 export function queuePosition(row: QueueRow, waiting: QueueRow[]): number {
-  return waiting.filter(
-    (other) =>
-      other.requested < row.requested ||
-      (other.requested === row.requested && other.id < row.id),
+  const ahead = (other: QueueRow) =>
+    other.requested < row.requested ||
+    (other.requested === row.requested && other.id < row.id);
+  return waiting.filter((other) =>
+    row.free === true
+      ? other.id !== row.id && (other.free !== true || ahead(other))
+      : other.free !== true && ahead(other),
   ).length;
 }
 
@@ -124,16 +140,23 @@ export function queuePosition(row: QueueRow, waiting: QueueRow[]): number {
  * waiting for the platform, and stopping there would queue that preview
  * while containers sit free.
  *
- * FIFO otherwise, so a preview is never passed by a later one, and a build
- * by a later build.
+ * A Free preview also needs `paidReserved` containers to stay free after it
+ * starts (D158), so the last few are kept for paid plans. It is passed over
+ * the same way, for the same reason: a paid preview behind it can use a
+ * container it may not.
+ *
+ * FIFO otherwise, so a preview is never passed by a later one of its own
+ * kind, and a build by a later build.
  */
 export function toActivate(
   waiting: QueueRow[],
   activeCount: number,
   maxInFlight: number,
   builds: BuildRoom = NO_BUILD_ROOM,
+  paidReserved = 0,
 ): QueueRow[] {
   let room = Math.max(0, maxInFlight - activeCount);
+  let freeRoom = Math.max(0, maxInFlight - paidReserved - activeCount);
   let buildRoom = Math.max(0, builds.max - builds.active);
   const admitted: QueueRow[] = [];
   const ordered = [...waiting].sort(
@@ -144,8 +167,11 @@ export function toActivate(
     if (row.kind === 'build') {
       if (buildRoom === 0) continue;
       buildRoom--;
+    } else if (row.free === true) {
+      if (freeRoom === 0) continue;
     }
     room--;
+    freeRoom = Math.max(0, freeRoom - 1);
     admitted.push(row);
   }
   return admitted;

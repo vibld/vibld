@@ -34,6 +34,7 @@ import {
 // The one fleet instance that counts every container, previews and builds
 // alike: see `capacity.ts` for how the budget is shared (internal issue 197).
 import { FLEET_NAME } from './capacity.ts';
+import { FREE_PREVIEW_LIMIT_ERROR } from './free-previews.ts';
 import {
   DEV_COMMAND,
   PREVIEW_INSTALL_TIMEOUT_MS,
@@ -328,6 +329,11 @@ export class PreviewSandbox extends Sandbox<Env> {
     owner?: string,
     // Which checkpoint these files are, when the caller knows (D74).
     revision?: string,
+    // The account is on the Free plan (D158): the fleet holds the start to
+    // the account's daily limit and keeps it out of the containers kept for
+    // paid plans. The account is `owner`, whose preview this is wherever it
+    // runs, so a shared link draws on the same day as the builder.
+    free = false,
   ): Promise<PreviewStatus> {
     // A start-up lost with an earlier instance is a failed one, so this
     // start is a retry rather than a report of it (`settleLostProvision`).
@@ -348,7 +354,13 @@ export class PreviewSandbox extends Sandbox<Env> {
       }
       // Still queued: check the *same* ticket rather than enqueueing a new
       // one, or every retry would push this caller to the back of the line.
-      const ticket = await fleet.status(existing.fleetTicketId);
+      // It carries the plan as it is now, which may not be the one it was
+      // queued under (internal PR 376 review).
+      const ticket = await fleet.status(existing.fleetTicketId, {
+        free,
+        account: owner ?? label,
+      });
+      if (ticket.limited) return this.limitedWhileQueued(existing);
       if (!ticket.active) {
         return { status: 'queued', position: ticket.position };
       }
@@ -365,7 +377,11 @@ export class PreviewSandbox extends Sandbox<Env> {
     }
 
     const startedAt = Date.now();
-    const ticket = await fleet.enqueue(label, 'preview');
+    const ticket = await fleet.enqueue(label, 'preview', free, owner ?? label);
+    // Refused for the day, before any row was written: nothing to give back.
+    if (ticket.limited) {
+      return { status: 'failed', error: FREE_PREVIEW_LIMIT_ERROR };
+    }
     if (!ticket.active) {
       await this.writeState({
         phase: 'queued',
@@ -384,6 +400,24 @@ export class PreviewSandbox extends Sandbox<Env> {
       revision,
     );
     return { status: 'installing' };
+  }
+
+  /**
+   * A queued Free preview the fleet closed because its account's day ran
+   * out while it waited (D158). Written as a failure, so the next start is
+   * a new one and is refused, or admitted tomorrow, on its own terms. The
+   * fleet already closed the row, so there is no slot to give back.
+   */
+  private async limitedWhileQueued(
+    state: PreviewState,
+  ): Promise<PreviewStatus> {
+    await this.writeState({
+      phase: 'failed',
+      startedAt: state.startedAt,
+      fleetTicketId: state.fleetTicketId,
+      error: FREE_PREVIEW_LIMIT_ERROR,
+    });
+    return { status: 'failed', error: FREE_PREVIEW_LIMIT_ERROR };
   }
 
   /**
@@ -688,7 +722,11 @@ export class PreviewSandbox extends Sandbox<Env> {
    * to settle a start-up that was lost with an earlier instance, which it
    * does once (`settleLostProvision`).
    */
-  async getPreviewStatus(): Promise<PreviewStatus> {
+  async getPreviewStatus(
+    // The account's plan as it is now (D158), which a preview still
+    // waiting takes in place of the one it was queued under (internal PR 376 review).
+    plan?: { free: boolean; account: string },
+  ): Promise<PreviewStatus> {
     const state = await this.settleLostProvision(await this.readState());
     if (!state) {
       return { status: 'failed', error: 'No preview has been started.' };
@@ -703,7 +741,9 @@ export class PreviewSandbox extends Sandbox<Env> {
     if (state.phase === 'queued') {
       const ticket = await this.env.Fleet.getByName(FLEET_NAME).status(
         state.fleetTicketId,
+        plan,
       );
+      if (ticket.limited) return this.limitedWhileQueued(state);
       return ticket.active
         ? { status: 'ready-to-start' }
         : { status: 'queued', position: ticket.position };

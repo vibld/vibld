@@ -75,3 +75,12 @@ export const ACCOUNT_MAX_IN_FLIGHT = CONTAINER_MAX_INSTANCES;
  * recently.
  */
 export const BUILD_MAX_IN_FLIGHT = 5;
+
+/**
+ * How many containers a Free preview may never take (D158, Chris,
+ * 2026-10-05), so Free use filling the fleet cannot queue paying accounts.
+ * A Free preview starts only while this many would still be free after it;
+ * paid previews and builds may use every one. Five of the twenty-five, the
+ * figure Chris agreed to.
+ */
+export const PAID_PREVIEW_RESERVED = 5;

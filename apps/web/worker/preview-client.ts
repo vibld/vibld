@@ -216,6 +216,12 @@ export function startPreview(
    * revision it serves. Omitted, it serves files under no name, as before.
    */
   revision?: string,
+  /**
+   * The account is on the Free plan (D158, `freePreviewFor`): the service
+   * holds the start to its daily limit and keeps it out of the containers
+   * reserved for paid plans.
+   */
+  free = false,
 ): Promise<PreviewStatus> {
   // A start has to answer the person who pressed the button, so an
   // unreadable reply becomes a failure here rather than nothing. The status
@@ -230,6 +236,7 @@ export function startPreview(
       files,
       ...(mediaOwner === undefined ? {} : { mediaOwner }),
       ...(revision === undefined ? {} : { revision }),
+      ...(free ? { free: true } : {}),
     }),
   }).then((status) => status ?? UNREADABLE_PREVIEW);
 }
@@ -296,15 +303,24 @@ export async function updatePreview(
     : { ok: false, error: UNREADABLE_PREVIEW.error };
 }
 
-/** `null` when the service's answer could not be read. */
+/**
+ * `null` when the service's answer could not be read.
+ *
+ * `plan` is the account's plan as it is now (D158): a preview still queued
+ * takes it, so a change of plan while it waits applies without a second
+ * start (internal PR 376 review). `account` is whose day a Free preview draws on.
+ */
 export function previewStatus(
   env: PreviewServiceEnv,
   userId: string,
+  plan?: { free: boolean; account: string },
 ): Promise<PreviewStatus | null> {
-  return call(
-    env,
-    `/internal/preview/status?userId=${encodeURIComponent(userId)}`,
-  );
+  const query = new URLSearchParams({ userId });
+  if (plan) {
+    query.set('free', String(plan.free));
+    query.set('account', plan.account);
+  }
+  return call(env, `/internal/preview/status?${query}`);
 }
 
 /**
