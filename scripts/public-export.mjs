@@ -62,12 +62,17 @@ import { pathToFileURL } from 'node:url';
  * public Dependabot pull request could only be merged by diverging from
  * this repository. Dependabot's security alerts do not need the file.
  *
+ * The launch kit in docs/launch/ (profile copy, directory listings and the
+ * images for them, D154) is kept internal for the same reason as the social
+ * launch plan.
+ *
  * The style gallery's data is exported (Chris, docs/decisions.md, D143).
  */
 export const EXCLUDE = [
   'docs/social-launch.md',
   'docs/pricing-routine.md',
   'docs/launch-email.md',
+  'docs/launch',
   '.github/dependabot.yml',
 ];
 
@@ -450,7 +455,7 @@ async function main(argv) {
   const missing = [];
   for (const path of EXCLUDE) {
     const full = join(target, ...path.split('/'));
-    if (existsSync(full)) rmSync(full);
+    if (existsSync(full)) rmSync(full, { recursive: true });
     else missing.push(path);
   }
 

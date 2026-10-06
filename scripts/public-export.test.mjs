@@ -314,6 +314,7 @@ describe('the export', () => {
       'docs/social-launch.md',
       'docs/pricing-routine.md',
       'docs/launch-email.md',
+      'docs/launch',
       '.github/dependabot.yml',
     ]);
   });
