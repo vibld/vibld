@@ -1,5 +1,21 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useLoaderData, useSearchParams } from 'react-router';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import {
+  Link,
+  useLoaderData,
+  useLocation,
+  useSearchParams,
+} from 'react-router';
+
+import {
+  TEMPLATE_GROUPS,
+  TEMPLATE_SUBCATEGORIES,
+  findSubcategory,
+  subcategoryPhrase,
+  subcategoryTitle,
+  templateGroup,
+  templateSubcategories,
+  type TemplateGroup,
+} from '@vibld/ai/design-categories';
 
 import { PageHead } from '../components/SiteChrome';
 import { TemplatePreview } from '../components/TemplatePreview';
@@ -7,10 +23,12 @@ import { approxCount } from '../counts';
 import { LAYERS } from '../layers';
 import { SITE, metaFor } from '../site';
 import type { PreviewSpec } from '../template-preview';
-import { USE_CASES } from '../use-cases';
+import { placeHref, placeOf, placePath, type Place } from '../template-places';
 
-export function meta() {
-  return metaFor('/templates');
+export { placeOf, placePath, type Place };
+
+export function meta({ location }: { location: { pathname: string } }) {
+  return metaFor(placePath(placeOf(location.pathname)));
 }
 
 export function links() {
@@ -28,7 +46,10 @@ export interface TemplateCard {
   name: string;
   summary: string;
   kind: 'site' | 'app';
-  useCase: string;
+  /** Websites, apps or app screens (D161). */
+  group: TemplateGroup;
+  /** Its subcategories' slugs, in gallery order (D161). */
+  subcategories: string[];
   category: string;
   complexity: string;
   /** A whole design, a single page, or a screen pattern (D106, D110). */
@@ -79,7 +100,10 @@ function luminance(hex: string): number {
  * the loader, which React Router keeps out of the browser bundle; the page
  * gets only what its cards draw.
  */
-export async function loader() {
+export async function loader({ request }: { request: Request }) {
+  // A client navigation asks for `<path>.data`, and that is the URL the
+  // loader is handed.
+  const place = placeOf(new URL(request.url).pathname.replace(/\.data$/, ''));
   const {
     listedDesignTemplates,
     DESIGN_TEMPLATES,
@@ -104,7 +128,8 @@ export async function loader() {
       name: t.name,
       summary: t.summary,
       kind: t.kind,
-      useCase: t.useCase,
+      group: templateGroup(t),
+      subcategories: templateSubcategories(t).map((sub) => sub.slug),
       category: t.category,
       complexity: t.complexity,
       format: t.format,
@@ -133,8 +158,20 @@ export async function loader() {
         intoName: nameOf.get(t.mergedInto!.slug) ?? t.mergedInto!.slug,
       }),
     );
+  // How many designs each category and subcategory holds, for the links
+  // between them; the page itself carries only its own place's cards.
+  const counts: Record<string, number> = {};
+  for (const card of cards) {
+    counts[card.group] = (counts[card.group] ?? 0) + 1;
+    for (const sub of card.subcategories) {
+      const key = `${card.group}/${sub}`;
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+  }
   return {
-    cards,
+    place,
+    counts,
+    cards: cards.filter((card) => inPlace(card, place)),
     merged: mergedOf('examples'),
     alternates: mergedOf('templates'),
     batches: Object.entries(DESIGN_BATCHES).map(([id, b]) => [id, b.name]) as [
@@ -143,6 +180,14 @@ export async function loader() {
     ][],
     screenTypes: [...SCREEN_TYPES].sort(),
   };
+}
+
+export function inPlace(
+  card: Pick<TemplateCard, 'group' | 'subcategories'>,
+  place: Place,
+): boolean {
+  if (place.group && card.group !== place.group) return false;
+  return !place.sub || card.subcategories.includes(place.sub);
 }
 
 /** "empty-state" as a reader says it: "Empty state". */
@@ -157,13 +202,9 @@ type Sort = 'recommended' | 'name' | 'newest';
 
 interface Filters {
   q: string;
-  /** 'design' (sites and apps, and single pages) or 'screen' (D110). */
-  format: string;
   /** A screen type, which shows screens only. */
   screen: string;
   batch: string;
-  use: string;
-  kind: string;
   tone: string;
   type: string;
   fonts: string;
@@ -172,11 +213,8 @@ interface Filters {
 
 const EMPTY: Filters = {
   q: '',
-  format: '',
   screen: '',
   batch: '',
-  use: '',
-  kind: '',
   tone: '',
   type: '',
   fonts: '',
@@ -188,11 +226,8 @@ function readFilters(params: URLSearchParams): Filters {
   const sort = get('sort');
   return {
     q: get('q'),
-    format: get('format'),
     screen: get('screen'),
     batch: get('batch'),
-    use: get('use'),
-    kind: get('kind'),
     tone: get('tone'),
     type: get('type'),
     fonts: get('fonts'),
@@ -201,8 +236,6 @@ function readFilters(params: URLSearchParams): Filters {
 }
 
 export function matches(card: TemplateCard, f: Filters): boolean {
-  if (f.format === 'screen' && card.format !== 'screen') return false;
-  if (f.format === 'design' && card.format === 'screen') return false;
   if (
     f.screen &&
     (card.format !== 'screen' ||
@@ -210,8 +243,6 @@ export function matches(card: TemplateCard, f: Filters): boolean {
   )
     return false;
   if (f.batch && card.batch !== f.batch) return false;
-  if (f.use && card.useCase !== f.use) return false;
-  if (f.kind && card.kind !== f.kind) return false;
   if (f.tone && card.tone !== f.tone) return false;
   if (f.type && card.typeStyle !== f.type) return false;
   if (f.fonts) {
@@ -225,6 +256,9 @@ export function matches(card: TemplateCard, f: Filters): boolean {
       card.name,
       card.summary,
       card.category,
+      ...card.subcategories.map(
+        (sub) => findSubcategory(card.group, sub)?.label ?? sub,
+      ),
       ...card.screenTypes,
       ...card.faces.map((face) => face.family),
     ]
@@ -258,10 +292,12 @@ export function sorted(cards: TemplateCard[], sort: Sort): TemplateCard[] {
  * for, which also keeps their typefaces from loading.
  */
 export default function Templates() {
-  const { cards, merged, alternates, batches, screenTypes } =
+  const { place, counts, cards, merged, alternates, batches, screenTypes } =
     useLoaderData<typeof loader>();
-  const designCount = cards.filter((c) => c.format !== 'screen').length;
-  const screenCount = cards.length - designCount;
+  const designCount = (counts.websites ?? 0) + (counts.apps ?? 0);
+  const screenCount = counts.screens ?? 0;
+  const head = placeHead(place, counts);
+  const showScreenTypes = !place.group || place.group === 'screens';
   const [params, setParams] = useSearchParams();
   // The page is prerendered without a query, so the first render matches it
   // and the address's filters apply once the page is hydrated; applied
@@ -294,9 +330,15 @@ export default function Templates() {
     <>
       <PageHead
         eyebrow="Templates"
-        title="Designs to start from"
-        lead={`${approxCount(designCount)} app and website designs and ${approxCount(screenCount)} app screens to add to them, each with a palette whose every text pair passes WCAG AA and a build prompt a coding agent can follow. Every design has its own typefaces.`}
-      />
+        title={head.title}
+        lead={
+          place.group
+            ? head.lead
+            : `${approxCount(designCount)} app and website designs and ${approxCount(screenCount)} app screens to add to them, each with a palette whose every text pair passes WCAG AA and a build prompt a coding agent can follow. Every design has its own typefaces.`
+        }
+      >
+        <CategoryNav place={place} counts={counts} />
+      </PageHead>
       <section
         className="lb-section lb-section--tight"
         aria-labelledby="gallery-title"
@@ -321,37 +363,17 @@ export default function Templates() {
                 onChange={(event) => set('q', event.target.value)}
               />
             </label>
-            <Select
-              label="Show"
-              value={filters.format}
-              onChange={(v) => set('format', v)}
-              anyLabel="Designs and screens"
-              options={[
-                ['design', 'Designs'],
-                ['screen', 'App screens'],
-              ]}
-            />
-            <Select
-              label="Screen type"
-              value={filters.screen}
-              onChange={(v) => set('screen', v)}
-              options={screenTypes.map((type) => [type, screenTypeLabel(type)])}
-            />
-            <Select
-              label="Use case"
-              value={filters.use}
-              onChange={(v) => set('use', v)}
-              options={USE_CASES.map((u) => [u.slug, u.label])}
-            />
-            <Select
-              label="Kind"
-              value={filters.kind}
-              onChange={(v) => set('kind', v)}
-              options={[
-                ['site', 'Websites'],
-                ['app', 'Apps'],
-              ]}
-            />
+            {showScreenTypes ? (
+              <Select
+                label="Screen type"
+                value={filters.screen}
+                onChange={(v) => set('screen', v)}
+                options={screenTypes.map((type) => [
+                  type,
+                  screenTypeLabel(type),
+                ])}
+              />
+            ) : null}
             <Select
               label="Tone"
               value={filters.tone}
@@ -406,7 +428,7 @@ export default function Templates() {
               ? 'No design matches all of these.'
               : filtered
                 ? `${approxCount(results.length)} ${results.length === 1 ? 'entry matches' : 'entries match'}.`
-                : `${approxCount(results.length)} designs and screens.`}{' '}
+                : `${approxCount(results.length)} ${head.noun}.`}{' '}
             {filtered ? (
               <button
                 type="button"
@@ -592,10 +614,112 @@ export function TemplateCardView({
           <p className="lb-tpl__facts">
             {card.format === 'screen'
               ? `App screen · ${screenTypeLabel(card.category)}`
-              : `${card.format === 'page' ? 'Single page' : card.kind === 'app' ? 'App' : 'Website'} · ${card.category.replace(/-/g, ' ')}`}
+              : `${card.format === 'page' ? 'Single page' : card.kind === 'app' ? 'App' : 'Website'} · ${card.subcategories.map((sub) => findSubcategory(card.group, sub)?.label ?? sub).join(', ')}`}
           </p>
         </div>
       </Link>
     </li>
+  );
+}
+
+/** The heading, lead and noun for a place in the catalog (D161). */
+export function placeHead(
+  place: Place,
+  counts: Record<string, number>,
+): { title: string; lead: string; noun: string } {
+  const group = TEMPLATE_GROUPS.find((g) => g.slug === place.group);
+  if (!group) {
+    return {
+      title: 'Designs to start from',
+      lead: '',
+      noun: 'designs and screens',
+    };
+  }
+  const sub = place.sub ? findSubcategory(group.slug, place.sub) : undefined;
+  const n =
+    counts[place.sub ? `${place.group}/${place.sub}` : place.group] ?? 0;
+  const things =
+    group.slug === 'screens'
+      ? 'app screens'
+      : `${group.noun} ${n === 1 ? 'design' : 'designs'}`;
+  const lead =
+    group.slug === 'screens'
+      ? `${approxCount(n)} app screens, such as dashboards, settings pages and empty states, to add to any app design. Each one is built in the design system of the template it joins.`
+      : `${approxCount(n)} ${sub ? `${subcategoryPhrase(sub)} ` : ''}${things}, ${n === 1 ? 'with' : 'each with'} a palette whose every text pair passes WCAG AA, its own typefaces and a build prompt to start a project from.`;
+  return {
+    title: sub
+      ? subcategoryTitle(sub)
+      : `${group.noun.charAt(0).toUpperCase()}${group.noun.slice(1)} templates`,
+    lead,
+    noun: things,
+  };
+}
+
+/**
+ * The categories and subcategories as links (D161), the way
+ * lovable.dev/templates lays out its own: every place is a page of its own,
+ * and the filters in the address go with you between them.
+ */
+function CategoryNav({
+  place,
+  counts,
+}: {
+  place: Place;
+  counts: Record<string, number>;
+}) {
+  const { search } = useLocation();
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  // As prerendered, the links carry no query; the address's own applies once
+  // hydrated, as the filters do. A screen type goes only where screens are
+  // listed: elsewhere it would hide every card behind a filter not shown.
+  const to = (p: Place) => placeHref(p, hydrated ? search : '');
+  // Every subcategory on /templates, by category; a category's own on its
+  // pages. App screens are sorted by screen type in the filters instead.
+  const rows = TEMPLATE_GROUPS.filter(
+    (g) => g.slug !== 'screens' && (!place.group || g.slug === place.group),
+  ).map((g) => ({
+    label: place.group ? 'Subcategory' : g.label,
+    subs: TEMPLATE_SUBCATEGORIES.filter((sub) => sub.group === g.slug),
+  }));
+  const link = (p: Place, label: string, count?: number) => {
+    const current = p.group === place.group && p.sub === place.sub;
+    return (
+      <li key={placePath(p)}>
+        <Link
+          to={to(p)}
+          aria-current={current ? 'page' : undefined}
+          preventScrollReset
+        >
+          {label}
+          {count === undefined ? null : <small>{approxCount(count)}</small>}
+        </Link>
+      </li>
+    );
+  };
+  return (
+    <nav className="lb-tcats" aria-label="Template categories">
+      <p className="lb-tcats__label">Category</p>
+      <ul className="lb-chiplinks">
+        {link({ group: '', sub: '' }, 'All')}
+        {TEMPLATE_GROUPS.map((g) =>
+          link({ group: g.slug, sub: '' }, g.label, counts[g.slug]),
+        )}
+      </ul>
+      {rows.map((row) => (
+        <Fragment key={row.label}>
+          <p className="lb-tcats__label">{row.label}</p>
+          <ul className="lb-chiplinks">
+            {row.subs.map((sub) =>
+              link(
+                { group: sub.group, sub: sub.slug },
+                sub.label,
+                counts[`${sub.group}/${sub.slug}`],
+              ),
+            )}
+          </ul>
+        </Fragment>
+      ))}
+    </nav>
   );
 }

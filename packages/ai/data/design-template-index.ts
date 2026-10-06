@@ -8,6 +8,7 @@ const data: unknown = [
     "summary": "Personal net-worth tracker",
     "kind": "app",
     "useCase": "tools",
+    "category": "business-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -18,6 +19,7 @@ const data: unknown = [
     "summary": "Kanban sales lead tracker",
     "kind": "app",
     "useCase": "tools",
+    "category": "business-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -28,6 +30,7 @@ const data: unknown = [
     "summary": "Guided home-loan payment estimator",
     "kind": "app",
     "useCase": "tools",
+    "category": "business-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -38,6 +41,7 @@ const data: unknown = [
     "summary": "Event-based usage insights dashboard",
     "kind": "app",
     "useCase": "tools",
+    "category": "business-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -48,6 +52,7 @@ const data: unknown = [
     "summary": "Branded QR code studio",
     "kind": "app",
     "useCase": "tools",
+    "category": "business-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -58,6 +63,7 @@ const data: unknown = [
     "summary": "Private in-browser document e-signing",
     "kind": "app",
     "useCase": "tools",
+    "category": "business-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -68,6 +74,7 @@ const data: unknown = [
     "summary": "Browser video trimmer",
     "kind": "app",
     "useCase": "tools",
+    "category": "business-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -78,6 +85,7 @@ const data: unknown = [
     "summary": "API documentation site",
     "kind": "app",
     "useCase": "tools",
+    "category": "developer-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -88,6 +96,7 @@ const data: unknown = [
     "summary": "Dark docs and knowledge hub",
     "kind": "app",
     "useCase": "tools",
+    "category": "developer-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -98,6 +107,7 @@ const data: unknown = [
     "summary": "Bug report and triage tracker",
     "kind": "app",
     "useCase": "tools",
+    "category": "developer-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -108,6 +118,7 @@ const data: unknown = [
     "summary": "Rubric grading workspace",
     "kind": "app",
     "useCase": "tools",
+    "category": "education",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -118,6 +129,7 @@ const data: unknown = [
     "summary": "Spaced-repetition study cards",
     "kind": "app",
     "useCase": "tools",
+    "category": "education",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -128,6 +140,7 @@ const data: unknown = [
     "summary": "Workshop sales landing page",
     "kind": "app",
     "useCase": "tools",
+    "category": "education",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -138,6 +151,7 @@ const data: unknown = [
     "summary": "Pay-period budget tracker",
     "kind": "app",
     "useCase": "tools",
+    "category": "finance",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30",
@@ -152,6 +166,7 @@ const data: unknown = [
     "summary": "Debt snowball and avalanche plan",
     "kind": "app",
     "useCase": "tools",
+    "category": "finance",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -162,6 +177,7 @@ const data: unknown = [
     "summary": "Phone-first receipt and reimbursement app",
     "kind": "app",
     "useCase": "tools",
+    "category": "finance",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -172,6 +188,7 @@ const data: unknown = [
     "summary": "Small-business money overview",
     "kind": "app",
     "useCase": "tools",
+    "category": "finance",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -182,6 +199,7 @@ const data: unknown = [
     "summary": "Company equipment tracker",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -192,6 +210,7 @@ const data: unknown = [
     "summary": "Budget vs actual dashboard",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -202,6 +221,7 @@ const data: unknown = [
     "summary": "Board finance reporting dashboard",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -212,6 +232,7 @@ const data: unknown = [
     "summary": "Rep payout and quota modeler",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -222,6 +243,7 @@ const data: unknown = [
     "summary": "Revenue funnel analytics dashboard",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -232,6 +254,7 @@ const data: unknown = [
     "summary": "Account churn-risk monitor",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -242,6 +265,7 @@ const data: unknown = [
     "summary": "Drag-and-drop deal board",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -252,6 +276,7 @@ const data: unknown = [
     "summary": "Hybrid workplace seat reservations",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -262,6 +287,7 @@ const data: unknown = [
     "summary": "Expense claim approval tool",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -272,6 +298,7 @@ const data: unknown = [
     "summary": "Hybrid workplace platform",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -282,6 +309,7 @@ const data: unknown = [
     "summary": "Applicant tracking system",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -292,6 +320,7 @@ const data: unknown = [
     "summary": "Drag-to-design billing documents",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -302,6 +331,7 @@ const data: unknown = [
     "summary": "Governed self-serve analytics",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -312,6 +342,7 @@ const data: unknown = [
     "summary": "Marketing campaign operations hub",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -322,6 +353,7 @@ const data: unknown = [
     "summary": "Self-hosted meeting scheduler",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -332,6 +364,7 @@ const data: unknown = [
     "summary": "Org chart and people directory",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -342,6 +375,7 @@ const data: unknown = [
     "summary": "Churn-risk and renewals dashboard",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -352,6 +386,7 @@ const data: unknown = [
     "summary": "Proposal and quote builder",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -362,6 +397,7 @@ const data: unknown = [
     "summary": "Small-team applicant tracker",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -372,6 +408,7 @@ const data: unknown = [
     "summary": "AI sales role-play trainer",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -382,6 +419,7 @@ const data: unknown = [
     "summary": "Internal request approval system",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -392,6 +430,7 @@ const data: unknown = [
     "summary": "Sales ROI business-case builder",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -402,6 +441,7 @@ const data: unknown = [
     "summary": "Marketing attribution explainer dashboard",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -412,6 +452,7 @@ const data: unknown = [
     "summary": "Meta tag and SERP preview tool",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -422,6 +463,7 @@ const data: unknown = [
     "summary": "Internal request routing workspace",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -432,6 +474,7 @@ const data: unknown = [
     "summary": "Multi-location inventory manager",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -442,6 +485,7 @@ const data: unknown = [
     "summary": "Freight network disruption simulator",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -452,6 +496,7 @@ const data: unknown = [
     "summary": "Friendly staff directory",
     "kind": "app",
     "useCase": "tools",
+    "category": "internal-tools",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -462,6 +507,7 @@ const data: unknown = [
     "summary": "Private daily writing journal",
     "kind": "app",
     "useCase": "tools",
+    "category": "lifestyle",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -472,6 +518,7 @@ const data: unknown = [
     "summary": "Code-driven interactive slide deck",
     "kind": "app",
     "useCase": "tools",
+    "category": "presentations",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -482,6 +529,7 @@ const data: unknown = [
     "summary": "Quarter-based roadmap planner",
     "kind": "app",
     "useCase": "tools",
+    "category": "product-management",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -492,6 +540,7 @@ const data: unknown = [
     "summary": "Feature request voting board",
     "kind": "app",
     "useCase": "tools",
+    "category": "product-management",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -502,6 +551,7 @@ const data: unknown = [
     "summary": "Real-time collaborative notes",
     "kind": "app",
     "useCase": "tools",
+    "category": "productivity",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -512,6 +562,7 @@ const data: unknown = [
     "summary": "Browser spreadsheet editor",
     "kind": "app",
     "useCase": "tools",
+    "category": "productivity",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -522,6 +573,7 @@ const data: unknown = [
     "summary": "Focus and break interval timer",
     "kind": "app",
     "useCase": "tools",
+    "category": "productivity",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -532,6 +584,7 @@ const data: unknown = [
     "summary": "Lightweight collaborative docs editor",
     "kind": "app",
     "useCase": "tools",
+    "category": "productivity",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -542,6 +595,7 @@ const data: unknown = [
     "summary": "Agile sprint delivery workspace",
     "kind": "app",
     "useCase": "tools",
+    "category": "project-management",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -552,6 +606,7 @@ const data: unknown = [
     "summary": "Drag-and-drop task board",
     "kind": "app",
     "useCase": "tools",
+    "category": "project-management",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -562,6 +617,7 @@ const data: unknown = [
     "summary": "Async sprint retrospective board",
     "kind": "app",
     "useCase": "tools",
+    "category": "project-management",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -572,6 +628,7 @@ const data: unknown = [
     "summary": "Brand identity extraction tool",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -582,6 +639,7 @@ const data: unknown = [
     "summary": "In-browser video trimming SaaS",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -592,6 +650,7 @@ const data: unknown = [
     "summary": "Team cloud storage workspace",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -602,6 +661,7 @@ const data: unknown = [
     "summary": "Social content planning calendar",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -612,6 +672,7 @@ const data: unknown = [
     "summary": "Minimalist habit tracker app",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -622,6 +683,7 @@ const data: unknown = [
     "summary": "Font discovery directory with CMS",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -632,6 +694,7 @@ const data: unknown = [
     "summary": "Infinite-canvas moodboard app",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -642,6 +705,7 @@ const data: unknown = [
     "summary": "Freelancer invoicing app",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -652,6 +716,7 @@ const data: unknown = [
     "summary": "Voice-note content scheduler",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -662,6 +727,7 @@ const data: unknown = [
     "summary": "Team objectives and key results",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -672,6 +738,7 @@ const data: unknown = [
     "summary": "Social card mockup checker",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -682,6 +749,7 @@ const data: unknown = [
     "summary": "Holiday home booking marketplace",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -692,6 +760,7 @@ const data: unknown = [
     "summary": "Startup funding directory and newsroom",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -702,6 +771,7 @@ const data: unknown = [
     "summary": "Email sign-off and QR maker",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -712,6 +782,7 @@ const data: unknown = [
     "summary": "AI trip planner",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -722,6 +793,7 @@ const data: unknown = [
     "summary": "Link shortener with click analytics",
     "kind": "app",
     "useCase": "tools",
+    "category": "saas",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -732,6 +804,7 @@ const data: unknown = [
     "summary": "Single-author essay newsletter site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "blog",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -742,6 +815,7 @@ const data: unknown = [
     "summary": "Moody cinema criticism journal",
     "kind": "site",
     "useCase": "small-business",
+    "category": "blog",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -752,6 +826,7 @@ const data: unknown = [
     "summary": "Monochrome film criticism magazine",
     "kind": "site",
     "useCase": "small-business",
+    "category": "blog",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -762,6 +837,7 @@ const data: unknown = [
     "summary": "Food culture magazine blog",
     "kind": "site",
     "useCase": "small-business",
+    "category": "blog",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -772,6 +848,7 @@ const data: unknown = [
     "summary": "Architecture and design journal",
     "kind": "site",
     "useCase": "small-business",
+    "category": "blog",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -782,6 +859,7 @@ const data: unknown = [
     "summary": "Creator newsletter landing page",
     "kind": "site",
     "useCase": "small-business",
+    "category": "blog",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -792,6 +870,7 @@ const data: unknown = [
     "summary": "Brutalist-leaning personal magazine blog",
     "kind": "site",
     "useCase": "small-business",
+    "category": "blog",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -802,6 +881,7 @@ const data: unknown = [
     "summary": "Calm wellness and living journal",
     "kind": "site",
     "useCase": "small-business",
+    "category": "blog",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -812,6 +892,7 @@ const data: unknown = [
     "summary": "Color-blocked fashion blog",
     "kind": "site",
     "useCase": "small-business",
+    "category": "blog",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -822,6 +903,7 @@ const data: unknown = [
     "summary": "Photo-led dark travel journal",
     "kind": "site",
     "useCase": "small-business",
+    "category": "blog",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -832,6 +914,7 @@ const data: unknown = [
     "summary": "Editorial travel guide publication",
     "kind": "site",
     "useCase": "small-business",
+    "category": "blog",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -842,6 +925,7 @@ const data: unknown = [
     "summary": "Bakery pickup ordering site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "ecommerce",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -852,6 +936,7 @@ const data: unknown = [
     "summary": "Charity auction platform",
     "kind": "site",
     "useCase": "small-business",
+    "category": "ecommerce",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -862,6 +947,7 @@ const data: unknown = [
     "summary": "Coffee shop ordering site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "ecommerce",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -872,6 +958,7 @@ const data: unknown = [
     "summary": "Minimalist jewelry storefront",
     "kind": "site",
     "useCase": "small-business",
+    "category": "ecommerce",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -882,6 +969,7 @@ const data: unknown = [
     "summary": "Handmade knitwear storefront",
     "kind": "site",
     "useCase": "small-business",
+    "category": "ecommerce",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -892,6 +980,7 @@ const data: unknown = [
     "summary": "Editorial homeware store",
     "kind": "site",
     "useCase": "small-business",
+    "category": "ecommerce",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -902,6 +991,7 @@ const data: unknown = [
     "summary": "Monochrome fashion pre-launch site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "ecommerce",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -912,6 +1002,7 @@ const data: unknown = [
     "summary": "Cinematic product showcase",
     "kind": "site",
     "useCase": "small-business",
+    "category": "ecommerce",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -922,6 +1013,7 @@ const data: unknown = [
     "summary": "Brutalist catalog storefront",
     "kind": "site",
     "useCase": "small-business",
+    "category": "ecommerce",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -932,6 +1024,7 @@ const data: unknown = [
     "summary": "Video creator course shop",
     "kind": "site",
     "useCase": "small-business",
+    "category": "ecommerce",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -942,6 +1035,7 @@ const data: unknown = [
     "summary": "Monospace streetwear shop",
     "kind": "site",
     "useCase": "small-business",
+    "category": "ecommerce",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -952,6 +1046,7 @@ const data: unknown = [
     "summary": "Traditional newspaper website",
     "kind": "site",
     "useCase": "small-business",
+    "category": "editorial",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -962,6 +1057,7 @@ const data: unknown = [
     "summary": "Members-only newsroom",
     "kind": "site",
     "useCase": "small-business",
+    "category": "editorial",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -972,6 +1068,7 @@ const data: unknown = [
     "summary": "Hyperlocal community news site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "editorial",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -982,6 +1079,7 @@ const data: unknown = [
     "summary": "Academic research group website",
     "kind": "site",
     "useCase": "small-business",
+    "category": "editorial",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -992,6 +1090,7 @@ const data: unknown = [
     "summary": "B2B content marketing hub",
     "kind": "site",
     "useCase": "small-business",
+    "category": "editorial",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1002,6 +1101,7 @@ const data: unknown = [
     "summary": "Markets and trade newsletter site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "editorial",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1012,6 +1112,7 @@ const data: unknown = [
     "summary": "Literary quarterly site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "editorial",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1022,6 +1123,7 @@ const data: unknown = [
     "summary": "Classic multi-topic newspaper",
     "kind": "site",
     "useCase": "small-business",
+    "category": "editorial",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1032,6 +1134,7 @@ const data: unknown = [
     "summary": "Poster-style event discovery platform",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1042,6 +1145,7 @@ const data: unknown = [
     "summary": "Event registration platform",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1052,6 +1156,7 @@ const data: unknown = [
     "summary": "Community garden website",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1062,6 +1167,7 @@ const data: unknown = [
     "summary": "Editorial wedding website",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1072,6 +1178,7 @@ const data: unknown = [
     "summary": "Scrapbook wedding invitation site",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1082,6 +1189,7 @@ const data: unknown = [
     "summary": "Destination wedding website",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1092,6 +1200,7 @@ const data: unknown = [
     "summary": "Indie tech conference site",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30",
@@ -1106,6 +1215,7 @@ const data: unknown = [
     "summary": "Conference video hub",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1116,6 +1226,7 @@ const data: unknown = [
     "summary": "Retro 1970s wedding site",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1126,6 +1237,7 @@ const data: unknown = [
     "summary": "Art-exhibition wedding site",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1136,6 +1248,7 @@ const data: unknown = [
     "summary": "Poster-style wedding site",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1146,6 +1259,7 @@ const data: unknown = [
     "summary": "Magazine-style wedding site",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1156,6 +1270,7 @@ const data: unknown = [
     "summary": "Single-scroll literary wedding page",
     "kind": "site",
     "useCase": "events",
+    "category": "events",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1166,6 +1281,7 @@ const data: unknown = [
     "summary": "Construction cost estimator landing page",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "landing-page",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1176,6 +1292,7 @@ const data: unknown = [
     "summary": "Live cohort class sign-up page",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "landing-page",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1186,6 +1303,7 @@ const data: unknown = [
     "summary": "Pre-launch waitlist page",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "landing-page",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1196,6 +1314,7 @@ const data: unknown = [
     "summary": "Dark fintech marketing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "landing-page",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1206,6 +1325,7 @@ const data: unknown = [
     "summary": "Coming-soon launch page",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "landing-page",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1216,6 +1336,7 @@ const data: unknown = [
     "summary": "Interior studio lead-gen site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "landing-page",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1226,6 +1347,7 @@ const data: unknown = [
     "summary": "Payments startup marketing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "landing-page",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1236,6 +1358,7 @@ const data: unknown = [
     "summary": "Electronic artist one-pager",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1246,6 +1369,7 @@ const data: unknown = [
     "summary": "Latin urban artist site",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1256,6 +1380,7 @@ const data: unknown = [
     "summary": "Solo artist portfolio site",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1266,6 +1391,7 @@ const data: unknown = [
     "summary": "DJ event series site",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1276,6 +1402,7 @@ const data: unknown = [
     "summary": "Photo-led artist portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1286,6 +1413,7 @@ const data: unknown = [
     "summary": "Desert-rock band website",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1296,6 +1424,7 @@ const data: unknown = [
     "summary": "Folk songwriter website",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1306,6 +1435,7 @@ const data: unknown = [
     "summary": "Mosaic electronic artist site",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1316,6 +1446,7 @@ const data: unknown = [
     "summary": "Single-release musician site",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1326,6 +1457,7 @@ const data: unknown = [
     "summary": "Cinematic neo-soul artist site",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1336,6 +1468,7 @@ const data: unknown = [
     "summary": "Post-punk band website",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1346,6 +1479,7 @@ const data: unknown = [
     "summary": "Pre-release campaign landing",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1356,6 +1490,7 @@ const data: unknown = [
     "summary": "Multi-theme artist portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1366,6 +1501,7 @@ const data: unknown = [
     "summary": "Shared listening room app",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1376,6 +1512,7 @@ const data: unknown = [
     "summary": "Dark rock band portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "music",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1386,6 +1523,7 @@ const data: unknown = [
     "summary": "Architecture practice website",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1396,6 +1534,7 @@ const data: unknown = [
     "summary": "Architecture and interiors portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1406,6 +1545,7 @@ const data: unknown = [
     "summary": "Case-study design portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1416,6 +1556,7 @@ const data: unknown = [
     "summary": "Solo consultant studio site",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1426,6 +1567,7 @@ const data: unknown = [
     "summary": "Content strategist portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1436,6 +1578,7 @@ const data: unknown = [
     "summary": "Fashion photographer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1446,6 +1589,7 @@ const data: unknown = [
     "summary": "Stylist lookbook portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1456,6 +1600,7 @@ const data: unknown = [
     "summary": "Portrait photographer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1466,6 +1611,7 @@ const data: unknown = [
     "summary": "Typographic poster resume",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1476,6 +1622,7 @@ const data: unknown = [
     "summary": "Masonry illustrator portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30",
@@ -1490,6 +1637,7 @@ const data: unknown = [
     "summary": "Brand designer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1500,6 +1648,7 @@ const data: unknown = [
     "summary": "Single-color designer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1510,6 +1659,7 @@ const data: unknown = [
     "summary": "Monospace designer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1520,6 +1670,7 @@ const data: unknown = [
     "summary": "Editorial art director portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1530,6 +1681,7 @@ const data: unknown = [
     "summary": "Brutalist split-screen design portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1540,6 +1692,7 @@ const data: unknown = [
     "summary": "Dark green brand designer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1550,6 +1703,7 @@ const data: unknown = [
     "summary": "Editorial photographer website",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1560,6 +1714,7 @@ const data: unknown = [
     "summary": "Split-screen photography portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1570,6 +1725,7 @@ const data: unknown = [
     "summary": "Dark sales copywriter showcase",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1580,6 +1736,7 @@ const data: unknown = [
     "summary": "Corner-nav product designer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1590,6 +1747,7 @@ const data: unknown = [
     "summary": "Editorial artist-designer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1600,6 +1758,7 @@ const data: unknown = [
     "summary": "Masonry architecture photography portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1610,6 +1769,7 @@ const data: unknown = [
     "summary": "Cinematic brand designer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1620,6 +1780,7 @@ const data: unknown = [
     "summary": "Swiss split-screen fine-art photo site",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1630,6 +1791,7 @@ const data: unknown = [
     "summary": "Slate-blue design director portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1640,6 +1802,7 @@ const data: unknown = [
     "summary": "Horizontal-scroll monospace photo portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1650,6 +1813,7 @@ const data: unknown = [
     "summary": "Dark 3D artist portfolio with CMS",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1660,6 +1824,7 @@ const data: unknown = [
     "summary": "Cinematic documentary photographer one-pager",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1670,6 +1835,7 @@ const data: unknown = [
     "summary": "Parallax painter portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1680,6 +1846,7 @@ const data: unknown = [
     "summary": "Carousel-led freelance designer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1690,6 +1857,7 @@ const data: unknown = [
     "summary": "Linen-toned painter portfolio with sidebar",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1700,6 +1868,7 @@ const data: unknown = [
     "summary": "Dark design lead portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1710,6 +1879,7 @@ const data: unknown = [
     "summary": "Product designer and speaker site",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1720,6 +1890,7 @@ const data: unknown = [
     "summary": "Typographic nature photographer site",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1730,6 +1901,7 @@ const data: unknown = [
     "summary": "Dark parallax illustration studio portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1740,6 +1912,7 @@ const data: unknown = [
     "summary": "Editorial food photographer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1750,6 +1923,7 @@ const data: unknown = [
     "summary": "Broadsheet three-column designer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1760,6 +1934,7 @@ const data: unknown = [
     "summary": "Masthead-style product designer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1770,6 +1945,7 @@ const data: unknown = [
     "summary": "Horizontal-scroll wedding photography site",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1780,6 +1956,7 @@ const data: unknown = [
     "summary": "Warm-gradient creative director portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1790,6 +1967,7 @@ const data: unknown = [
     "summary": "Terminal-style developer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1800,6 +1978,7 @@ const data: unknown = [
     "summary": "Literary writer showcase with essays",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1810,6 +1989,7 @@ const data: unknown = [
     "summary": "Case-study-first identity studio portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1820,6 +2000,7 @@ const data: unknown = [
     "summary": "Cinematic wedding photography portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1830,6 +2011,7 @@ const data: unknown = [
     "summary": "AI-assisted film studio landing page",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "portfolio",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1840,6 +2022,7 @@ const data: unknown = [
     "summary": "Accordion designer portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "resume",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1850,6 +2033,7 @@ const data: unknown = [
     "summary": "Editorial one-page resume",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "resume",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1860,6 +2044,7 @@ const data: unknown = [
     "summary": "Timeline resume site",
     "kind": "site",
     "useCase": "portfolio",
+    "category": "resume",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1870,6 +2055,7 @@ const data: unknown = [
     "summary": "Dog rescue nonprofit website",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1880,6 +2066,7 @@ const data: unknown = [
     "summary": "Personal injury law firm website",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1890,6 +2077,7 @@ const data: unknown = [
     "summary": "Plumbing company site with leads dashboard",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1900,6 +2088,7 @@ const data: unknown = [
     "summary": "Italian restaurant website",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1910,6 +2099,7 @@ const data: unknown = [
     "summary": "Pet boarding hotel booking site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1920,6 +2110,7 @@ const data: unknown = [
     "summary": "Small-group pet boarding and daycare site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1930,6 +2121,7 @@ const data: unknown = [
     "summary": "Editorial charitable foundation site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1940,6 +2132,7 @@ const data: unknown = [
     "summary": "Dog grooming and boarding site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1950,6 +2143,7 @@ const data: unknown = [
     "summary": "Coaching practice site with booking and CMS",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1960,6 +2154,7 @@ const data: unknown = [
     "summary": "Language school enrollment site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1970,6 +2165,7 @@ const data: unknown = [
     "summary": "Monochrome branding studio portfolio",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1980,6 +2176,7 @@ const data: unknown = [
     "summary": "Luxury pet resort landing page",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -1990,6 +2187,7 @@ const data: unknown = [
     "summary": "Dog daycare landing page",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -2000,6 +2198,7 @@ const data: unknown = [
     "summary": "In-home pet sitter booking site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -2010,6 +2209,7 @@ const data: unknown = [
     "summary": "Dark photography school site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -2020,6 +2220,7 @@ const data: unknown = [
     "summary": "Kennel website with owner dashboard",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -2030,6 +2231,7 @@ const data: unknown = [
     "summary": "Multi-location pet care franchise hub",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -2040,6 +2242,7 @@ const data: unknown = [
     "summary": "Multi-location wellness studio site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -2050,6 +2253,7 @@ const data: unknown = [
     "summary": "Barbershop booking one-pager",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -2060,6 +2264,7 @@ const data: unknown = [
     "summary": "Salon and spa booking storefront",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -2070,6 +2275,7 @@ const data: unknown = [
     "summary": "Editorial yoga and wellness platform",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -2080,6 +2286,7 @@ const data: unknown = [
     "summary": "Off-grid glamping booking site",
     "kind": "site",
     "useCase": "small-business",
+    "category": "services",
     "format": "design",
     "batch": "design-catalog",
     "addedOn": "2026-09-30"
@@ -2090,6 +2297,7 @@ const data: unknown = [
     "summary": "Final wizard step reviewing AI-generated items",
     "kind": "app",
     "useCase": "tools",
+    "category": "account-setup",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2100,6 +2308,7 @@ const data: unknown = [
     "summary": "Topic-selection onboarding step with tips panel",
     "kind": "app",
     "useCase": "tools",
+    "category": "account-setup",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2110,6 +2319,7 @@ const data: unknown = [
     "summary": "Tool-picker onboarding step with logo tile grid",
     "kind": "app",
     "useCase": "tools",
+    "category": "account-setup",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2120,6 +2330,7 @@ const data: unknown = [
     "summary": "Community profile-completion form card",
     "kind": "app",
     "useCase": "tools",
+    "category": "account-setup",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2130,6 +2341,7 @@ const data: unknown = [
     "summary": "Create batch crawl job form in developer console",
     "kind": "app",
     "useCase": "tools",
+    "category": "add-edit",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2140,6 +2352,7 @@ const data: unknown = [
     "summary": "Create storage bucket form with region toggle cards",
     "kind": "app",
     "useCase": "tools",
+    "category": "add-edit",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2150,6 +2363,7 @@ const data: unknown = [
     "summary": "Lead-capture form builder with field palette",
     "kind": "app",
     "useCase": "tools",
+    "category": "add-edit",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2160,6 +2374,7 @@ const data: unknown = [
     "summary": "Create API key side sheet",
     "kind": "app",
     "useCase": "tools",
+    "category": "add-edit",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2170,6 +2385,7 @@ const data: unknown = [
     "summary": "DNS query analytics with dimension tabs and top-N breakdown",
     "kind": "app",
     "useCase": "tools",
+    "category": "analytics",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2180,6 +2396,7 @@ const data: unknown = [
     "summary": "Customizable traffic overview dashboard with KPI sparklines",
     "kind": "app",
     "useCase": "tools",
+    "category": "analytics",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2190,6 +2407,7 @@ const data: unknown = [
     "summary": "Web-performance vitals overview page",
     "kind": "app",
     "useCase": "tools",
+    "category": "analytics",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2200,6 +2418,7 @@ const data: unknown = [
     "summary": "Review-quality monitoring dashboard for automation runs",
     "kind": "app",
     "useCase": "tools",
+    "category": "analytics",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2210,6 +2429,7 @@ const data: unknown = [
     "summary": "Brand settings with logo, color and live checkout preview",
     "kind": "app",
     "useCase": "tools",
+    "category": "appearance",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2220,6 +2440,7 @@ const data: unknown = [
     "summary": "Booking-page appearance settings with theme and layout thumbnails",
     "kind": "app",
     "useCase": "tools",
+    "category": "appearance",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2230,6 +2451,7 @@ const data: unknown = [
     "summary": "Onboarding theme picker for a public profile page",
     "kind": "app",
     "useCase": "tools",
+    "category": "appearance",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2240,6 +2462,7 @@ const data: unknown = [
     "summary": "Dark color-token customizer for an interactive quiz builder",
     "kind": "app",
     "useCase": "tools",
+    "category": "appearance",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2250,6 +2473,7 @@ const data: unknown = [
     "summary": "Employee time-off calendar with balance summary",
     "kind": "app",
     "useCase": "tools",
+    "category": "calendar",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2260,6 +2484,7 @@ const data: unknown = [
     "summary": "Public three-column booking widget (event, month, slots)",
     "kind": "app",
     "useCase": "tools",
+    "category": "calendar",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2270,6 +2495,7 @@ const data: unknown = [
     "summary": "Dark week-view calendar with calendar list and color-coded events",
     "kind": "app",
     "useCase": "tools",
+    "category": "calendar",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2280,6 +2506,7 @@ const data: unknown = [
     "summary": "Dark personal planner with task buckets and day timeline",
     "kind": "app",
     "useCase": "tools",
+    "category": "calendar",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2290,6 +2517,7 @@ const data: unknown = [
     "summary": "AI data-analyst chat with side-by-side chart artifact",
     "kind": "app",
     "useCase": "tools",
+    "category": "chat",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2300,6 +2528,7 @@ const data: unknown = [
     "summary": "AI business-advisor chat with tabbed conversations and table answers",
     "kind": "app",
     "useCase": "tools",
+    "category": "chat",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2310,6 +2539,7 @@ const data: unknown = [
     "summary": "Reading-first AI chat feed with serif answers and inline citations",
     "kind": "app",
     "useCase": "tools",
+    "category": "chat",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2320,6 +2550,7 @@ const data: unknown = [
     "summary": "Agent builder with training chat, file tree and runs panel",
     "kind": "app",
     "useCase": "tools",
+    "category": "chat",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2330,6 +2561,7 @@ const data: unknown = [
     "summary": "Task list with filter chips and subtask detail pane",
     "kind": "app",
     "useCase": "tools",
+    "category": "checklist",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2340,6 +2572,7 @@ const data: unknown = [
     "summary": "Top-up payment-method modal over a usage console",
     "kind": "app",
     "useCase": "tools",
+    "category": "checkout",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2350,6 +2583,7 @@ const data: unknown = [
     "summary": "Add payment details modal over billing settings",
     "kind": "app",
     "useCase": "tools",
+    "category": "checkout",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2360,6 +2594,7 @@ const data: unknown = [
     "summary": "Dark two-column workspace plan checkout",
     "kind": "app",
     "useCase": "tools",
+    "category": "checkout",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2370,6 +2605,7 @@ const data: unknown = [
     "summary": "Plan change payment modal over pricing tiers",
     "kind": "app",
     "useCase": "tools",
+    "category": "checkout",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2380,6 +2616,7 @@ const data: unknown = [
     "summary": "Review-and-confirm step for a currency conversion",
     "kind": "app",
     "useCase": "tools",
+    "category": "confirmation",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2390,6 +2627,7 @@ const data: unknown = [
     "summary": "Mode comparison confirmation dialog before running a job",
     "kind": "app",
     "useCase": "tools",
+    "category": "confirmation",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2400,6 +2638,7 @@ const data: unknown = [
     "summary": "Redirect-to-partner interstitial with trust points",
     "kind": "app",
     "useCase": "tools",
+    "category": "confirmation",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2410,6 +2649,7 @@ const data: unknown = [
     "summary": "Third-party connector authorization consent dialog",
     "kind": "app",
     "useCase": "tools",
+    "category": "confirmation",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2420,6 +2660,7 @@ const data: unknown = [
     "summary": "CRM sales dashboard with photo hero and stale-deal list",
     "kind": "app",
     "useCase": "tools",
+    "category": "dashboard",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2430,6 +2671,7 @@ const data: unknown = [
     "summary": "Account repositories overview table in settings",
     "kind": "app",
     "useCase": "tools",
+    "category": "dashboard",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2440,6 +2682,7 @@ const data: unknown = [
     "summary": "Headless CMS project home with notifications panel",
     "kind": "app",
     "useCase": "tools",
+    "category": "dashboard",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2450,6 +2693,7 @@ const data: unknown = [
     "summary": "Logo lookup API product page with snippet and usage",
     "kind": "app",
     "useCase": "tools",
+    "category": "dashboard",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2460,6 +2704,7 @@ const data: unknown = [
     "summary": "Double type-to-confirm delete API dialog",
     "kind": "app",
     "useCase": "tools",
+    "category": "delete-account",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2470,6 +2715,7 @@ const data: unknown = [
     "summary": "Delete-account dialog with acknowledgment checkbox in a task app",
     "kind": "app",
     "useCase": "tools",
+    "category": "delete-account",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2480,6 +2726,7 @@ const data: unknown = [
     "summary": "Compact delete-account alert dialog",
     "kind": "app",
     "useCase": "tools",
+    "category": "delete-account",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2490,6 +2737,7 @@ const data: unknown = [
     "summary": "Workspace-deleted confirmation email",
     "kind": "app",
     "useCase": "tools",
+    "category": "delete-account",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2500,6 +2748,7 @@ const data: unknown = [
     "summary": "CRM deal detail page with metric cards and AI follow-up draft",
     "kind": "app",
     "useCase": "tools",
+    "category": "details",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2510,6 +2759,7 @@ const data: unknown = [
     "summary": "API endpoint reference with code example panel",
     "kind": "app",
     "useCase": "tools",
+    "category": "details",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2520,6 +2770,7 @@ const data: unknown = [
     "summary": "Batch crawl job detail with progress and input summary",
     "kind": "app",
     "useCase": "tools",
+    "category": "details",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2530,6 +2781,7 @@ const data: unknown = [
     "summary": "Model repository overview with getting-started cards",
     "kind": "app",
     "useCase": "tools",
+    "category": "details",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2540,6 +2792,7 @@ const data: unknown = [
     "summary": "Onboarding question with two-column radio tile grid",
     "kind": "app",
     "useCase": "tools",
+    "category": "discovery-questions",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2550,6 +2803,7 @@ const data: unknown = [
     "summary": "Personalized welcome question with icon choice cards",
     "kind": "app",
     "useCase": "tools",
+    "category": "discovery-questions",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2560,6 +2814,7 @@ const data: unknown = [
     "summary": "Single-question discovery step for an AI agent builder",
     "kind": "app",
     "useCase": "tools",
+    "category": "discovery-questions",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2570,6 +2825,7 @@ const data: unknown = [
     "summary": "Welcome attribution survey (single choice)",
     "kind": "app",
     "useCase": "tools",
+    "category": "discovery-questions",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2580,6 +2836,7 @@ const data: unknown = [
     "summary": "Batch scraping empty state in a developer API console",
     "kind": "app",
     "useCase": "tools",
+    "category": "empty-state",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2590,6 +2847,7 @@ const data: unknown = [
     "summary": "Storage usage tab with blurred ghost-preview empty state",
     "kind": "app",
     "useCase": "tools",
+    "category": "empty-state",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2600,6 +2858,7 @@ const data: unknown = [
     "summary": "Company watchlists empty state in a news-events API console",
     "kind": "app",
     "useCase": "tools",
+    "category": "empty-state",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2610,6 +2869,7 @@ const data: unknown = [
     "summary": "API keys page with empty state and create action",
     "kind": "app",
     "useCase": "tools",
+    "category": "empty-state",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2620,6 +2880,7 @@ const data: unknown = [
     "summary": "Sales sequence overview with stat row and ordered steps",
     "kind": "app",
     "useCase": "tools",
+    "category": "flowchart",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2630,6 +2891,7 @@ const data: unknown = [
     "summary": "Campaign journey builder with step wizard and block palette",
     "kind": "app",
     "useCase": "tools",
+    "category": "flowchart",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2640,6 +2902,7 @@ const data: unknown = [
     "summary": "Visual workflow builder canvas for AI agents",
     "kind": "app",
     "useCase": "tools",
+    "category": "flowchart",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2650,6 +2913,7 @@ const data: unknown = [
     "summary": "Fraud rules strategy builder (left-to-right decision pipeline)",
     "kind": "app",
     "useCase": "tools",
+    "category": "flowchart",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2660,6 +2924,7 @@ const data: unknown = [
     "summary": "Object-storage bucket files page with upload options",
     "kind": "app",
     "useCase": "tools",
+    "category": "import-export",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2670,6 +2935,7 @@ const data: unknown = [
     "summary": "Headless CMS media asset library grid with saved views",
     "kind": "app",
     "useCase": "tools",
+    "category": "import-export",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2680,6 +2946,7 @@ const data: unknown = [
     "summary": "Map export modal with live print-layout preview",
     "kind": "app",
     "useCase": "tools",
+    "category": "import-export",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2690,6 +2957,7 @@ const data: unknown = [
     "summary": "Enriched contact list with export popover and email-quality filters",
     "kind": "app",
     "useCase": "tools",
+    "category": "import-export",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2700,6 +2968,7 @@ const data: unknown = [
     "summary": "Help desk inbox with AI question/summary note and details sidebar",
     "kind": "app",
     "useCase": "tools",
+    "category": "inbox",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2710,6 +2979,7 @@ const data: unknown = [
     "summary": "Dark-mode team workspace inbox with grouped threads",
     "kind": "app",
     "useCase": "tools",
+    "category": "inbox",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2720,6 +2990,7 @@ const data: unknown = [
     "summary": "Personal task inbox with scenic side panel",
     "kind": "app",
     "useCase": "tools",
+    "category": "inbox",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2730,6 +3001,7 @@ const data: unknown = [
     "summary": "Shared support inbox with AI conversation summary",
     "kind": "app",
     "useCase": "tools",
+    "category": "inbox",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2740,6 +3012,7 @@ const data: unknown = [
     "summary": "Model Context Protocol server configuration settings",
     "kind": "app",
     "useCase": "tools",
+    "category": "integrations",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2750,6 +3023,7 @@ const data: unknown = [
     "summary": "AI agent configuration page inside grouped project settings",
     "kind": "app",
     "useCase": "tools",
+    "category": "integrations",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2760,6 +3034,7 @@ const data: unknown = [
     "summary": "Connected-apps list in account settings",
     "kind": "app",
     "useCase": "tools",
+    "category": "integrations",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2770,6 +3045,7 @@ const data: unknown = [
     "summary": "Data-sync-in-progress side sheet with explainer video",
     "kind": "app",
     "useCase": "tools",
+    "category": "integrations",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2780,6 +3056,7 @@ const data: unknown = [
     "summary": "Invite-teammates step in a split setup modal",
     "kind": "app",
     "useCase": "tools",
+    "category": "invite-team",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2790,6 +3067,7 @@ const data: unknown = [
     "summary": "Invite-members modal with role cards",
     "kind": "app",
     "useCase": "tools",
+    "category": "invite-team",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2800,6 +3078,7 @@ const data: unknown = [
     "summary": "Minimal project team settings with inline invite",
     "kind": "app",
     "useCase": "tools",
+    "category": "invite-team",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2810,6 +3089,7 @@ const data: unknown = [
     "summary": "Invite-users drawer over team security settings",
     "kind": "app",
     "useCase": "tools",
+    "category": "invite-team",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2820,6 +3100,7 @@ const data: unknown = [
     "summary": "Search-run progress screen with locked configuration panel",
     "kind": "app",
     "useCase": "tools",
+    "category": "loading",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2830,6 +3111,7 @@ const data: unknown = [
     "summary": "Full-screen analysis loading screen with dot-matrix field",
     "kind": "app",
     "useCase": "tools",
+    "category": "loading",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2840,6 +3122,7 @@ const data: unknown = [
     "summary": "CSV import uploading step with stepper",
     "kind": "app",
     "useCase": "tools",
+    "category": "loading",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2850,6 +3133,7 @@ const data: unknown = [
     "summary": "Usage analytics dashboard in skeleton loading state",
     "kind": "app",
     "useCase": "tools",
+    "category": "loading",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2860,6 +3144,7 @@ const data: unknown = [
     "summary": "Provider-first sign-in with icon button row",
     "kind": "app",
     "useCase": "tools",
+    "category": "login",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2870,6 +3155,7 @@ const data: unknown = [
     "summary": "Dark sign-in with light-beam backdrop",
     "kind": "app",
     "useCase": "tools",
+    "category": "login",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2880,6 +3166,7 @@ const data: unknown = [
     "summary": "Email-first sign-in with social options",
     "kind": "app",
     "useCase": "tools",
+    "category": "login",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2890,6 +3177,7 @@ const data: unknown = [
     "summary": "Sign-in page with globe map illustration",
     "kind": "app",
     "useCase": "tools",
+    "category": "login",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2900,6 +3188,7 @@ const data: unknown = [
     "summary": "Start-from-template onboarding modal with photo panel",
     "kind": "app",
     "useCase": "tools",
+    "category": "onboarding",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2910,6 +3199,7 @@ const data: unknown = [
     "summary": "Cloud coding-agent onboarding with product preview",
     "kind": "app",
     "useCase": "tools",
+    "category": "onboarding",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2920,6 +3210,7 @@ const data: unknown = [
     "summary": "Static-site project setup guide popover",
     "kind": "app",
     "useCase": "tools",
+    "category": "onboarding",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2930,6 +3221,7 @@ const data: unknown = [
     "summary": "Onboarding-complete card with API key and agent setup",
     "kind": "app",
     "useCase": "tools",
+    "category": "onboarding",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2940,6 +3232,7 @@ const data: unknown = [
     "summary": "Billing plans section inside workspace settings",
     "kind": "app",
     "useCase": "tools",
+    "category": "plans",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2950,6 +3243,7 @@ const data: unknown = [
     "summary": "Subscribe-to-paid-plan page with billing period tabs",
     "kind": "app",
     "useCase": "tools",
+    "category": "plans",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2960,6 +3254,7 @@ const data: unknown = [
     "summary": "Plans-and-billing page with comparison table",
     "kind": "app",
     "useCase": "tools",
+    "category": "plans",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2970,6 +3265,7 @@ const data: unknown = [
     "summary": "Dark in-app plan picker with billing toggle",
     "kind": "app",
     "useCase": "tools",
+    "category": "plans",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2980,6 +3276,7 @@ const data: unknown = [
     "summary": "Past-searches list with status and actions",
     "kind": "app",
     "useCase": "tools",
+    "category": "playground",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -2990,6 +3287,7 @@ const data: unknown = [
     "summary": "Text-to-speech playground with voice and model panel",
     "kind": "app",
     "useCase": "tools",
+    "category": "playground",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3000,6 +3298,7 @@ const data: unknown = [
     "summary": "In-browser model workspace with chat terminal, files and shell",
     "kind": "app",
     "useCase": "tools",
+    "category": "playground",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3010,6 +3309,7 @@ const data: unknown = [
     "summary": "AI assistant playground with config panel and test thread",
     "kind": "app",
     "useCase": "tools",
+    "category": "playground",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3020,6 +3320,7 @@ const data: unknown = [
     "summary": "Final onboarding step modal with embedded explainer video",
     "kind": "app",
     "useCase": "tools",
+    "category": "product-tour",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3030,6 +3331,7 @@ const data: unknown = [
     "summary": "Workspace home with dimmed-overlay onboarding tip card",
     "kind": "app",
     "useCase": "tools",
+    "category": "product-tour",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3040,6 +3342,7 @@ const data: unknown = [
     "summary": "Dark command-palette product tour step",
     "kind": "app",
     "useCase": "tools",
+    "category": "product-tour",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3050,6 +3353,7 @@ const data: unknown = [
     "summary": "Tour-complete modal over an app launcher home",
     "kind": "app",
     "useCase": "tools",
+    "category": "product-tour",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3060,6 +3364,7 @@ const data: unknown = [
     "summary": "Money-app referral page with share-link hero and reward cards",
     "kind": "app",
     "useCase": "tools",
+    "category": "referral",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3070,6 +3375,7 @@ const data: unknown = [
     "summary": "Referral program tab inside account settings",
     "kind": "app",
     "useCase": "tools",
+    "category": "referral",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3080,6 +3386,7 @@ const data: unknown = [
     "summary": "Freelancer referral dashboard with email-chip invites and activity table",
     "kind": "app",
     "useCase": "tools",
+    "category": "referral",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3090,6 +3397,7 @@ const data: unknown = [
     "summary": "Reading-app invite-friends modal with reward progress",
     "kind": "app",
     "useCase": "tools",
+    "category": "referral",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3100,6 +3408,7 @@ const data: unknown = [
     "summary": "AI model hub welcome page with persona chips and illustrated destination cards",
     "kind": "app",
     "useCase": "tools",
+    "category": "search",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3110,6 +3419,7 @@ const data: unknown = [
     "summary": "AI chat app search modal for past chats and projects",
     "kind": "app",
     "useCase": "tools",
+    "category": "search",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3120,6 +3430,7 @@ const data: unknown = [
     "summary": "Analytics workspace global search modal with filter chips and grouped results",
     "kind": "app",
     "useCase": "tools",
+    "category": "search",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3130,6 +3441,7 @@ const data: unknown = [
     "summary": "Presentation workspace command menu with single-key shortcuts",
     "kind": "app",
     "useCase": "tools",
+    "category": "search",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3140,6 +3452,7 @@ const data: unknown = [
     "summary": "Storage bucket settings with CDN region toggles and access control",
     "kind": "app",
     "useCase": "tools",
+    "category": "settings",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3150,6 +3463,7 @@ const data: unknown = [
     "summary": "Headless CMS component editor with localized fields and live preview",
     "kind": "app",
     "useCase": "tools",
+    "category": "settings",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3160,6 +3474,7 @@ const data: unknown = [
     "summary": "API product billing settings with credit meter",
     "kind": "app",
     "useCase": "tools",
+    "category": "settings",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3170,6 +3485,7 @@ const data: unknown = [
     "summary": "Agent platform data-retention settings with purge controls",
     "kind": "app",
     "useCase": "tools",
+    "category": "settings",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3180,6 +3496,7 @@ const data: unknown = [
     "summary": "Presentation export dialog with format cards and watermark upsell",
     "kind": "app",
     "useCase": "tools",
+    "category": "share",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3190,6 +3507,7 @@ const data: unknown = [
     "summary": "Data canvas share popover with app link, embed code and publish-to-web",
     "kind": "app",
     "useCase": "tools",
+    "category": "share",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3200,6 +3518,7 @@ const data: unknown = [
     "summary": "Dark quiz-builder share and embed settings",
     "kind": "app",
     "useCase": "tools",
+    "category": "share",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3210,6 +3529,7 @@ const data: unknown = [
     "summary": "Fundraiser share sheet with channel grid",
     "kind": "app",
     "useCase": "tools",
+    "category": "share",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3220,6 +3540,7 @@ const data: unknown = [
     "summary": "Split sign-up screen with pixel-art brand mark",
     "kind": "app",
     "useCase": "tools",
+    "category": "sign-up",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3230,6 +3551,7 @@ const data: unknown = [
     "summary": "Community sign-up card on a pastel gradient",
     "kind": "app",
     "useCase": "tools",
+    "category": "sign-up",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3240,6 +3562,7 @@ const data: unknown = [
     "summary": "Minimal sign-up form with OAuth alternatives",
     "kind": "app",
     "useCase": "tools",
+    "category": "sign-up",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3250,6 +3573,7 @@ const data: unknown = [
     "summary": "Split-screen account creation with testimonial carousel",
     "kind": "app",
     "useCase": "tools",
+    "category": "sign-up",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3260,6 +3584,7 @@ const data: unknown = [
     "summary": "CSV import summary with next-step cards",
     "kind": "app",
     "useCase": "tools",
+    "category": "success",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3270,6 +3595,7 @@ const data: unknown = [
     "summary": "API key reveal sheet (shown once)",
     "kind": "app",
     "useCase": "tools",
+    "category": "success",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3280,6 +3606,7 @@ const data: unknown = [
     "summary": "Full-screen celebratory confirmation for a scheduled currency conversion",
     "kind": "app",
     "useCase": "tools",
+    "category": "success",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3290,6 +3617,7 @@ const data: unknown = [
     "summary": "Email-verified confirmation card",
     "kind": "app",
     "useCase": "tools",
+    "category": "success",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3300,6 +3628,7 @@ const data: unknown = [
     "summary": "Organization API keys table",
     "kind": "app",
     "useCase": "tools",
+    "category": "table",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3310,6 +3639,7 @@ const data: unknown = [
     "summary": "Faceted dataset browser with card grid",
     "kind": "app",
     "useCase": "tools",
+    "category": "table",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3320,6 +3650,7 @@ const data: unknown = [
     "summary": "CRM contacts list inside a no-code app builder",
     "kind": "app",
     "useCase": "tools",
+    "category": "table",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3330,6 +3661,7 @@ const data: unknown = [
     "summary": "Headless CMS asset table with custom views",
     "kind": "app",
     "useCase": "tools",
+    "category": "table",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3340,6 +3672,7 @@ const data: unknown = [
     "summary": "Workspace people and security admin page",
     "kind": "app",
     "useCase": "tools",
+    "category": "team-members",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3350,6 +3683,7 @@ const data: unknown = [
     "summary": "Team seats table with credit limits",
     "kind": "app",
     "useCase": "tools",
+    "category": "team-members",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3360,6 +3694,7 @@ const data: unknown = [
     "summary": "Application members and invitations settings",
     "kind": "app",
     "useCase": "tools",
+    "category": "team-members",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3370,6 +3705,7 @@ const data: unknown = [
     "summary": "Workspace members with inline invite bar",
     "kind": "app",
     "useCase": "tools",
+    "category": "team-members",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3380,6 +3716,7 @@ const data: unknown = [
     "summary": "Slide editor with comments side panel",
     "kind": "app",
     "useCase": "tools",
+    "category": "text-editor",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3390,6 +3727,7 @@ const data: unknown = [
     "summary": "Docs-site MDX editor with live preview",
     "kind": "app",
     "useCase": "tools",
+    "category": "text-editor",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3400,6 +3738,7 @@ const data: unknown = [
     "summary": "Analytics report document with charts and prose",
     "kind": "app",
     "useCase": "tools",
+    "category": "text-editor",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3410,6 +3749,7 @@ const data: unknown = [
     "summary": "AI content brief editor with workflow progress panel",
     "kind": "app",
     "useCase": "tools",
+    "category": "text-editor",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3420,6 +3760,7 @@ const data: unknown = [
     "summary": "Prepaid API credit balance and invoice history",
     "kind": "app",
     "useCase": "tools",
+    "category": "upgrade",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3430,6 +3771,7 @@ const data: unknown = [
     "summary": "Account billing overview with usage meters",
     "kind": "app",
     "useCase": "tools",
+    "category": "upgrade",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3440,6 +3782,7 @@ const data: unknown = [
     "summary": "Workspace subscription and plan picker",
     "kind": "app",
     "useCase": "tools",
+    "category": "upgrade",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3450,6 +3793,7 @@ const data: unknown = [
     "summary": "Prepaid balance billing screen with top-up history",
     "kind": "app",
     "useCase": "tools",
+    "category": "upgrade",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3460,6 +3804,7 @@ const data: unknown = [
     "summary": "Download bandwidth usage chart in account settings",
     "kind": "app",
     "useCase": "tools",
+    "category": "usage",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3470,6 +3815,7 @@ const data: unknown = [
     "summary": "API trial overview with first-call card and calls-left meter",
     "kind": "app",
     "useCase": "tools",
+    "category": "usage",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3480,6 +3826,7 @@ const data: unknown = [
     "summary": "API request log and usage screen",
     "kind": "app",
     "useCase": "tools",
+    "category": "usage",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3490,6 +3837,7 @@ const data: unknown = [
     "summary": "Credit and model-usage analytics settings screen",
     "kind": "app",
     "useCase": "tools",
+    "category": "usage",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3500,6 +3848,7 @@ const data: unknown = [
     "summary": "Link-based email verification card with site footer",
     "kind": "app",
     "useCase": "tools",
+    "category": "verification",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3510,6 +3859,7 @@ const data: unknown = [
     "summary": "One-time-code email verification over pixel-art brand mark",
     "kind": "app",
     "useCase": "tools",
+    "category": "verification",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3520,6 +3870,7 @@ const data: unknown = [
     "summary": "Check-your-inbox email verification card",
     "kind": "app",
     "useCase": "tools",
+    "category": "verification",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3530,6 +3881,7 @@ const data: unknown = [
     "summary": "Split-screen code verification with testimonial carousel",
     "kind": "app",
     "useCase": "tools",
+    "category": "verification",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3540,6 +3892,7 @@ const data: unknown = [
     "summary": "AI assistant welcome conversation with trial banner",
     "kind": "app",
     "useCase": "tools",
+    "category": "welcome",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3550,6 +3903,7 @@ const data: unknown = [
     "summary": "Minimal welcome screen launching a personalized onboarding quiz",
     "kind": "app",
     "useCase": "tools",
+    "category": "welcome",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3560,6 +3914,7 @@ const data: unknown = [
     "summary": "Welcome modal that creates the first organization",
     "kind": "app",
     "useCase": "tools",
+    "category": "welcome",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3570,6 +3925,7 @@ const data: unknown = [
     "summary": "Get-started accordion checklist for an API product",
     "kind": "app",
     "useCase": "tools",
+    "category": "welcome",
     "format": "screen",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3580,6 +3936,7 @@ const data: unknown = [
     "summary": "AI image-generation landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "ai-product",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3590,6 +3947,7 @@ const data: unknown = [
     "summary": "AI agents platform landing site with serif display",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "ai-product",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3600,6 +3958,7 @@ const data: unknown = [
     "summary": "AI site-builder startup landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "ai-product",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3610,6 +3969,7 @@ const data: unknown = [
     "summary": "AI finance-agent enterprise landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "ai-product",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3620,6 +3980,7 @@ const data: unknown = [
     "summary": "AI assistant-agent landing site with painterly hero and warm editorial palette",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "ai-product",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3630,6 +3991,7 @@ const data: unknown = [
     "summary": "Warm-neutral AI support-copilot landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "ai-product",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3640,6 +4002,7 @@ const data: unknown = [
     "summary": "AI prompt-library landing site with mascot illustrations",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "ai-product",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3650,6 +4013,7 @@ const data: unknown = [
     "summary": "AI voice-generation (text-to-speech) landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "ai-product",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3660,6 +4024,7 @@ const data: unknown = [
     "summary": "Dark AI data-intelligence (knowledge graph) landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "ai-product",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3670,6 +4035,7 @@ const data: unknown = [
     "summary": "AI text-to-video generator landing page",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "ai-product",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3680,6 +4046,7 @@ const data: unknown = [
     "summary": "E-commerce sales-analytics landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "analytics",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3690,6 +4057,7 @@ const data: unknown = [
     "summary": "Business operations analytics landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "analytics",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3700,6 +4068,7 @@ const data: unknown = [
     "summary": "Pastel SaaS analytics landing site with full dashboard hero and tinted feature bento",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "analytics",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3710,6 +4079,7 @@ const data: unknown = [
     "summary": "Dark sales-analytics SaaS landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "analytics",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3720,6 +4090,7 @@ const data: unknown = [
     "summary": "AI dispatch-agent automation landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "automation",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3730,6 +4101,7 @@ const data: unknown = [
     "summary": "Monochrome AI workflow-automation landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "automation",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3740,6 +4112,7 @@ const data: unknown = [
     "summary": "AI agent orchestration landing site (terminal aesthetic)",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "automation",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3750,6 +4123,7 @@ const data: unknown = [
     "summary": "AI automation agency landing site with midnight-blue glow and workflow diagrams",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "automation",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3760,6 +4134,7 @@ const data: unknown = [
     "summary": "Cinematic dark AI-agent automation landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "automation",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3770,6 +4145,7 @@ const data: unknown = [
     "summary": "Community-coordination app landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "collaboration",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3780,6 +4156,7 @@ const data: unknown = [
     "summary": "Team workspace and client-portal landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "collaboration",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3790,6 +4167,7 @@ const data: unknown = [
     "summary": "Dark ember-toned project-collaboration SaaS landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "collaboration",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3800,6 +4178,7 @@ const data: unknown = [
     "summary": "Deep-indigo AI CRM landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "crm-sales",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3810,6 +4189,7 @@ const data: unknown = [
     "summary": "Sage-green AI CRM landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "crm-sales",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3820,6 +4200,7 @@ const data: unknown = [
     "summary": "Dark sales and CRM platform landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "crm-sales",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3830,6 +4211,7 @@ const data: unknown = [
     "summary": "Dark AI sales-analytics landing site with electric-yellow accents and dashboard-first hero",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "crm-sales",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3840,6 +4222,7 @@ const data: unknown = [
     "summary": "Deep-violet AI sales-automation landing site with floating KPI cards and beta badge",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "crm-sales",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3850,6 +4233,7 @@ const data: unknown = [
     "summary": "AI CRM landing site with photo hero and floating metric widgets",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "crm-sales",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3860,6 +4244,7 @@ const data: unknown = [
     "summary": "Customer-engagement CRM landing site with color-blocked split feature panels",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "crm-sales",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3870,6 +4255,7 @@ const data: unknown = [
     "summary": "Minimal sales-ROI SaaS landing site with framed grid rails and sticky tool list",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "crm-sales",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3880,6 +4266,7 @@ const data: unknown = [
     "summary": "Developer-framework and SaaS landing site with terminal styling",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "developer-tools",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3890,6 +4277,7 @@ const data: unknown = [
     "summary": "Modular dark bento landing site for an AI infrastructure product",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "developer-tools",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3900,6 +4288,7 @@ const data: unknown = [
     "summary": "Editorial uptime-monitoring SaaS marketing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "developer-tools",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3910,6 +4299,7 @@ const data: unknown = [
     "summary": "Curated design-resource directory site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "documentation",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3920,6 +4310,7 @@ const data: unknown = [
     "summary": "AI investing-platform landing site with sky-and-meadow hero",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "fintech",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3930,6 +4321,7 @@ const data: unknown = [
     "summary": "Digital payments and cards app landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "fintech",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30",
@@ -3944,6 +4336,7 @@ const data: unknown = [
     "summary": "Dark fintech SaaS landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "fintech",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30",
@@ -3958,6 +4351,7 @@ const data: unknown = [
     "summary": "AI invoicing and payroll fintech landing site with amber glow hero and browser-framed dashboard",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "fintech",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3968,6 +4362,7 @@ const data: unknown = [
     "summary": "Spend-management fintech marketing site with photo-video hero",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "fintech",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3978,6 +4373,7 @@ const data: unknown = [
     "summary": "Personal card and expense management landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "fintech",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3988,6 +4384,7 @@ const data: unknown = [
     "summary": "Relationship-matching app landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "general-saas",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -3998,6 +4395,7 @@ const data: unknown = [
     "summary": "Consumer social-plans app waitlist site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "general-saas",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4008,6 +4406,7 @@ const data: unknown = [
     "summary": "Shared customer-inbox SaaS landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "general-saas",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4018,6 +4417,7 @@ const data: unknown = [
     "summary": "Business-management SaaS landing site with tilted dashboard, lime hashtag chips and starfield sections",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "general-saas",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4028,6 +4428,7 @@ const data: unknown = [
     "summary": "Expressive lilac-and-butter business-analytics SaaS landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "general-saas",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4038,6 +4439,7 @@ const data: unknown = [
     "summary": "Mobile streaming app showcase landing page",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "general-saas",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4048,6 +4450,7 @@ const data: unknown = [
     "summary": "Friendly 404 page over a dark showcase-tile mosaic",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "general-saas",
     "format": "page",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4058,6 +4461,7 @@ const data: unknown = [
     "summary": "HR and workforce-management landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "hr-people",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4068,6 +4472,7 @@ const data: unknown = [
     "summary": "HR and payroll suite landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "hr-people",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4078,6 +4483,7 @@ const data: unknown = [
     "summary": "Small-business growth services landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "marketing-tools",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4088,6 +4494,7 @@ const data: unknown = [
     "summary": "AI marketing-analytics landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "marketing-tools",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4098,6 +4505,7 @@ const data: unknown = [
     "summary": "AI SEO-audit landing site with clinical cream-and-yellow sections",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "marketing-tools",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4108,6 +4516,7 @@ const data: unknown = [
     "summary": "AI growth-insights landing site with soft periwinkle glass, floating 3D shapes and dashboard showcase",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "marketing-tools",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4118,6 +4527,7 @@ const data: unknown = [
     "summary": "Marketing-campaign management SaaS landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "marketing-tools",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4128,6 +4538,7 @@ const data: unknown = [
     "summary": "Content-management platform landing site with hero lead form",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "productivity",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4138,6 +4549,7 @@ const data: unknown = [
     "summary": "Dark all-in-one work-management landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "productivity",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4148,6 +4560,7 @@ const data: unknown = [
     "summary": "All-in-one business workflow landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "productivity",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4158,6 +4571,7 @@ const data: unknown = [
     "summary": "Dark all-in-one work platform landing site",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "productivity",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4168,6 +4582,7 @@ const data: unknown = [
     "summary": "Dark startup-productivity landing site with full dashboard mock hero",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "productivity",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4178,6 +4593,7 @@ const data: unknown = [
     "summary": "B2B workflow-workspace landing site with deep-teal hero and UI-widget illustrations",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "productivity",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4188,6 +4604,7 @@ const data: unknown = [
     "summary": "Localized subscription pricing starter with customer billing portal",
     "kind": "app",
     "useCase": "tools",
+    "category": "billing",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4198,6 +4615,7 @@ const data: unknown = [
     "summary": "Dark subscription pricing starter with account page",
     "kind": "app",
     "useCase": "tools",
+    "category": "billing",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4208,6 +4626,7 @@ const data: unknown = [
     "summary": "Paid-access gate starter for a web app",
     "kind": "app",
     "useCase": "tools",
+    "category": "billing",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4218,6 +4637,7 @@ const data: unknown = [
     "summary": "Subscription and entitlements account settings starter",
     "kind": "app",
     "useCase": "tools",
+    "category": "billing",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4228,6 +4648,7 @@ const data: unknown = [
     "summary": "Production-grade web app boilerplate with tooling showcase page",
     "kind": "site",
     "useCase": "tools",
+    "category": "boilerplate",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4238,6 +4659,7 @@ const data: unknown = [
     "summary": "Team SaaS starter with terminal hero and role-based dashboard",
     "kind": "app",
     "useCase": "tools",
+    "category": "boilerplate",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4248,6 +4670,7 @@ const data: unknown = [
     "summary": "Open-source SaaS boilerplate landing site",
     "kind": "site",
     "useCase": "tools",
+    "category": "boilerplate",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4258,6 +4681,7 @@ const data: unknown = [
     "summary": "Offline-first realtime shared todo list starter",
     "kind": "app",
     "useCase": "tools",
+    "category": "collaboration",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4268,6 +4692,7 @@ const data: unknown = [
     "summary": "AI email-assistant console with live inbox and streaming chat",
     "kind": "app",
     "useCase": "tools",
+    "category": "collaboration",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4278,6 +4703,7 @@ const data: unknown = [
     "summary": "Real-time collaborative documents starter",
     "kind": "app",
     "useCase": "tools",
+    "category": "collaboration",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30",
@@ -4292,6 +4718,7 @@ const data: unknown = [
     "summary": "Support-desk analytics dashboard with light/dark themes",
     "kind": "app",
     "useCase": "tools",
+    "category": "dashboard",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4302,6 +4729,7 @@ const data: unknown = [
     "summary": "Headless form endpoints and lead-routing dashboard",
     "kind": "app",
     "useCase": "tools",
+    "category": "dashboard",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4312,6 +4740,7 @@ const data: unknown = [
     "summary": "Database-free link-in-bio builder with live phone preview",
     "kind": "app",
     "useCase": "tools",
+    "category": "editor",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4322,6 +4751,7 @@ const data: unknown = [
     "summary": "Block-based rich-text editor with slash menu and AI autocomplete",
     "kind": "app",
     "useCase": "tools",
+    "category": "editor",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4332,6 +4762,7 @@ const data: unknown = [
     "summary": "Collaborative rich-text documents editor starter",
     "kind": "app",
     "useCase": "tools",
+    "category": "editor",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30",
@@ -4346,6 +4777,7 @@ const data: unknown = [
     "summary": "Minimal SaaS landing-site starter with pricing and auth pages",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "marketing-site",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4356,6 +4788,7 @@ const data: unknown = [
     "summary": "Themeable business marketing site with blog and landing-page variants",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "marketing-site",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4366,6 +4799,7 @@ const data: unknown = [
     "summary": "Minimal-dependency dark SaaS/app landing starter",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "marketing-site",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4376,6 +4810,7 @@ const data: unknown = [
     "summary": "Illustrated startup marketing site and blog starter",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "marketing-site",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4386,6 +4821,7 @@ const data: unknown = [
     "summary": "Personal-finance mobile app landing page",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "marketing-site",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4396,6 +4832,7 @@ const data: unknown = [
     "summary": "CMS-driven space-themed marketing site starter",
     "kind": "site",
     "useCase": "saas-landing",
+    "category": "marketing-site",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4406,6 +4843,7 @@ const data: unknown = [
     "summary": "Subdomain-per-tenant SaaS starter with claim form and admin",
     "kind": "app",
     "useCase": "tools",
+    "category": "multi-tenant",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4416,6 +4854,7 @@ const data: unknown = [
     "summary": "Multi-tenant B2B identity starter with organization settings",
     "kind": "app",
     "useCase": "tools",
+    "category": "multi-tenant",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4426,6 +4865,7 @@ const data: unknown = [
     "summary": "End-to-end encrypted secret-sharing tool with expiring links",
     "kind": "app",
     "useCase": "tools",
+    "category": "utility",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4436,6 +4876,7 @@ const data: unknown = [
     "summary": "Typo-tolerant full-text search app over a film catalog",
     "kind": "app",
     "useCase": "tools",
+    "category": "utility",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4446,6 +4887,7 @@ const data: unknown = [
     "summary": "Data-encryption SDK playground starter",
     "kind": "app",
     "useCase": "tools",
+    "category": "utility",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30"
@@ -4456,6 +4898,7 @@ const data: unknown = [
     "summary": "Countdown waitlist page with email capture",
     "kind": "app",
     "useCase": "saas-landing",
+    "category": "waitlist",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30",
@@ -4470,6 +4913,7 @@ const data: unknown = [
     "summary": "Name-and-email waitlist page with stack showcase",
     "kind": "app",
     "useCase": "saas-landing",
+    "category": "waitlist",
     "format": "design",
     "batch": "saas-screen-patterns",
     "addedOn": "2026-09-30",

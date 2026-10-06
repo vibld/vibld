@@ -3924,3 +3924,37 @@
   gap: 0.5rem;
   align-items: baseline;
 }
+
+/* The template gallery's categories and subcategories (D161). */
+.lb-tcats {
+  margin-top: 24px;
+}
+.lb-tcats__label {
+  margin: 16px 0 0;
+  color: var(--color-ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.lb-tcats .lb-chiplinks {
+  margin-top: 8px;
+}
+.lb-tcats .lb-chiplinks a {
+  gap: 8px;
+  min-height: 36px;
+  font-size: 0.875rem;
+}
+.lb-tcats .lb-chiplinks small {
+  color: var(--color-ink-muted);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+.lb-tcats .lb-chiplinks a[aria-current='page'] {
+  border-color: var(--color-ink);
+  background: var(--color-ink);
+  color: var(--color-paper);
+}
+.lb-tcats .lb-chiplinks a[aria-current='page'] small {
+  color: inherit;
+}

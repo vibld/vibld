@@ -1,6 +1,7 @@
 /**
  * Every design in the template catalog by name, and no more: its id, name,
- * one-line summary, kind, use case, format, batch and where it is merged. For code that runs on every page and
+ * one-line summary, kind, use case, catalog category, format, batch and
+ * where it is merged. For code that runs on every page and
  * must not carry the catalog itself (`design-templates.ts` is 6.5 MB).
  * Generated beside it by `bin/import-design-catalog.ts`.
  */
@@ -13,6 +14,8 @@ export interface DesignTemplateName {
   summary: string;
   kind: 'site' | 'app';
   useCase: DesignUseCase;
+  /** The catalog's own category, which places it in a subcategory (D161). */
+  category: string;
   format: DesignFormat;
   batch: string;
   addedOn: string;

@@ -1,19 +1,29 @@
 import { useEffect, useId, useRef, useState } from 'react';
 
-import type { DesignTemplateName } from '@vibld/ai/design-template-index';
+import {
+  TEMPLATE_GROUPS,
+  TEMPLATE_SUBCATEGORIES,
+  templateGroup,
+  templateSubcategories,
+} from '@vibld/ai/design-categories';
 
 import { loadTemplateBrief } from '../templates/template-brief-client.ts';
 
 type IndexModule = typeof import('@vibld/ai/design-template-index');
 
-/** The use cases as vibld.com names them (apps/marketing/app/use-cases.ts). */
-const USE_CASE_LABELS: Record<DesignTemplateName['useCase'], string> = {
-  'small-business': 'Small business site',
-  portfolio: 'Portfolio',
-  'saas-landing': 'SaaS landing page',
-  events: 'Events and bookings',
-  tools: 'Small tools and apps',
-};
+/**
+ * Whether a design is in a place as vibld.com/templates names it (D161): a
+ * category, `websites`, or a subcategory, `websites/ecommerce`.
+ */
+function inCategory(
+  template: Parameters<typeof templateSubcategories>[0],
+  place: string,
+): boolean {
+  if (!place) return true;
+  const [group, sub] = place.split('/');
+  if (templateGroup(template) !== group) return false;
+  return !sub || templateSubcategories(template).some((s) => s.slug === sub);
+}
 
 /**
  * A design template as inspiration (docs/decisions.md, D148): the template
@@ -47,14 +57,12 @@ export function TemplatePicker({
 }) {
   const [index, setIndex] = useState<IndexModule | null>(null);
   const [failed, setFailed] = useState(false);
-  const [kind, setKind] = useState('');
-  const [useCase, setUseCase] = useState('');
+  const [category, setCategory] = useState('');
   const [query, setQuery] = useState('');
   const [chosen, setChosen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const kindId = useId();
-  const useCaseId = useId();
+  const categoryId = useId();
   const searchId = useId();
   // The message as it is now, read when a brief arrives: one sent or edited
   // while the brief loaded is not the message it was asked for.
@@ -92,8 +100,7 @@ export function TemplatePicker({
   const shown = index.DESIGN_TEMPLATE_INDEX.filter(
     (template) =>
       !template.mergedInto &&
-      (!kind || template.kind === kind) &&
-      (!useCase || template.useCase === useCase) &&
+      inCategory(template, category) &&
       words.every((word) =>
         `${template.name} ${template.summary}`.toLowerCase().includes(word),
       ),
@@ -136,37 +143,30 @@ export function TemplatePicker({
     <div className="gallery">
       <div className="gallery__filters">
         <div>
-          <label className="option-panel__label" htmlFor={kindId}>
-            Kind
+          <label className="option-panel__label" htmlFor={categoryId}>
+            Category
           </label>
           <select
-            id={kindId}
+            id={categoryId}
             className="prompt__input"
-            value={kind}
-            onChange={(event) => setKind(event.target.value)}
+            value={category}
+            onChange={(event) => setCategory(event.target.value)}
             disabled={disabled}
           >
-            <option value="">Sites and apps</option>
-            <option value="site">Sites</option>
-            <option value="app">Apps</option>
-          </select>
-        </div>
-        <div>
-          <label className="option-panel__label" htmlFor={useCaseId}>
-            Use case
-          </label>
-          <select
-            id={useCaseId}
-            className="prompt__input"
-            value={useCase}
-            onChange={(event) => setUseCase(event.target.value)}
-            disabled={disabled}
-          >
-            <option value="">Every use case</option>
-            {Object.entries(USE_CASE_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
+            <option value="">Everything</option>
+            {TEMPLATE_GROUPS.map((group) => (
+              <optgroup key={group.slug} label={group.label}>
+                <option value={group.slug}>
+                  All {group.label.toLowerCase()}
+                </option>
+                {TEMPLATE_SUBCATEGORIES.filter(
+                  (sub) => sub.group === group.slug,
+                ).map((sub) => (
+                  <option key={sub.slug} value={`${group.slug}/${sub.slug}`}>
+                    {sub.label}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>

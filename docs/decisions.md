@@ -205,6 +205,31 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
+### Template categories, 2026-10-06
+
+Chris: "The templates on vibld are missing the subcategories for things like
+ecommerce, shopify, etc. (see https://lovable.dev/templates for examples)".
+The gallery and the builder's picker filtered by kind and by the five use
+cases, while each design's own catalog category,
+38 of them, was printed on its card and could not be browsed.
+
+- **D161. Templates are browsed by category and subcategory (Chris,
+  2026-10-06: "Approve").** As on
+  lovable.dev/templates: Websites, Apps and App screens, then a subcategory
+  inside websites and apps, each a prerendered page of its own at
+  `/templates/<category>/<subcategory>` with only its own designs, and the
+  gallery's other filters carried between them. Websites: Portfolio, Local
+  services, Ecommerce, Shopify, SaaS, AI products, Landing page, Blog,
+  Editorial, Music, Events, Resume. Apps: Internal tools, SaaS,
+  Business tools, Dashboards, Productivity, Developer tools, Starter kits,
+  Finance, Project management, Product management, Education, Lifestyle,
+  Presentations. App screens keep their screen-type filter. A subcategory
+  gathers catalog categories, so the catalog is unchanged; Shopify takes
+  the designs whose purpose names Shopify, which Ecommerce lists too. The map is `packages/ai/src/design-categories.ts`; the
+  builder's picker uses the same one, in place of its kind and use-case
+  filters, and so does the gallery, in place of its Show, Use case and Kind
+  filters. The use-case pages are unchanged.
+
 ### Pricing, 2026-10-04
 
 Chris asked for pricing that covers costs plus a small margin for his time.

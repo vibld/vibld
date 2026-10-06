@@ -1,5 +1,9 @@
 import { type RouteConfig, index, route } from '@react-router/dev/routes';
 
+import {
+  TEMPLATE_GROUPS,
+  TEMPLATE_SUBCATEGORIES,
+} from '@vibld/ai/design-categories';
 import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
 import { STYLE_GALLERY_INDEX } from '@vibld/ai/style-gallery-index';
 
@@ -43,6 +47,19 @@ export default [
     }),
   ),
   route('templates', 'routes/templates.tsx'),
+  // The gallery once per category and subcategory (D161), each a page of
+  // its own with only its own designs, for the same reason as the use cases
+  // above.
+  ...TEMPLATE_GROUPS.map((group) =>
+    route(`templates/${group.slug}`, 'routes/templates.tsx', {
+      id: `templates-${group.slug}`,
+    }),
+  ),
+  ...TEMPLATE_SUBCATEGORIES.map((sub) =>
+    route(`templates/${sub.group}/${sub.slug}`, 'routes/templates.tsx', {
+      id: `templates-${sub.group}-${sub.slug}`,
+    }),
+  ),
   // One module for every design, declared once per path for the same reason
   // as the use cases above.
   ...DESIGN_TEMPLATE_INDEX.map((template) =>

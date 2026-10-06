@@ -21,6 +21,7 @@
     "./stack": "./src/stack.ts",
     "./design-templates": "./src/design-templates.ts",
     "./design-template-index": "./src/design-template-index.ts",
+    "./design-categories": "./src/design-categories.ts",
     "./screen-patterns": "./src/screen-patterns.ts",
     "./backdrops": "./src/backdrops.ts",
     "./style-gallery": "./src/style-gallery.ts",

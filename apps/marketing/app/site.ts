@@ -7,6 +7,14 @@
  * place in the legal index.
  */
 
+import {
+  TEMPLATE_GROUPS,
+  TEMPLATE_SUBCATEGORIES,
+  subcategoryPhrase,
+  subcategoryTitle,
+  templateGroup,
+  templateSubcategories,
+} from '@vibld/ai/design-categories';
 import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
 import {
   STYLE_CATEGORY_LABELS,
@@ -17,6 +25,9 @@ import { STYLE_GALLERY_INDEX } from '@vibld/ai/style-gallery-index';
 import { LAYERS } from './layers.ts';
 import { USE_CASES } from './use-cases.ts';
 import { approxCount } from './counts.ts';
+
+/** The designs the gallery lists: none merged into another entry. */
+const LISTED_TEMPLATES = DESIGN_TEMPLATE_INDEX.filter((t) => !t.mergedInto);
 
 export interface SiteRoute {
   path: string;
@@ -410,6 +421,30 @@ export const ROUTES: SiteRoute[] = [
     title: `Templates | ${SITE.name}`,
     description: `${approxCount(DESIGN_TEMPLATE_INDEX.filter((t) => t.format !== 'screen').length)} app and website designs and ${approxCount(DESIGN_TEMPLATE_INDEX.filter((t) => t.format === 'screen').length)} app screens to start from, each with a layout, a checked palette, typefaces and a build prompt.`,
   },
+  ...TEMPLATE_GROUPS.map((group) => {
+    const n = LISTED_TEMPLATES.filter(
+      (t) => templateGroup(t) === group.slug,
+    ).length;
+    return {
+      path: `/templates/${group.slug}`,
+      title: `${group.noun.charAt(0).toUpperCase()}${group.noun.slice(1)} templates | ${SITE.name}`,
+      description:
+        group.slug === 'screens'
+          ? `${approxCount(n)} app screens, such as dashboards, settings pages and empty states, to add to an app design, each with a build prompt.`
+          : `${approxCount(n)} ${group.noun} designs to start from, sorted into ${approxCount(TEMPLATE_SUBCATEGORIES.filter((s) => s.group === group.slug).length)} subcategories, each with a layout, a checked palette, typefaces and a build prompt.`,
+    };
+  }),
+  ...TEMPLATE_SUBCATEGORIES.map((sub) => {
+    const noun = TEMPLATE_GROUPS.find((g) => g.slug === sub.group)!.noun;
+    const n = LISTED_TEMPLATES.filter((t) =>
+      templateSubcategories(t).includes(sub),
+    ).length;
+    return {
+      path: `/templates/${sub.group}/${sub.slug}`,
+      title: `${subcategoryTitle(sub)} | ${SITE.name}`,
+      description: `${approxCount(n)} ${subcategoryPhrase(sub)} ${noun} ${n === 1 ? 'design' : 'designs'} to start from, ${n === 1 ? 'with' : 'each with'} a layout, a palette whose every text pair passes WCAG AA, typefaces and a build prompt.`,
+    };
+  }),
   ...DESIGN_TEMPLATE_INDEX.map((template) => ({
     image: {
       path: `/og/templates/${template.id}.jpg`,
@@ -512,6 +547,13 @@ export function breadcrumbsFor(path: string): { name: string; path: string }[] {
         [`/use-cases/${useCase.slug}`, useCase.label] as [string, string],
     ),
     ['/inspiration', 'Inspiration'],
+    ...TEMPLATE_GROUPS.map(
+      (group) => [`/templates/${group.slug}`, group.label] as [string, string],
+    ),
+    ...TEMPLATE_SUBCATEGORIES.map(
+      (sub) =>
+        [`/templates/${sub.group}/${sub.slug}`, sub.label] as [string, string],
+    ),
     ...DESIGN_TEMPLATE_INDEX.map(
       (template) =>
         [`/templates/${template.id}`, template.name] as [string, string],

@@ -23,6 +23,7 @@ import { dirname, join, relative, sep } from 'node:path';
 
 import { answers } from '../app/answers.ts';
 import { readPlans, type Plans } from '../app/plans.ts';
+import { placeOf } from '../app/template-places.ts';
 import {
   DOC_GUIDES,
   DOC_TRACKS,
@@ -67,20 +68,24 @@ function plans(): Plans {
  * lastmod that is always today is one a search engine learns to ignore.
  */
 function sourcesFor(path: string): string[] {
+  // The gallery and its category pages, which are not templates (D161).
+  const gallery = path === '/templates' || placeOf(path).group !== '';
   const module =
     path === '/'
       ? 'routes/home.tsx'
       : path.startsWith('/use-cases/')
         ? 'routes/use-case.tsx'
-        : path.startsWith('/templates/')
-          ? 'routes/template.tsx'
-          : path === '/styles/gallery'
-            ? 'routes/style-gallery.tsx'
-            : path.startsWith('/styles/gallery/')
-              ? 'routes/style.tsx'
-              : ['/legal', '/docs', '/use-cases'].includes(path)
-                ? `routes/${path.slice(1)}.index.tsx`
-                : `routes/${path.slice(1).replace(/\//g, '.')}.tsx`;
+        : gallery
+          ? 'routes/templates.tsx'
+          : path.startsWith('/templates/')
+            ? 'routes/template.tsx'
+            : path === '/styles/gallery'
+              ? 'routes/style-gallery.tsx'
+              : path.startsWith('/styles/gallery/')
+                ? 'routes/style.tsx'
+                : ['/legal', '/docs', '/use-cases'].includes(path)
+                  ? `routes/${path.slice(1)}.index.tsx`
+                  : `routes/${path.slice(1).replace(/\//g, '.')}.tsx`;
   const data: Record<string, string[]> = {
     '/': ['answers.ts'],
     '/pricing': [
@@ -95,14 +100,16 @@ function sourcesFor(path: string): string[] {
   // Every template page and the two galleries read the generated catalog.
   const catalog = '../../../packages/ai/data/design-templates.ts';
   // The style gallery's pages read its data (D143).
-  const gallery = '../../../packages/ai/data/style-gallery.json';
+  const styles = '../../../packages/ai/data/style-gallery.json';
   const extra = path.startsWith('/use-cases/')
     ? ['use-cases.ts']
-    : path.startsWith('/templates') || path === '/inspiration'
-      ? [catalog]
-      : path.startsWith('/styles/gallery')
-        ? [gallery]
-        : (data[path] ?? []);
+    : gallery
+      ? [catalog, '../../../packages/ai/src/design-categories.ts']
+      : path.startsWith('/templates') || path === '/inspiration'
+        ? [catalog]
+        : path.startsWith('/styles/gallery')
+          ? [styles]
+          : (data[path] ?? []);
   const files = [module, ...extra].map((file) => join(APP, file));
   for (const file of files) {
     if (!existsSync(file)) {

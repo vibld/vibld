@@ -120,21 +120,31 @@ describe('the template picker', () => {
     );
   });
 
-  it('filters by kind and use case, and searches name and summary', async () => {
+  it('filters by category and subcategory (D161), and searches name and summary', async () => {
     const view = await mount({ active: true });
-    const [kind, useCase] = [...view.container.querySelectorAll('select')];
-    type(kind, 'app');
+    const [category] = [...view.container.querySelectorAll('select')];
+    type(category, 'apps');
     assert.equal(
       view.cards().length,
-      listed.filter((t) => t.kind === 'app').length,
+      listed.filter((t) => t.kind === 'app' && t.format !== 'screen').length,
     );
-    type(useCase, 'tools');
+    type(category, 'websites/ecommerce');
     assert.equal(
       view.cards().length,
-      listed.filter((t) => t.kind === 'app' && t.useCase === 'tools').length,
+      listed.filter((t) => t.kind === 'site' && t.category === 'ecommerce')
+        .length,
     );
-    type(kind, '');
-    type(useCase, '');
+    type(category, 'websites/shopify');
+    assert.deepEqual(
+      view.cards().map((c) => c.querySelector('.gallery__name')?.textContent),
+      ['Hardline Depot', 'Plain Matter'],
+    );
+    type(category, 'screens');
+    assert.equal(
+      view.cards().length,
+      listed.filter((t) => t.format === 'screen').length,
+    );
+    type(category, '');
     type(view.container.querySelector('input[type="search"]'), first.name);
     assert.ok(view.cards().some((c) => c.textContent?.includes(first.summary)));
     type(view.container.querySelector('input[type="search"]'), 'zzzzqqq');

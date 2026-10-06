@@ -157,6 +157,7 @@ describe('the design template catalog', () => {
         summary: t.summary,
         kind: t.kind,
         useCase: t.useCase,
+        category: t.category,
         format: t.format,
         batch: t.batch,
         addedOn: t.addedOn,
