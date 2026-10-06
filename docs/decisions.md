@@ -228,6 +228,22 @@ changes.
 - **D156. Annual plans stay, at two months free (Chris, 2026-10-04).**
   Build $190 a year, Ship $490. Amends L38.
 
+### Free accounts, 2026-10-05
+
+Every Free account's run counted against the one deployment-wide day (L29,
+$80 by default) that paid runs count against too, so free use could pause
+paying accounts until midnight UTC.
+
+- **D158. Free use gets its own share of the day (Chris, 2026-10-05: "D158
+  yes").** A run on the Free plan of a deployment that sells plans counts
+  against a Free share of the day as well as the whole of it: $10 by
+  default, `VIBLD_FREE_DAILY_MICRO_USD`. Paid runs count against the whole
+  day only, so they are never refused for free use. A Free run that draws on
+  top-up credit leaves the share, since that is paid money. The share is a
+  `pool` column in the account ledger (`apps/web/worker/budget.ts`), so
+  settlement is unchanged. A daily preview limit for Free and preview slots
+  kept for paid plans are the second half of D158, in their own change.
+
 ### Checkpoint history, 2026-10-03
 
 ROADMAP M2 asks for "a history view that lists every accepted checkpoint and

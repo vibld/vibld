@@ -220,6 +220,13 @@ export interface WorkflowParams {
    */
   monthlyAllowance?: number;
   topupCeiling?: number;
+  /**
+   * The run is on the Free plan (D158), so a repair turn's reservation asks
+   * for the Free share of the day, and leaves it again, as the run's own
+   * did, when it is paid from top-up credit. Absent on an older instance,
+   * which then holds against the whole day only, as it always did.
+   */
+  freePool?: true;
 }
 
 /**
@@ -570,7 +577,10 @@ export interface GenerationWorkflowEnv {
    * being taken for abandoned (`touchReservation`).
    */
   USER_BUDGET: DurableObjectNamespace<
-    Pick<UserBudget, 'reserve' | 'settle' | 'touch'>
+    Pick<
+      UserBudget,
+      'reserve' | 'settle' | 'touch' | 'leavePool' | 'inFlightFor'
+    >
   >;
   /** Read by `reserveBudget` when the repair holds its own reservation. */
   VIBLD_ACCOUNT_DAILY_MICRO_USD?: string;
@@ -1673,6 +1683,9 @@ export async function verifyAndRepair(
         params.monthlyAllowance!,
         params.topupCeiling!,
         now(),
+        undefined,
+        undefined,
+        { freePool: params.freePool === true },
       ),
       LEDGER_CALL_TIMEOUT_MS,
     );

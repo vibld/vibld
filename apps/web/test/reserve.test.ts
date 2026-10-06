@@ -71,6 +71,11 @@ function ledgerThat(
             }
             return answer.verdict.allow ? { ...answer, id: (id += 1) } : answer;
           },
+          async inFlightFor() {
+            // Nothing in flight elsewhere, so the cross-ledger count never
+            // refuses here; `free-pool.test.ts` asserts it on real ledgers.
+            return 0;
+          },
           async settle(reservationId: number, actual: number) {
             settles.push({ key, id: reservationId, actual });
             if (settles.length <= settleStalls) {

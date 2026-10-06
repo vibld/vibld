@@ -1,8 +1,8 @@
 import { ACCOUNT_BUDGET_KEY, dayKey } from './spend.ts';
 import type { SpendVerdict } from './spend.ts';
 import { allowancePeriodKey } from './entitlement.ts';
-import type { Reservation, UserBudget } from './budget.ts';
-import { retryingWithin, sleep } from '@vibld/core';
+import type { Pool, Reservation, UserBudget } from './budget.ts';
+import { retryingWithin, sleep, withinDeadline } from '@vibld/core';
 
 /**
  * How long one call to a budget Durable Object may stay pending
@@ -46,15 +46,54 @@ export const LEDGER_CALL_TIMEOUT_MS = 15_000;
 
 /** The bindings and knobs a reservation needs, and nothing else. */
 export interface ReserveEnv {
-  USER_BUDGET?: DurableObjectNamespace<Pick<UserBudget, 'reserve' | 'settle'>>;
+  USER_BUDGET?: DurableObjectNamespace<
+    Pick<UserBudget, 'reserve' | 'settle' | 'leavePool' | 'inFlightFor'>
+  >;
   /** Micro-USD this whole deployment may spend in one UTC day (L29). */
   VIBLD_ACCOUNT_DAILY_MICRO_USD?: string;
+  /**
+   * Micro-USD of that day the Free plan may spend between all its accounts
+   * (D158), so free use can never pause paying ones.
+   */
+  VIBLD_FREE_DAILY_MICRO_USD?: string;
   /** How many runs one caller may have in flight at once. */
   VIBLD_MAX_IN_FLIGHT?: string;
 }
 
 export const DEFAULT_MAX_IN_FLIGHT = 2;
 export const DEFAULT_ACCOUNT_DAILY_MICRO_USD = 80_000_000;
+/** D158 (Chris, 2026-10-05): about $10 of the $80 day is the Free plan's. */
+export const DEFAULT_FREE_DAILY_MICRO_USD = 10_000_000;
+/** The pool name Free runs carry in the account ledger. */
+export const FREE_POOL = 'free';
+
+/**
+ * The Free plan's share of the deployment's day (D158), or none for a run
+ * that is not on the Free plan.
+ */
+export function freePoolFor(
+  env: ReserveEnv,
+  pooled: boolean,
+): Pool | undefined {
+  if (!pooled) return undefined;
+  return {
+    name: FREE_POOL,
+    ceilingMicroUsd: positiveInt(
+      env.VIBLD_FREE_DAILY_MICRO_USD,
+      DEFAULT_FREE_DAILY_MICRO_USD,
+    ),
+  };
+}
+
+/** What a reservation needs to know beyond its amounts. */
+export interface ReserveOptions {
+  /**
+   * The run is on the Free plan and counts against the Free plan's share
+   * of the day as well as the whole of it (D158). Released again if the
+   * run turns out to draw on top-up credit, which is paid money.
+   */
+  freePool?: boolean;
+}
 
 export interface BudgetLayers {
   account: Reservation;
@@ -67,6 +106,13 @@ export interface BudgetLayers {
    * `WorkflowParams.reservationKey` so settlement targets the same instance.
    */
   userReservationKey: string;
+  /**
+   * The account row counts against the Free plan's share of the day (D158).
+   * Absent when the run is not on the Free plan or is paid from top-up
+   * credit, so a later hold for the same run (a mockup retry, a repair
+   * turn) asks for the share only when the run itself is in it.
+   */
+  freePool?: true;
 }
 
 /** Only ever constructed from a verdict already known to deny the run. */
@@ -89,6 +135,8 @@ export type DeniedVerdict = Extract<SpendVerdict, { allow: false }>;
  */
 export type CeilingRefusal =
   | { layer: 'account' }
+  /** The Free plan's share of the day is spent; the deployment has room. */
+  | { layer: 'free-pool' }
   | {
       layer: 'user';
       /** What is left of this period's allowance, never below zero. */
@@ -149,14 +197,32 @@ export async function reserveAccount(
   env: ReserveEnv,
   worstCase: number,
   now: number,
+  options: ReserveOptions = {},
 ): Promise<Reservation> {
   const accountCeiling = positiveInt(
     env.VIBLD_ACCOUNT_DAILY_MICRO_USD,
     DEFAULT_ACCOUNT_DAILY_MICRO_USD,
   );
+  const pool = freePoolFor(env, options.freePool === true);
+  // Without the argument when there is no pool, so a ledger that predates
+  // pools is asked exactly what it always was.
   return env
     .USER_BUDGET!.getByName(ACCOUNT_BUDGET_KEY)
-    .reserve(worstCase, accountCeiling, Number.MAX_SAFE_INTEGER, dayKey(now));
+    .reserve(
+      worstCase,
+      accountCeiling,
+      Number.MAX_SAFE_INTEGER,
+      dayKey(now),
+      ...(pool ? [pool] : []),
+    );
+}
+
+/** The refusal an account-layer denial stands for. */
+function accountRefusal(account: Reservation): CeilingRefusal | undefined {
+  if (account.verdict.allow || account.verdict.reason !== 'period-ceiling') {
+    return undefined;
+  }
+  return account.poolRefused ? { layer: 'free-pool' } : { layer: 'account' };
 }
 
 /**
@@ -189,16 +255,33 @@ export async function reserveBudget(
    * test is not a bound anybody would keep.
    */
   within: number = LEDGER_CALL_TIMEOUT_MS,
+  options: ReserveOptions = {},
 ): Promise<ReserveOutcome> {
   const ledger = env.USER_BUDGET!;
-  const account = await reserveAccount(env, worstCase, now);
+  // Bounded, as every other ledger call here is (internal PR 374 review): an account
+  // ledger that accepts the call and never answers must end the request
+  // as "accounting unavailable", not leave it pending. Not retried, since
+  // an attempt that went unanswered may have written its row; that row is
+  // reclaimed like any other run that never came back.
+  const reserveDay = (freePool: boolean) =>
+    withinDeadline(reserveAccount(env, worstCase, now, { freePool }), within);
+  let account = await reserveDay(options.freePool === true);
+  // The Free share of the day is spent, but this account holds top-up
+  // credit (D158). That is money it paid, so the run may still go, outside
+  // the share and drawing on top-up credit alone: the monthly allowance is
+  // the Free plan's, and spending it here would be free use the share no
+  // longer has room for.
+  let topupOnly = false;
+  if (!account.verdict.allow && account.poolRefused && topupCeiling > 0) {
+    account = await reserveDay(false);
+    topupOnly = true;
+  }
   if (!account.verdict.allow) {
+    const ceiling = accountRefusal(account);
     return {
       ok: false,
       verdict: account.verdict,
-      ...(account.verdict.reason === 'period-ceiling'
-        ? { ceiling: { layer: 'account' } as const }
-        : {}),
+      ...(ceiling ? { ceiling } : {}),
     };
   }
 
@@ -270,20 +353,89 @@ export async function reserveBudget(
     env.VIBLD_MAX_IN_FLIGHT,
     DEFAULT_MAX_IN_FLIGHT,
   );
+  /**
+   * In flight across both of this caller's ledgers (internal PR 374 review).
+   *
+   * Each ledger serializes its own rows and not the other's, so a run
+   * admitted by one reads the other after its own row is written, and
+   * gives its place back if the two together are over the limit. Two runs
+   * racing across the ledgers each write before they read, so at least one
+   * of them sees the other: this can refuse one run too many, never admit
+   * one too many.
+   *
+   * Asked only where the caller holds top-up credit; without it there are
+   * no top-up runs to count.
+   */
+  const overLimit = async (
+    own: { key: string; reservation: Reservation },
+    other: { key: string; period: string },
+  ): Promise<boolean> => {
+    const giveBackOwn = () =>
+      retryingWithin(
+        async () => {
+          if (own.reservation.id !== undefined) {
+            await ledger.getByName(own.key).settle(own.reservation.id, 0);
+          }
+        },
+        within,
+        wait,
+      );
+    // Bounded like every other ledger call here: a ledger that never
+    // answers must not hang the request with both holds written.
+    const read = await retryingWithin(
+      async () => ledger.getByName(other.key).inFlightFor(other.period),
+      within,
+      wait,
+    );
+    if (!read.ok) {
+      await giveBackOwn();
+      await giveBackAccount();
+      throw read.error;
+    }
+    const elsewhere = read.value;
+    if ((own.reservation.inFlight ?? 0) + 1 + elsewhere <= maxInFlight) {
+      return false;
+    }
+    await giveBackOwn();
+    await giveBackAccount();
+    return true;
+  };
+  // A ledger's verdict, the same one either ledger gives on its own count.
+  // Named rather than written inline: an inline `reason:` literal here reads
+  // as a refusal identifier to `run-refusal-wire.test.ts`, which it is not.
+  const inFlightReason = 'too-many-in-flight' as const;
+  const tooManyInFlight = {
+    ok: false,
+    verdict: { allow: false, reason: inFlightReason },
+  } as const;
+
   const primary = await guard(() =>
-    ledger
-      .getByName(userId)
-      .reserve(
-        worstCase,
-        monthlyAllowance,
-        maxInFlight,
-        allowancePeriodKey(now),
-      ),
+    ledger.getByName(userId).reserve(
+      worstCase,
+      // Zero still asks the in-flight question, which comes first.
+      topupOnly ? 0 : monthlyAllowance,
+      maxInFlight,
+      allowancePeriodKey(now),
+    ),
   );
   if (primary.verdict.allow) {
+    if (
+      topupCeiling > 0 &&
+      (await overLimit(
+        { key: userId, reservation: primary },
+        { key: topupKeyFor(userId), period: 'lifetime' },
+      ))
+    ) {
+      return tooManyInFlight;
+    }
     return {
       ok: true,
-      layers: { account, user: primary, userReservationKey: userId },
+      layers: {
+        account,
+        user: primary,
+        userReservationKey: userId,
+        ...(options.freePool && !topupOnly ? { freePool: true as const } : {}),
+      },
     };
   }
 
@@ -297,10 +449,9 @@ export async function reserveBudget(
   // What was left under the allowance when it refused. `spentMicroUsd` on a
   // refusal is what the period holds, runs still in flight included, which
   // is exactly what a smaller reservation would have to fit beside.
-  const allowanceLeftMicroUsd = Math.max(
-    0,
-    monthlyAllowance - primary.spentMicroUsd,
-  );
+  const allowanceLeftMicroUsd = topupOnly
+    ? 0
+    : Math.max(0, monthlyAllowance - primary.spentMicroUsd);
   if (topupCeiling <= 0) {
     await giveBackAccount();
     return {
@@ -316,12 +467,42 @@ export async function reserveBudget(
   // down until spent (or, approximately, until it is 12 months old -- see
   // `BillingStore.totalTopupCreditMicroUsd`).
   const topupKey = topupKeyFor(userId);
+  // The allowance refused on money, so it wrote no row and this run would
+  // not count in flight there. Its in-flight limit is applied here instead,
+  // net of what the allowance ledger already has running, or parallel
+  // top-up runs would each see the same unchanged count (internal PR 374 review).
+  const topupMaxInFlight = Math.max(0, maxInFlight - (primary.inFlight ?? 0));
   const topup = await guard(() =>
     ledger
       .getByName(topupKey)
-      .reserve(worstCase, topupCeiling, Number.MAX_SAFE_INTEGER, 'lifetime'),
+      .reserve(worstCase, topupCeiling, topupMaxInFlight, 'lifetime'),
   );
+  if (!topup.verdict.allow && topup.verdict.reason === 'too-many-in-flight') {
+    await giveBackAccount();
+    return { ok: false, verdict: topup.verdict };
+  }
+  if (
+    topup.verdict.allow &&
+    (await overLimit(
+      { key: topupKey, reservation: topup },
+      { key: userId, period: allowancePeriodKey(now) },
+    ))
+  ) {
+    return tooManyInFlight;
+  }
   if (topup.verdict.allow) {
+    // Top-up credit is money the caller paid, not the Free plan's share of
+    // the day (D158). Best effort: failing leaves the row counted against
+    // the pool, which refuses more Free runs, never fewer.
+    if (options.freePool && !topupOnly && account.id !== undefined) {
+      const id = account.id;
+      const left = await retryingWithin(
+        async () => ledger.getByName(ACCOUNT_BUDGET_KEY).leavePool(id),
+        within,
+        wait,
+      );
+      if (!left.ok) console.error('free pool release failed', left.error);
+    }
     return {
       ok: true,
       layers: { account, user: topup, userReservationKey: topupKey },
@@ -382,6 +563,13 @@ export function refusalFor(
     };
   }
   const ceiling = denied.ceiling;
+  if (ceiling?.layer === 'free-pool') {
+    return {
+      reason: 'account-ceiling',
+      error:
+        'Free builds have reached their limit for today, so new free generations are paused until midnight UTC. A paid plan or a top-up keeps you building now.',
+    };
+  }
   if (ceiling?.layer === 'account') {
     return {
       reason: 'account-ceiling',

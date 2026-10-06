@@ -1356,6 +1356,9 @@ async function handlePlan(
   // was admitted on, not ones it re-derives minutes later (internal issue 194).
   let monthlyAllowance: number;
   let topupCeiling: number;
+  // Carried into the Workflow, so a repair turn's hold counts against the
+  // same Free share of the day this run was admitted against (D158).
+  let freePool = false;
   try {
     const now = Date.now();
     const spendable = await spendableFor(env, principal);
@@ -1366,6 +1369,7 @@ async function handlePlan(
       return refuse('account-suspended', SUSPENDED_MESSAGE, 403);
     }
     ({ monthlyAllowance, topupCeiling } = spendable);
+    freePool = spendable.freePool === true;
 
     const sized = await sizedReservation(
       carry,
@@ -1378,6 +1382,9 @@ async function handlePlan(
           monthlyAllowance,
           topupCeiling,
           now,
+          undefined,
+          undefined,
+          { freePool },
         ),
       // A caller with less left than the whole run's worst case gets a
       // smaller run rather than a refusal, down to the floor.
@@ -1591,6 +1598,7 @@ async function handlePlan(
         // inside the Workflow (internal issue 194).
         monthlyAllowance,
         topupCeiling,
+        ...(freePool ? { freePool: true as const } : {}),
       },
     });
   } catch (error) {
@@ -2087,6 +2095,8 @@ async function handleMockups(
   const worstCase = worstCaseMicroUsd(prices, maxTokens, inputChars);
 
   let reserved;
+  // Read again by the empty-reply retry's hold (D158).
+  let freePool = false;
   try {
     const now = Date.now();
     const spendable = await spendableFor(env, principal);
@@ -2094,6 +2104,7 @@ async function handleMockups(
       return refuse('account-suspended', SUSPENDED_MESSAGE, 403);
     }
     const { monthlyAllowance, topupCeiling } = spendable;
+    freePool = spendable.freePool === true;
     reserved = await reserveBudget(
       env,
       principal.userId,
@@ -2101,6 +2112,9 @@ async function handleMockups(
       monthlyAllowance,
       topupCeiling,
       now,
+      undefined,
+      undefined,
+      { freePool },
     );
   } catch (error) {
     console.error('budget unavailable', error);
@@ -2316,7 +2330,11 @@ async function handleMockups(
                   .USER_BUDGET!.getByName(ACCOUNT_BUDGET_KEY)
                   .settle(settleParams.accountReservationId, absorbedMicroUsd);
               }
-              retryHold = await reserveAccount(env, worstCase, Date.now());
+              retryHold = await reserveAccount(env, worstCase, Date.now(), {
+                // The run's own standing, not the plan's: a run paid from
+                // top-up credit left the Free share, and so does its retry.
+                freePool: reserved.layers.freePool === true,
+              });
             } catch (error) {
               // Either half failing refuses the retry: an unreconciled
               // reservation and an unread ceiling are both "the ledger

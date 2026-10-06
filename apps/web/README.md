@@ -703,6 +703,10 @@ true`).
    above (L36-L39).
 5. **Account-wide daily ceiling** -- `VIBLD_ACCOUNT_DAILY_MICRO_USD`,
    documented above (L29).
+6. **Free share of the day** -- `VIBLD_FREE_DAILY_MICRO_USD` (D158), $10 by
+   default: the most the Free plan may spend in a UTC day between all its
+   accounts, inside the account-wide ceiling, so free use never pauses a
+   paid run.
 
 ## Sandbox previews (docs/decisions.md L7-L11)
 

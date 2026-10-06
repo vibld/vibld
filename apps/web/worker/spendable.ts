@@ -16,6 +16,9 @@ import type { Principal } from './principal.ts';
 export interface SpendableEnv {
   DB?: D1Database;
   VIBLD_FREE_MONTHLY_MICRO_USD?: string;
+  /** Read only to know whether this deployment sells plans (`tierOf`). */
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
 }
 
 function positiveInt(raw: string | undefined, fallback: number): number {
@@ -41,6 +44,14 @@ export interface Spendable {
    * refusal say why, as `account-suspended` rather than `account-ceiling`.
    */
   suspended?: true;
+  /**
+   * The account is on the Free plan of a deployment that sells plans, so
+   * its runs also count against the Free plan's share of the day (D158,
+   * `reserve.ts`). Absent on a paid plan, a gifted one, and a deployment
+   * with no billing, where everybody is Free and there is nobody to keep
+   * room for.
+   */
+  freePool?: true;
 }
 
 /**
@@ -103,6 +114,9 @@ export async function spendableFor(
     // Stripe top-ups and admin-granted credit (L4) combined -- see
     // `totalSpendableCreditMicroUsd`'s own comment.
     topupCeiling: await billing.totalSpendableCreditMicroUsd(principal.userId),
+    ...(plan.tier === 'free' && billingConfigured(env)
+      ? { freePool: true as const }
+      : {}),
   };
 }
 

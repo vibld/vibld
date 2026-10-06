@@ -220,6 +220,9 @@ export async function handleChat(
       monthlyAllowance,
       topupCeiling,
       Date.now(),
+      undefined,
+      undefined,
+      { freePool: allowed.freePool === true },
     );
   } catch (error) {
     console.error('budget unavailable', error);

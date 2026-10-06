@@ -47,6 +47,28 @@ export interface Reservation {
   /** Present only when the verdict allows the run. */
   id?: number;
   spentMicroUsd: number;
+  /**
+   * Runs this ledger had in flight in the period when it answered, not
+   * counting the one it admitted. Lets a second ledger asked for the same
+   * run hold it to the in-flight limit the first one applied.
+   */
+  inFlight?: number;
+  /**
+   * True when the period had room and the pool did not (D158), so the
+   * refusal can say which. Absent on every other answer.
+   */
+  poolRefused?: true;
+}
+
+/**
+ * A share of one period that some rows also count against (D158): the
+ * Free plan's part of the deployment's day. A row in a pool still counts
+ * against the period's whole ceiling, so a pool can only ever refuse more,
+ * never admit more.
+ */
+export interface Pool {
+  name: string;
+  ceilingMicroUsd: number;
 }
 
 interface Totals {
@@ -73,6 +95,15 @@ export class UserBudget extends DurableObject {
       ctx.storage.sql.exec(
         `CREATE INDEX IF NOT EXISTS runs_by_day ON runs(day)`,
       );
+      // The pool a row also counts against inside its period (D158): the
+      // Free plan's share of the deployment's day. Added to tables made
+      // before it, since SQLite has no "ADD COLUMN IF NOT EXISTS".
+      const columns = ctx.storage.sql
+        .exec<{ name: string }>(`PRAGMA table_info(runs)`)
+        .toArray();
+      if (!columns.some((column) => column.name === 'pool')) {
+        ctx.storage.sql.exec(`ALTER TABLE runs ADD COLUMN pool TEXT`);
+      }
     });
   }
 
@@ -94,17 +125,10 @@ export class UserBudget extends DurableObject {
     ceilingMicroUsd: number,
     maxInFlight: number,
     periodKey: string,
+    pool?: Pool,
   ): Reservation {
     const now = Date.now();
-
-    // Reclaim reservations whose run never came back to settle. Without this
-    // a crashed Worker holds its worst case against the user indefinitely.
-    this.ctx.storage.sql.exec(
-      `UPDATE runs SET settled = ?, actual = reserved
-         WHERE settled IS NULL AND started < ?`,
-      now,
-      now - ABANDONED_AFTER_MS,
-    );
+    this.reclaimAbandoned(now);
 
     // Cursors are not a stable snapshot across an await, so it is consumed
     // immediately.
@@ -120,25 +144,54 @@ export class UserBudget extends DurableObject {
       .toArray();
 
     const spent = totals?.spent ?? 0;
+    const inFlight = totals?.inflight ?? 0;
     const verdict = decide({
       spentMicroUsd: spent,
-      inFlight: totals?.inflight ?? 0,
+      inFlight,
       worstCaseMicroUsd,
       ceilingMicroUsd,
       maxInFlight,
     });
 
     if (!verdict.allow) {
-      return { verdict, spentMicroUsd: spent };
+      return { verdict, spentMicroUsd: spent, inFlight };
+    }
+
+    if (pool) {
+      // Still no await: the same read-then-write the period's own check is.
+      const [pooled] = this.ctx.storage.sql
+        .exec<{ spent: number }>(
+          `SELECT COALESCE(SUM(COALESCE(actual, reserved)), 0) AS spent
+             FROM runs WHERE day = ? AND pool = ?`,
+          periodKey,
+          pool.name,
+        )
+        .toArray();
+      const poolVerdict = decide({
+        spentMicroUsd: pooled?.spent ?? 0,
+        inFlight: 0,
+        worstCaseMicroUsd,
+        ceilingMicroUsd: pool.ceilingMicroUsd,
+        maxInFlight,
+      });
+      if (!poolVerdict.allow) {
+        return {
+          verdict: poolVerdict,
+          spentMicroUsd: spent,
+          inFlight,
+          poolRefused: true,
+        };
+      }
     }
 
     const [row] = this.ctx.storage.sql
       .exec<{ id: number }>(
-        `INSERT INTO runs (day, started, reserved) VALUES (?, ?, ?)
+        `INSERT INTO runs (day, started, reserved, pool) VALUES (?, ?, ?, ?)
            RETURNING id`,
         periodKey,
         now,
         worstCaseMicroUsd,
+        pool?.name ?? null,
       )
       .toArray();
 
@@ -146,7 +199,42 @@ export class UserBudget extends DurableObject {
       verdict,
       id: row?.id,
       spentMicroUsd: spent + worstCaseMicroUsd,
+      inFlight,
     };
+  }
+
+  /**
+   * Reclaim reservations whose run never came back to settle. Without this
+   * a crashed Worker holds its worst case against the user indefinitely.
+   */
+  private reclaimAbandoned(now: number): void {
+    this.ctx.storage.sql.exec(
+      `UPDATE runs SET settled = ?, actual = reserved
+         WHERE settled IS NULL AND started < ?`,
+      now,
+      now - ABANDONED_AFTER_MS,
+    );
+  }
+
+  /**
+   * How many runs are in flight in this period, for a second ledger
+   * enforcing one in-flight limit across both (`reserve.ts`, internal PR 374 review).
+   *
+   * Reclaims first, exactly as `reserve` does, so a run that died stops
+   * counting after the same window here as it does there: this ledger may
+   * be read for its count long after anything last reserved in it.
+   */
+  inFlightFor(periodKey: string): number {
+    this.reclaimAbandoned(Date.now());
+    const [row] = this.ctx.storage.sql
+      .exec<{ inflight: number }>(
+        `SELECT COALESCE(SUM(CASE WHEN settled IS NULL THEN 1 ELSE 0 END), 0)
+           AS inflight
+         FROM runs WHERE day = ?`,
+        periodKey,
+      )
+      .toArray();
+    return row?.inflight ?? 0;
   }
 
   /**
@@ -176,6 +264,15 @@ export class UserBudget extends DurableObject {
       actualMicroUsd,
       id,
     );
+  }
+
+  /**
+   * Take a row out of its pool, leaving it in its period (D158). For a Free
+   * account's run that turned out to draw on top-up credit, which is paid
+   * money and not the Free plan's share of the day.
+   */
+  leavePool(id: number): void {
+    this.ctx.storage.sql.exec(`UPDATE runs SET pool = NULL WHERE id = ?`, id);
   }
 
   /**

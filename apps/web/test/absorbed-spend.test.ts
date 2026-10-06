@@ -74,7 +74,7 @@ describe('accounting for an attempt nobody was billed for', () => {
     const block = source.slice(hook, source.indexOf('},', hook));
     assert.match(
       block,
-      /retryHold = await reserveAccount\(env, worstCase, Date\.now\(\)\)/,
+      /retryHold = await reserveAccount\(env, worstCase, Date\.now\(\),/,
       'the retry is sent without holding anything against the daily ceiling',
     );
     assert.match(
