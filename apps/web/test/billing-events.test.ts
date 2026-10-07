@@ -186,6 +186,45 @@ describe('applyStripeEvent: the purchase hook', () => {
     assert.deepEqual(seen, []);
   });
 
+  it('marks a top-up that completed unpaid, and drops the mark if it fails (D167)', async () => {
+    const store = newStore();
+    await applyStripeEvent(
+      store,
+      topup({ payment_status: 'unpaid', payment_intent: 'pi_debit' }),
+    );
+    assert.deepEqual(await store.uncreditedUnsettledTopups('user_1'), [
+      'pi_debit',
+    ]);
+    await applyStripeEvent(
+      store,
+      stripeEvent(
+        'checkout.session.async_payment_failed',
+        checkoutSession({ id: 'cs_topup', mode: 'payment' }),
+      ),
+    );
+    assert.deepEqual(await store.uncreditedUnsettledTopups('user_1'), []);
+  });
+
+  it('counts a marked top-up as settled once it is credited (D167)', async () => {
+    const store = newStore();
+    await applyStripeEvent(
+      store,
+      topup({ payment_status: 'unpaid', payment_intent: 'pi_debit' }),
+    );
+    await applyStripeEvent(
+      store,
+      stripeEvent(
+        'checkout.session.async_payment_succeeded',
+        checkoutSession({
+          id: 'cs_topup',
+          mode: 'payment',
+          payment_status: 'paid',
+        }),
+      ),
+    );
+    assert.deepEqual(await store.uncreditedUnsettledTopups('user_1'), []);
+  });
+
   it('announces the delayed payment when it finally settles', async () => {
     const seen: string[] = [];
     await applyStripeEvent(

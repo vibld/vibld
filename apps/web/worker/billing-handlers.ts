@@ -1,5 +1,6 @@
 import type Stripe from 'stripe';
 import { resolvePrincipal } from './principal.ts';
+import type { Principal } from './principal.ts';
 import { BILLABLE_STATUSES, BillingStore } from './billing-store.ts';
 import {
   applyStripeEvent,
@@ -14,6 +15,7 @@ import { ReferralStore } from './referral-store.ts';
 import {
   createCancelSession,
   createCardSetupSession,
+  AutoSubscribeInFlightError,
   createCheckoutSession,
   createPortalSession,
 } from './billing-checkout.ts';
@@ -142,6 +144,16 @@ export async function handleBillingCheckout(
     );
     return json({ url });
   } catch (error) {
+    if (error instanceof AutoSubscribeInFlightError) {
+      return json(
+        {
+          error:
+            'Auto-subscribe is starting the Build plan for this account. Check back in a few minutes.',
+          autoSubscribing: true,
+        },
+        409,
+      );
+    }
     console.error('failed to create checkout session', error);
     return json({ error: 'Could not start checkout. Try again shortly.' }, 502);
   }
@@ -393,6 +405,115 @@ export async function handleBillingAutoReload(
     monthlyCapUsdCents: cap,
     card: { brand: card.brand, last4: card.last4 },
     ...(reload ? { reload } : {}),
+  });
+}
+
+/**
+ * POST { enabled } -> the account's auto-subscribe setting (D167).
+ *
+ * Offered on Free only: an account on a plan already has what this would
+ * start. Turning it on finds the card the plan will start on, and refuses
+ * with `needsCard` when Stripe holds none that can be charged without the
+ * person there. When the account is already out, the plan is started at
+ * once (`subscribeNow`): turning it on while out is asking for it.
+ */
+export async function handleBillingAutoSubscribe(
+  request: Request,
+  env: BillingEnv,
+  subscribeNow?: (userId: string) => Promise<unknown>,
+  client?: Pick<Stripe, 'customers'>,
+  /**
+   * The access decision for turning it on, which the route table leaves to
+   * this handler (access-gate.ts): a refusal, or undefined when admitted.
+   */
+  gate?: (principal: Principal) => Promise<Response | undefined>,
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!billingConfigured(env)) {
+    return json(
+      { error: 'Billing is not configured for this deployment.' },
+      503,
+    );
+  }
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { userId } = resolved.principal;
+
+  const body = (await request.json().catch(() => null)) as {
+    enabled?: unknown;
+  } | null;
+  if (typeof body?.enabled !== 'boolean') {
+    return json({ error: 'enabled must be true or false.' }, 400);
+  }
+
+  const store = new BillingStore(env.DB!);
+  if (!body.enabled) {
+    await store.saveAutoSubscribeSettings(userId, { enabled: false });
+    return json({ enabled: false });
+  }
+  const refused = await gate?.(resolved.principal);
+  if (refused) return refused;
+  if (await store.isSuspended(userId)) {
+    return json({ error: SUSPENDED_MESSAGE }, 403);
+  }
+  // On Free as the claim sees it: a past_due or paused subscription, which
+  // grants nothing, still counts as a plan, and the switch could never act.
+  if (!(await store.onFree(userId))) {
+    return json(
+      { error: 'This account is already on a plan.', alreadySubscribed: true },
+      409,
+    );
+  }
+  const alreadyUsed = () =>
+    json(
+      {
+        error:
+          'Auto-subscribe has already started a plan for this account, and it does that only once.',
+        alreadyUsed: true,
+      },
+      409,
+    );
+  if ((await store.autoSubscribeSettings(userId))?.used) return alreadyUsed();
+  const customer = await store.findCustomerId(userId);
+  let card: Awaited<ReturnType<typeof resolveReusableCard>>;
+  try {
+    card = customer
+      ? await resolveReusableCard(client ?? createStripeClient(env), customer)
+      : undefined;
+  } catch (error) {
+    console.error('could not read saved cards for auto-subscribe', error);
+    return json(
+      { error: 'Could not read your saved card. Try again shortly.' },
+      502,
+    );
+  }
+  if (!card) {
+    return json(
+      {
+        error:
+          'Add a card first: auto-subscribe starts the plan on a card saved to this account.',
+        needsCard: true,
+      },
+      409,
+    );
+  }
+  // Asked again in the write itself: a plan started while the card was
+  // being read leaves it off.
+  if (
+    !(await store.saveAutoSubscribeSettings(userId, { enabled: true, card }))
+  ) {
+    return alreadyUsed();
+  }
+  if (subscribeNow) {
+    await subscribeNow(userId).catch((error: unknown) => {
+      console.error('auto-subscribe on enable failed', error);
+    });
+  }
+  const settings = await store.autoSubscribeSettings(userId);
+  return json({
+    enabled: settings?.enabled ?? false,
+    card: { brand: card.brand, last4: card.last4 },
+    disabledReason: settings?.disabledReason ?? null,
   });
 }
 

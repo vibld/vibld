@@ -32,6 +32,16 @@ class SqliteD1Statement implements D1PreparedStatement {
 
   async run<T = Record<string, unknown>>(): Promise<D1Result<T>> {
     const statement = this.#db.prepare(this.#sql);
+    // D1 gives a RETURNING statement's rows from run() too, which a batch
+    // is the only way to read.
+    if (/\bRETURNING\b/i.test(this.#sql)) {
+      const rows = statement.all(...(this.#values as never[]));
+      return {
+        results: rows as T[],
+        success: true,
+        meta: { changes: rows.length, last_row_id: 0 },
+      };
+    }
     const result = statement.run(...(this.#values as never[]));
     return {
       results: [],

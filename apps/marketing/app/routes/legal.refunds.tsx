@@ -29,8 +29,11 @@ export default function Refunds() {
         is off unless you turn it on: it then charges your saved card for a $10
         top-up when less than $1 is left to spend, never more in a month than
         the limit you choose ($10 to $100), and you can turn it off at any time.
-        Saving a card for the Free plan&apos;s monthly allowance charges
-        nothing, so there is nothing to refund.
+        Auto-subscribe, on the Free plan, is off unless you turn it on too: it
+        then starts a monthly Build subscription on your saved card, once, when
+        less than $1 is left to spend, and that subscription renews and is
+        canceled like any other (below). Saving a card for the Free plan&apos;s
+        monthly allowance charges nothing, so there is nothing to refund.
       </p>
 
       <h2>Canceling a subscription</h2>

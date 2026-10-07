@@ -44,6 +44,7 @@ import type {
   DeletionRecord,
   ImmediateStep,
 } from './account-deletion-store.ts';
+import { AUTO_SUBSCRIBE_DISPATCH_LEASE_MS } from './auto-subscribe.ts';
 import { BILLABLE_STATUSES, BillingStore } from './billing-store.ts';
 import { clerkLookupConfigured } from './clerk-lookup.ts';
 import type { ClerkLookupEnv } from './clerk-lookup.ts';
@@ -254,6 +255,15 @@ async function cancelSubscriptions(
   if (!deps.stripe) {
     return 'Your subscription could not be canceled: billing is not configured here.';
   }
+  // An auto-subscribe request already sent (D167) may start a plan after
+  // the list below: the deletion stops any new one, not one in flight. Until
+  // its lease has run out the step is not done, so a later pass cancels the
+  // plan it made.
+  const auto = await deps.billing.autoSubscribeState(userId);
+  const sending =
+    auto.dispatchedAt !== null &&
+    deps.now().getTime() - Date.parse(auto.dispatchedAt) <
+      AUTO_SUBSCRIBE_DISPATCH_LEASE_MS;
   const page = await deps.stripe.subscriptions.list({
     customer: customerId,
     status: 'all',
@@ -266,7 +276,7 @@ async function cancelSubscriptions(
       prorate: false,
     });
   }
-  return true;
+  return sending ? STEP_FAILED.subscription : true;
 }
 
 export interface ImmediateOptions {
@@ -350,8 +360,9 @@ const STEPS: Record<
 
 /** D1 queries one attempt at every immediate step can cost from the nightly pass. */
 export const QUERIES_PER_RETRY =
-  // The customer mapping, then the mirror when there is no mapping.
-  2 +
+  // The customer mapping, then the mirror when there is no mapping, then
+  // whether an auto-subscribe request may still be in flight (D167).
+  3 +
   // Preview: the share links whose previews to stop. Sites: the live-site
   // read. GitHub: the revoke, which is two statements since D72 (every
   // project's binding and the account's connection). They go in one batch,
@@ -468,7 +479,7 @@ export const PURGE_STEPS: readonly PurgeStep[] = [
     // made completed afterwards and started a subscription nobody asked to
     // stop. Cheap, and the purge is the last chance to notice.
     name: 'subscription',
-    queries: 2,
+    queries: 3,
     async run(deps, record) {
       const outcome = await cancelSubscriptions(deps, record.userId);
       return outcome === true ? 'done' : { error: outcome };

@@ -308,6 +308,46 @@ interface AutoReloadRow {
   disabled_reason: string | null;
 }
 
+/** Why auto-subscribe turned itself off (D167). */
+export type AutoSubscribeDisabledReason =
+  'subscribed' | 'declined' | 'authentication_required' | 'no_card';
+
+export interface AutoSubscribeSettings {
+  enabled: boolean;
+  paymentMethodId: string | null;
+  card: { brand: string; last4: string } | null;
+  disabledReason: AutoSubscribeDisabledReason | null;
+  /** The attempt in flight, if any, and when it was claimed. */
+  attempt: { id: string; claimedAt: string } | null;
+  /** It has started a plan: it does that once, and is not turned on again. */
+  used: boolean;
+}
+
+interface AutoSubscribeRow {
+  enabled: number;
+  payment_method_id: string | null;
+  card_brand: string | null;
+  card_last4: string | null;
+  disabled_reason: string | null;
+  attempt_id: string | null;
+  attempt_claimed_at: string | null;
+  stripe_subscription_id: string | null;
+}
+
+/**
+ * Still on Free, in SQL, for the statements that start a plan: no
+ * subscription Stripe may bill (`BILLABLE_STATUSES`), and no gifted plan in
+ * force at `now`. `?1` is the user id.
+ */
+function onFreeSql(now: string): string {
+  return `NOT EXISTS (SELECT 1 FROM billing_subscriptions
+                       WHERE user_id = ?1
+                         AND status IN (${BILLABLE_STATUS_SQL}))
+          AND NOT EXISTS (SELECT 1 FROM plan_gifts
+                       WHERE user_id = ?1 AND revoked_at IS NULL
+                         AND (ends_at IS NULL OR ends_at > ${now}))`;
+}
+
 export class BillingStore {
   #db: D1Database;
 
@@ -1015,6 +1055,78 @@ export class BillingStore {
       .bind(grantId, userId, claim.grantedByEmail, claim.note, now)
       .run();
     return { outcome: 'granted', paid: paid.meta.changes > 0 };
+  }
+
+  /**
+   * A top-up whose Checkout completed unpaid, its payment still on the way
+   * (a bank debit). Auto-subscribe waits on it (D167) until it is credited
+   * or its payment fails (`dropUnsettledTopup`).
+   */
+  async recordUnsettledTopup(
+    stripeCheckoutSessionId: string,
+    userId: string,
+    stripePaymentIntentId: string | null,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_unsettled_topups
+           (stripe_checkout_session_id, user_id, stripe_payment_intent_id,
+            created_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(stripe_checkout_session_id) DO NOTHING`,
+      )
+      .bind(
+        stripeCheckoutSessionId,
+        userId,
+        stripePaymentIntentId,
+        new Date().toISOString(),
+      )
+      .run();
+  }
+
+  async dropUnsettledTopup(stripeCheckoutSessionId: string): Promise<void> {
+    await this.#db
+      .prepare(
+        `DELETE FROM billing_unsettled_topups
+          WHERE stripe_checkout_session_id = ?1`,
+      )
+      .bind(stripeCheckoutSessionId)
+      .run();
+  }
+
+  /**
+   * The payment intents of this account's unsettled top-ups not yet
+   * credited: null in the list where the intent is not known.
+   */
+  async uncreditedUnsettledTopups(userId: string): Promise<(string | null)[]> {
+    const rows = await this.#db
+      .prepare(
+        `SELECT u.stripe_payment_intent_id AS intent
+           FROM billing_unsettled_topups u
+          WHERE u.user_id = ?1
+            AND NOT EXISTS (
+                  SELECT 1 FROM billing_topups t
+                   WHERE t.stripe_checkout_session_id =
+                         u.stripe_checkout_session_id)`,
+      )
+      .bind(userId)
+      .all<{ intent: string | null }>();
+    return rows.results.map((row) => row.intent);
+  }
+
+  /** Whether each of these top-up Checkout sessions has been credited. */
+  async topupsRecorded(stripeCheckoutSessionIds: string[]): Promise<boolean> {
+    for (const id of stripeCheckoutSessionIds) {
+      const row = await this.#db
+        .prepare(
+          `SELECT 1 AS found FROM billing_topups
+            WHERE stripe_checkout_session_id = ?1`,
+        )
+        .bind(id)
+        .first();
+      if (!row) return false;
+    }
+    return true;
   }
 
   async recordTopup(
@@ -1938,7 +2050,8 @@ export class BillingStore {
    * index and the (user, period, seq) key turn a lost race into nothing.
    *
    * Refused while auto-reload is off or has no card, while another charge
-   * for the account is in flight, once the month holds as many charges as
+   * for the account is in flight, or an auto-subscribe attempt
+   * (`claimAutoSubscribe`, which refuses in turn while this one is), once the month holds as many charges as
    * the cap buys (counted in the month each was made, `charged_period`),
    * and once the account has asked to be deleted (docs/decisions.md L32)
    * or lost its invite (`autoReloadBarred`): a run that settles after
@@ -1968,6 +2081,8 @@ export class BillingStore {
             AND s.payment_method_id IS NOT NULL
             AND NOT EXISTS (SELECT 1 FROM billing_auto_reload_attempts
                              WHERE user_id = ?1 AND state = 'pending')
+            AND NOT EXISTS (SELECT 1 FROM billing_auto_subscribe
+                             WHERE user_id = ?1 AND attempt_id IS NOT NULL)
             AND NOT (${autoReloadBarredSql('?6', '?7')})
             AND (SELECT COUNT(*) FROM billing_auto_reload_attempts
                   WHERE user_id = ?1 AND charged_period = ?2
@@ -2178,5 +2293,291 @@ export class BillingStore {
       .bind(userId, period)
       .first<{ n: number }>();
     return row?.n ?? 0;
+  }
+
+  /** This account's auto-subscribe settings (D167), or undefined if never set. */
+  async autoSubscribeSettings(
+    userId: string,
+  ): Promise<AutoSubscribeSettings | undefined> {
+    const row = await this.#db
+      .prepare(
+        `SELECT enabled, payment_method_id, card_brand, card_last4,
+                disabled_reason, attempt_id, attempt_claimed_at,
+                stripe_subscription_id
+           FROM billing_auto_subscribe WHERE user_id = ?1`,
+      )
+      .bind(userId)
+      .first<AutoSubscribeRow>();
+    if (!row) return undefined;
+    return {
+      enabled: row.enabled === 1,
+      paymentMethodId: row.payment_method_id,
+      card:
+        row.card_brand && row.card_last4
+          ? { brand: row.card_brand, last4: row.card_last4 }
+          : null,
+      disabledReason: row.disabled_reason as AutoSubscribeDisabledReason | null,
+      attempt:
+        row.attempt_id && row.attempt_claimed_at
+          ? { id: row.attempt_id, claimedAt: row.attempt_claimed_at }
+          : null,
+      used: row.stripe_subscription_id !== null,
+    };
+  }
+
+  /**
+   * Where auto-subscribe stands for a Checkout (D167): whether an
+   * attempt is in flight, and the plan it started, if any. Read before and
+   * after the session is created, a change in either means auto-subscribe
+   * acted in between, so the session must not be handed out.
+   */
+  async autoSubscribeState(userId: string): Promise<{
+    inFlight: boolean;
+    subscriptionId: string | null;
+    dispatchedAt: string | null;
+  }> {
+    const row = await this.#db
+      .prepare(
+        `SELECT attempt_id, stripe_subscription_id, attempt_dispatched_at
+           FROM billing_auto_subscribe
+          WHERE user_id = ?1`,
+      )
+      .bind(userId)
+      .first<{
+        attempt_id: string | null;
+        stripe_subscription_id: string | null;
+        attempt_dispatched_at: string | null;
+      }>();
+    return {
+      inFlight: row?.attempt_id != null,
+      subscriptionId: row?.stripe_subscription_id ?? null,
+      dispatchedAt: row?.attempt_id != null ? row.attempt_dispatched_at : null,
+    };
+  }
+
+  /**
+   * Whether the account is on Free as the statements that start a plan see
+   * it (`onFreeSql`): a subscription Stripe may still bill, `past_due` or
+   * `paused` among them, counts as a plan, though it grants nothing.
+   */
+  async onFree(
+    userId: string,
+    now: string = new Date().toISOString(),
+  ): Promise<boolean> {
+    const row = await this.#db
+      .prepare(`SELECT 1 AS free WHERE ${onFreeSql('?2')}`)
+      .bind(userId, now)
+      .first<{ free: number }>();
+    return row !== null;
+  }
+
+  /**
+   * Turn auto-subscribe on, with the card it will start the plan on, or off.
+   * Either clears a reason it turned itself off for, and either is a new
+   * save (`version`), so an attempt claimed from the one before gives way.
+   * The attempt itself is left for the check that owns it to end. Turning
+   * it on is refused (false) once it has started a plan, in the same
+   * statement, so a plan started while the request was being made wins.
+   */
+  async saveAutoSubscribeSettings(
+    userId: string,
+    settings: {
+      enabled: boolean;
+      card?: { paymentMethodId: string; brand: string; last4: string };
+    },
+  ): Promise<boolean> {
+    const result = await this.#db
+      .prepare(
+        `INSERT INTO billing_auto_subscribe
+           (user_id, enabled, payment_method_id, card_brand, card_last4,
+            disabled_reason, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)
+         ON CONFLICT(user_id) DO UPDATE SET
+           enabled = excluded.enabled,
+           payment_method_id = COALESCE(excluded.payment_method_id,
+                                        billing_auto_subscribe.payment_method_id),
+           card_brand = COALESCE(excluded.card_brand,
+                                 billing_auto_subscribe.card_brand),
+           card_last4 = COALESCE(excluded.card_last4,
+                                 billing_auto_subscribe.card_last4),
+           disabled_reason = NULL,
+           version = billing_auto_subscribe.version + 1,
+           updated_at = excluded.updated_at
+         WHERE excluded.enabled = 0
+            OR billing_auto_subscribe.stripe_subscription_id IS NULL`,
+      )
+      .bind(
+        userId,
+        settings.enabled ? 1 : 0,
+        settings.card?.paymentMethodId ?? null,
+        settings.card?.brand ?? null,
+        settings.card?.last4 ?? null,
+        new Date().toISOString(),
+      )
+      .run();
+    return result.meta.changes > 0;
+  }
+
+  /**
+   * Claim the one attempt to start this account's plan (D167), or nothing.
+   * One statement: on, with a card, no attempt already in flight (nor an
+   * auto-reload charge: each claim refuses while the other's is held, so
+   * the two can never both buy), still on
+   * Free (`onFreeSql`), and not barred (`autoReloadBarredSql`, whose
+   * terms are the same for any charge made without the person there). The
+   * card is read in the same statement, so the attempt is about one save.
+   */
+  async claimAutoSubscribe(
+    userId: string,
+    now: string = new Date().toISOString(),
+    access: AutoReloadAccess = INVITE_GATED,
+  ): Promise<{ attemptId: string; paymentMethodId: string } | undefined> {
+    const row = await this.#db
+      .prepare(
+        `UPDATE billing_auto_subscribe
+            SET attempt_id = ?2, attempt_claimed_at = ?3,
+                attempt_version = version, attempt_dispatched_at = NULL,
+                updated_at = ?3
+          WHERE user_id = ?1 AND enabled = 1 AND attempt_id IS NULL
+            AND payment_method_id IS NOT NULL
+            AND stripe_subscription_id IS NULL
+            AND NOT EXISTS (SELECT 1 FROM billing_auto_reload_attempts
+                             WHERE user_id = ?1 AND state = 'pending')
+            AND ${onFreeSql('?3')}
+            AND NOT (${autoReloadBarredSql('?4', '?5')})
+         RETURNING attempt_id, payment_method_id`,
+      )
+      .bind(userId, crypto.randomUUID(), now, ...accessParams(access))
+      .first<{ attempt_id: string; payment_method_id: string }>();
+    return row
+      ? { attemptId: row.attempt_id, paymentMethodId: row.payment_method_id }
+      : undefined;
+  }
+
+  /**
+   * Whether the attempt may still be sent to Stripe, asked in one statement
+   * as the last thing before it is: still this account's attempt, still on
+   * with the save the claim read, still on Free, not barred. True also
+   * records the dispatch, which keeps the attempt from being given up while
+   * its request may be in flight (`giveUpAutoSubscribe`), and the referral
+   * barrier's earliest term (`recordPurchaseStarted`), in the same batch:
+   * an attempt this says no to never sent a purchase, so leaves no barrier.
+   * The card is read here too: the one the claim's save named.
+   */
+  async autoSubscribeAttemptCurrent(
+    userId: string,
+    attemptId: string,
+    now: string = new Date().toISOString(),
+    access: AutoReloadAccess = INVITE_GATED,
+  ): Promise<{ paymentMethodId: string } | undefined> {
+    const [dispatched] = await this.#db.batch([
+      this.#db
+        .prepare(
+          `UPDATE billing_auto_subscribe
+              SET attempt_dispatched_at = ?3
+            WHERE user_id = ?1 AND attempt_id = ?2 AND enabled = 1
+              AND version = attempt_version
+              AND payment_method_id IS NOT NULL
+              AND stripe_subscription_id IS NULL
+              AND ${onFreeSql('?3')}
+              AND NOT (${autoReloadBarredSql('?4', '?5')})
+           RETURNING payment_method_id`,
+        )
+        .bind(userId, attemptId, now, ...accessParams(access)),
+      // Only when the statement above recorded this dispatch.
+      this.#db
+        .prepare(
+          `INSERT INTO billing_purchase_starts (user_id, started_at)
+           SELECT ?1, ?3
+            WHERE EXISTS (
+                    SELECT 1 FROM billing_auto_subscribe
+                     WHERE user_id = ?1 AND attempt_id = ?2
+                       AND attempt_dispatched_at = ?3)
+           ON CONFLICT(user_id) DO NOTHING`,
+        )
+        .bind(userId, attemptId, now),
+    ]);
+    const row = (
+      dispatched?.results as { payment_method_id: string }[] | undefined
+    )?.[0];
+    return row ? { paymentMethodId: row.payment_method_id } : undefined;
+  }
+
+  /**
+   * It started the plan: auto-subscribe has done the one thing it does, and
+   * turns itself off saying so. From the charge's own reply or from the
+   * webhook, whichever is first; the second changes nothing. A subscription
+   * it started under an attempt since given up still counts.
+   */
+  async settleAutoSubscribed(
+    userId: string,
+    stripeSubscriptionId: string,
+  ): Promise<boolean> {
+    const result = await this.#db
+      .prepare(
+        `UPDATE billing_auto_subscribe
+            SET enabled = 0, disabled_reason = 'subscribed',
+                stripe_subscription_id = ?2,
+                attempt_id = NULL, attempt_claimed_at = NULL,
+                attempt_version = NULL, attempt_dispatched_at = NULL,
+                updated_at = ?3
+          WHERE user_id = ?1 AND stripe_subscription_id IS NULL`,
+      )
+      .bind(userId, stripeSubscriptionId, new Date().toISOString())
+      .run();
+    return result.meta.changes > 0;
+  }
+
+  /**
+   * Stripe refused the attempt: it ends, and auto-subscribe turns itself off
+   * for `reason`, in the same single-row write, but only while the
+   * setting is still the save the claim read its card from. False, and
+   * nothing written, when the attempt had already ended.
+   */
+  async failAutoSubscribe(
+    userId: string,
+    attemptId: string,
+    reason: Exclude<AutoSubscribeDisabledReason, 'subscribed'>,
+  ): Promise<boolean> {
+    const result = await this.#db
+      .prepare(
+        `UPDATE billing_auto_subscribe
+            SET enabled = CASE WHEN version = attempt_version THEN 0
+                               ELSE enabled END,
+                disabled_reason = CASE WHEN version = attempt_version THEN ?3
+                                       ELSE disabled_reason END,
+                attempt_id = NULL, attempt_claimed_at = NULL,
+                attempt_version = NULL, attempt_dispatched_at = NULL,
+                updated_at = ?4
+          WHERE user_id = ?1 AND attempt_id = ?2`,
+      )
+      .bind(userId, attemptId, reason, new Date().toISOString())
+      .run();
+    return result.meta.changes > 0;
+  }
+
+  /**
+   * Ends an attempt that never started a plan, leaving the setting as it
+   * is, but only once no request under its key can still be in flight:
+   * never dispatched, or last dispatched before `dispatchedBefore`.
+   */
+  async giveUpAutoSubscribe(
+    userId: string,
+    attemptId: string,
+    dispatchedBefore: string,
+  ): Promise<boolean> {
+    const result = await this.#db
+      .prepare(
+        `UPDATE billing_auto_subscribe
+            SET attempt_id = NULL, attempt_claimed_at = NULL,
+                attempt_version = NULL, attempt_dispatched_at = NULL,
+                updated_at = ?3
+          WHERE user_id = ?1 AND attempt_id = ?2
+            AND (attempt_dispatched_at IS NULL
+                 OR attempt_dispatched_at < ?4)`,
+      )
+      .bind(userId, attemptId, new Date().toISOString(), dispatchedBefore)
+      .run();
+    return result.meta.changes > 0;
   }
 }

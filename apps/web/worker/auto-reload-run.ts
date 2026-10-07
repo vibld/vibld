@@ -7,6 +7,8 @@ import { platformAdminsFor } from './platform-admins.ts';
 import type { PrincipalEnv } from './principal.ts';
 import { maybeAutoReload } from './auto-reload.ts';
 import type { AutoReloadOutcome } from './auto-reload.ts';
+import { maybeAutoSubscribe } from './auto-subscribe.ts';
+import type { AutoSubscribeOutcome } from './auto-subscribe.ts';
 import { payReferralIfEarned } from './referral-payout.ts';
 import { ReferralStore } from './referral-store.ts';
 import { largestSpendableMicroUsd } from './spendable.ts';
@@ -37,6 +39,17 @@ export async function autoReloadFor(
   const budget = env.USER_BUDGET;
   try {
     const billing = new BillingStore(env.DB);
+    // Auto-subscribe first (D167): on Free, the plan is what an account that
+    // turned it on asked for in place of a top-up. While its attempt is in
+    // flight or has just started the plan, no top-up is bought beside it.
+    const subscribed = await autoSubscribeFor(env, userId);
+    if (
+      subscribed === 'subscribed' ||
+      subscribed === 'pending' ||
+      (await billing.autoSubscribeSettings(userId))?.attempt
+    ) {
+      return 'skipped';
+    }
     const referrals = new ReferralStore(env.DB);
     const outcome = await maybeAutoReload(
       {
@@ -64,6 +77,46 @@ export async function autoReloadFor(
     return outcome;
   } catch (error) {
     console.error('auto-reload check failed', error);
+    return undefined;
+  }
+}
+
+/**
+ * Start the Build plan for this account if auto-subscribe is due (D167).
+ * Asked by `autoReloadFor`, before a top-up is. Never throws, for the same
+ * reason.
+ */
+export async function autoSubscribeFor(
+  env: AutoReloadEnv,
+  userId: string,
+): Promise<AutoSubscribeOutcome | undefined> {
+  if (!billingConfigured(env) || !env.DB || !env.USER_BUDGET) return undefined;
+  const budget = env.USER_BUDGET;
+  const db = env.DB;
+  try {
+    const billing = new BillingStore(db);
+    // One D1 read for the account that never turned it on.
+    if (!(await billing.autoSubscribeSettings(userId))) return 'off';
+    const outcome = await maybeAutoSubscribe(
+      {
+        store: billing,
+        stripe: createStripeClient(env),
+        access: {
+          inviteGated: parseAccessMode(env.VIBLD_ACCESS_MODE) === 'invite',
+          admins: platformAdminsFor(env),
+        },
+        spendableLeftMicroUsd: () =>
+          largestSpendableMicroUsd({ ...env, USER_BUDGET: budget }, userId),
+        onFree: () => billing.onFree(userId),
+      },
+      userId,
+    );
+    if (outcome !== 'off' && outcome !== 'skipped') {
+      console.log(JSON.stringify({ event: 'billing.auto_subscribe', outcome }));
+    }
+    return outcome;
+  } catch (error) {
+    console.error('auto-subscribe check failed', error);
     return undefined;
   }
 }

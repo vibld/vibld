@@ -13,6 +13,7 @@ import { SignedIn } from '../auth/clerk.tsx';
 import { signInConfigured } from '../auth/mode.ts';
 import { SignupCreditOffer } from './SignupCreditOffer.tsx';
 import { AutoReload } from './AutoReload.tsx';
+import { AutoSubscribe } from './AutoSubscribe.tsx';
 
 /**
  * The header's billing affordance: this caller's tier and usage, a picker to
@@ -177,6 +178,23 @@ export function BillingStatusPanel() {
        * on keeps the switch to turn it off: lifted later, the suspension
        * would otherwise charge the card before it had any way to opt out.
        */}
+      {/*
+       * Auto-subscribe (D167) is offered to an account on Free. One that has
+       * it on keeps the switch to turn it off, as above, while suspended or
+       * on another plan: that plan ending would otherwise start Build before
+       * it had any way to opt out.
+       */}
+      {status.autoSubscribe &&
+      ((status.tier === 'free' && !status.suspended) ||
+        status.autoSubscribe.enabled) ? (
+        <AutoSubscribe
+          status={status.autoSubscribe}
+          offOnly={status.suspended || status.tier !== 'free'}
+          onChanged={() => setReads((n) => n + 1)}
+          setAction={(action) => void redirect(action)}
+        />
+      ) : null}
+
       {status.autoReload && (!status.suspended || status.autoReload.enabled) ? (
         <AutoReload
           status={status.autoReload}

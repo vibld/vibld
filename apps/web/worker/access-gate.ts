@@ -170,6 +170,13 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // prevent. A route listed here has to be read-only in fact, not in
   // description.
   '/api/billing/status': 'a balance read, with its one write behind the gate',
+  // Starting a paid plan on a saved card without the person there (D167).
+  // Turning it on is taking money as checkout is, and is behind the access
+  // decision inside the handler. Turning it off is open: an account whose
+  // invite was withdrawn must still be able to take back that standing
+  // permission, or a later restore would start the plan before it could.
+  '/api/billing/auto-subscribe':
+    'turning it off; turning it on is behind the gate in the handler',
   // A read of what this caller's own runs did. Same reason as the balance
   // above: somebody who was invited, generated, and then had access revoked
   // can still see what became of the runs they paid for. It grants nothing

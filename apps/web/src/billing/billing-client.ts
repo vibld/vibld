@@ -71,6 +71,38 @@ export interface BillingStatus {
    * is: absent, the panel offers none.
    */
   autoReload?: AutoReloadStatus;
+  /** Opt-in auto-subscribe (D167), optional for the same reason. */
+  autoSubscribe?: AutoSubscribeStatus;
+}
+
+/** Why auto-subscribe turned itself off. */
+export type AutoSubscribeDisabledReason =
+  'subscribed' | 'declined' | 'authentication_required' | 'no_card';
+
+export interface AutoSubscribeStatus {
+  enabled: boolean;
+  card: { brand: string; last4: string } | null;
+  disabledReason: AutoSubscribeDisabledReason | null;
+  /** It already started a plan for this account, which it does only once. */
+  used?: boolean;
+  /** What the Build plan costs a month, in cents. */
+  buildMonthlyUsdCents: number;
+}
+
+/** The sentence the panel says when auto-subscribe turned itself off. */
+export function autoSubscribeOffReason(
+  reason: AutoSubscribeDisabledReason | null,
+): string | null {
+  switch (reason) {
+    case 'declined':
+      return 'Auto-subscribe is off: your card was declined.';
+    case 'authentication_required':
+      return 'Auto-subscribe is off: your bank asked to confirm the charge, which cannot happen while you are away.';
+    case 'no_card':
+      return 'Auto-subscribe is off: the card it would charge is no longer saved.';
+    default:
+      return null;
+  }
 }
 
 /** Why auto-reload turned itself off. */
@@ -322,6 +354,38 @@ export async function setAutoReload(
       typeof problem?.error === 'string'
         ? problem.error
         : 'Could not change auto-reload. Try again shortly.',
+    needsCard: problem?.needsCard === true,
+  };
+}
+
+/**
+ * Turn auto-subscribe on or off (D167). A refusal comes back as a value,
+ * as for auto-reload.
+ */
+export async function setAutoSubscribe(
+  enabled: boolean,
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<AutoReloadResult> {
+  const response = await fetchImpl('/api/billing/auto-subscribe', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(await authHeaders(getToken)),
+    },
+    body: JSON.stringify({ enabled }),
+  });
+  if (response.ok) return { ok: true };
+  const problem = (await response.json().catch(() => null)) as {
+    error?: unknown;
+    needsCard?: unknown;
+  } | null;
+  return {
+    ok: false,
+    error:
+      typeof problem?.error === 'string'
+        ? problem.error
+        : 'Could not change auto-subscribe. Try again shortly.',
     needsCard: problem?.needsCard === true,
   };
 }

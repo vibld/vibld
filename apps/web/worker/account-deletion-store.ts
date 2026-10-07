@@ -560,13 +560,17 @@ export class AccountDeletionStore {
       // The account's auto-reload setting and the card it named (D166):
       // nothing is charged for an account that is gone.
       `DELETE FROM billing_auto_reload WHERE user_id = ?1`,
+      // And its auto-subscribe setting (D167), for the same reason.
+      `DELETE FROM billing_auto_subscribe WHERE user_id = ?1`,
+      // And the top-ups it was waiting on, which buy nothing until credited.
+      `DELETE FROM billing_unsettled_topups WHERE user_id = ?1`,
       `DELETE FROM user_bans WHERE user_id = ?1`,
     ]) {
       await this.#db.prepare(sql).bind(userId).run();
     }
   }
 
-  static readonly ACCOUNT_ROW_QUERIES = 12;
+  static readonly ACCOUNT_ROW_QUERIES = 14;
 
   /**
    * The published site's catalogue, for a site that is already down.

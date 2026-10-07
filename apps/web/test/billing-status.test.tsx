@@ -462,3 +462,110 @@ describe('auto-reload in the billing readout (D166)', () => {
     view.unmount();
   });
 });
+
+describe('auto-subscribe in the billing readout (D167)', () => {
+  const AUTO = {
+    enabled: false,
+    card: null,
+    disabledReason: null,
+    buildMonthlyUsdCents: 1900,
+  } as const;
+
+  function checkbox(container: HTMLElement): HTMLInputElement {
+    const box = container.querySelector<HTMLInputElement>(
+      '.billing__auto-subscribe input[type="checkbox"]',
+    );
+    assert.ok(box, 'no auto-subscribe switch');
+    return box;
+  }
+
+  it('is offered off on Free, with the price, and turning it on posts it', async () => {
+    const calls = serving({
+      '/api/billing/status': () =>
+        reply(billing({ autoSubscribe: { ...AUTO } })),
+      '/api/billing/auto-subscribe': () => reply({ enabled: true }),
+    });
+    const view = await mount();
+    assert.match(view.text(), /Start Build \(\$19\/mo\) when Free runs out/);
+    const box = checkbox(view.container);
+    assert.equal(box.checked, false);
+    await act(async () => {
+      box.click();
+    });
+    const posted = calls.find((call) => call.url.includes('/auto-subscribe'));
+    assert.deepEqual(posted?.body, { enabled: true });
+    view.unmount();
+  });
+
+  it('says why it turned itself off', async () => {
+    serving({
+      '/api/billing/status': () =>
+        reply(
+          billing({ autoSubscribe: { ...AUTO, disabledReason: 'declined' } }),
+        ),
+    });
+    const view = await mount();
+    assert.match(view.text(), /Auto-subscribe is off: your card was declined/);
+    view.unmount();
+  });
+
+  it('is not offered again once it has started a plan', async () => {
+    serving({
+      '/api/billing/status': () =>
+        reply(
+          billing({
+            autoSubscribe: { ...AUTO, disabledReason: null, used: true },
+          }),
+        ),
+    });
+    const view = await mount();
+    assert.match(view.text(), /already started Build for this account once/);
+    assert.equal(
+      view.container.querySelector(
+        '.billing__auto-subscribe input[type="checkbox"]',
+      ),
+      null,
+    );
+    view.unmount();
+  });
+
+  it('is not offered on a plan', async () => {
+    serving({
+      '/api/billing/status': () =>
+        reply(billing({ tier: 'build', autoSubscribe: { ...AUTO } })),
+    });
+    const view = await mount();
+    assert.equal(
+      view.container.querySelector('.billing__auto-subscribe'),
+      null,
+    );
+    view.unmount();
+  });
+
+  it('keeps an on switch on a plan, to turn it off only', async () => {
+    const calls = serving({
+      '/api/billing/status': () =>
+        reply(
+          billing({
+            tier: 'build',
+            autoSubscribe: {
+              ...AUTO,
+              enabled: true,
+              card: { brand: 'visa', last4: '4242' },
+            },
+          }),
+        ),
+      '/api/billing/auto-subscribe': () => reply({ enabled: false }),
+    });
+    const view = await mount();
+    const box = checkbox(view.container);
+    assert.equal(box.checked, true);
+    assert.equal(box.disabled, false);
+    await act(async () => {
+      box.click();
+    });
+    const posted = calls.find((call) => call.url.includes('/auto-subscribe'));
+    assert.deepEqual(posted?.body, { enabled: false });
+    view.unmount();
+  });
+});

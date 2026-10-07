@@ -186,3 +186,11 @@ export const SIGNUP_CARD_PURPOSE = 'signup_credit';
  */
 export const AUTO_RELOAD_PURPOSE = 'auto_reload';
 export const AUTO_RELOAD_ATTEMPT_METADATA_KEY = 'vibld_auto_reload_attempt';
+
+/**
+ * Stamped on a subscription auto-subscribe starts (D167), beside the attempt
+ * it settles, so the webhook and a check asking again recognize it.
+ */
+export const AUTO_SUBSCRIBE_PURPOSE = 'auto_subscribe';
+export const AUTO_SUBSCRIBE_ATTEMPT_METADATA_KEY =
+  'vibld_auto_subscribe_attempt';

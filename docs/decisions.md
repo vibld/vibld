@@ -83,7 +83,7 @@ Accepted 2026-09-09 (internal PR 70). L1 and L24 amend D30 -- D23 is untouched b
 | L34  | a              | Hosted model access runs on one shared platform key per provider, gated by our own credit ledger.                                                                                                                                                                                                                                                                                                                                            |
 | L35  | a              | One credit = 1¢ of model spend; the user sees a plain "generations remaining" for the model they chose.                                                                                                                                                                                                                                                                                                                                      |
 | L36  | --             | Free $0/$1 spend, Build $19/$14, Ship $49/$40, top-up $10/$8 expiring 12 months (D155, 2026-10-04; was Build $29/$10, Ship $99/$40, top-up $20/$8). Recorded in full below.                                                                                                                                                                                                                                                                  |
-| L37  | a              | Hard stop at the allowance, with one-click top-up. No auto-charged overage, except the top-up an account opts into (D166, 2026-10-07).                                                                                                                                                                                                                                                                                                       |
+| L37  | a              | Hard stop at the allowance, with one-click top-up. No auto-charged overage, except the top-up an account opts into (D166) and the Build plan a Free account opts into (D167), both 2026-10-07.                                                                                                                                                                                                                                               |
 | L38  | a              | Annual billing at two months free -- Build $190, Ship $490 (D156, 2026-10-04; was $290 and $990).                                                                                                                                                                                                                                                                                                                                            |
 | L39  | a              | Opus is available inside a paid tier, drawn from the same allowance. _(Extended under "Resolved 2026-09-09": more providers are to be added as they ship, and hosted BYOK stays off per L45.)_                                                                                                                                                                                                                                               |
 | L40  | **b**          | Vibld deploys into the user's own Cloudflare account to auto-publish exported sites, reversing the recommendation against holding deploy credentials. Resolved: a scoped API Token the user pastes in (not OAuth), stored in Cloudflare Secrets Store, Cloudflare only for now, and the primary path is a Vibld-provided subdomain auto-configured on the user's behalf -- not merely a fallback. See "Resolved" below for the exact scheme. |
@@ -338,6 +338,27 @@ paying accounts until midnight UTC.
   above the one-click top-up, which stays. A refund or a lost dispute of the
   charge takes the credit back as for a Checkout top-up. The refund policy and
   the Terms say so.
+- **D167. Opt-in auto-subscribe starts Build, once (Chris, 2026-10-07:
+  decision card D167, "Start Build"; amends L37).** Off unless a Free account
+  turns it on in the builder, which needs a card Stripe can charge again. With
+  it on, at the moment auto-reload would charge a top-up (D166), and in its
+  place, the account is moved to the monthly Build plan on that card, off
+  session, with Stripe's `error_if_incomplete` so a refusal leaves no
+  subscription. Once: having started the plan, it turns itself off
+  (`disabled_reason = 'subscribed'`), and a plan canceled later is not started
+  again: the account's `stripe_subscription_id` stays recorded, the claim
+  refuses it, and the switch is not offered again. A declined charge, one the
+  bank wants confirmed, or a card no longer saved turns it off too. Not offered
+  on a paid or gifted plan, nor while a subscription Stripe may still bill
+  (`past_due`, `paused`) exists, asked of Stripe itself just before the plan
+  is started, so a Checkout purchase whose webhook has not landed yet is not
+  doubled. Open plan and top-up Checkouts are expired before the plan starts, a
+  top-up paid but not yet credited is waited for (one paid by bank debit for
+  as long as it takes to settle, `billing_unsettled_topups`), and either Checkout is
+  refused while an attempt is in flight. One attempt in flight at a time, on the setting's own row (`billing_auto_subscribe`), and never
+  beside an auto-reload charge: each claim refuses while the other's is held.
+  An account on a plan that has it on keeps the switch, to turn it off. The
+  refund policy and the Terms say so.
 
 ### Checkpoint history, 2026-10-03
 

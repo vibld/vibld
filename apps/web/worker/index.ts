@@ -181,6 +181,7 @@ import {
   clawbackDepsFor,
   clawbackViewOf,
   handleBillingAutoReload,
+  handleBillingAutoSubscribe,
   handleBillingCard,
   handleLiftSuspension,
   handleBillingCheckout,
@@ -241,7 +242,7 @@ import type {
   NightTurn,
   NightWithDeletion,
 } from './billing-replay.ts';
-import { createStripeClient } from './stripe-client.ts';
+import { PRICE_USD_CENTS, createStripeClient } from './stripe-client.ts';
 import { AUTO_RELOAD_DEFAULT_CAP_USD_CENTS } from './auto-reload.ts';
 import { autoReloadFor } from './auto-reload-run.ts';
 import { isGated, routeKeyFor } from './access-gate.ts';
@@ -752,8 +753,17 @@ async function handleBillingStatus(
     // asked the way every gated route asks: credit it cannot spend is never
     // bought for it, however it lost its way in (a withdrawn invite, an
     // address that changed, a deployment closed again).
+    // An auto-subscribe attempt still in flight is asked after too, on or
+    // off: turned off before Stripe answered, it would otherwise wait on a
+    // settlement an account that is out may never have, and hold up its
+    // Checkouts meanwhile.
+    const autoSubscribing = await billing.autoSubscribeSettings(
+      principal.userId,
+    );
     if (
-      (await billing.autoReloadSettings(principal.userId))?.enabled &&
+      ((await billing.autoReloadSettings(principal.userId))?.enabled ||
+        autoSubscribing?.enabled ||
+        autoSubscribing?.attempt) &&
       (await decideAccessFor(env, principal)).allowed
     ) {
       await autoReloadFor(env, principal.userId);
@@ -799,6 +809,7 @@ async function handleBillingStatus(
     );
     const suspended = await billing.isSuspended(principal.userId);
     const autoReload = await billing.autoReloadSettings(principal.userId);
+    const autoSubscribe = await billing.autoSubscribeSettings(principal.userId);
 
     return json({
       tier,
@@ -841,6 +852,16 @@ async function handleBillingStatus(
           principal.userId,
           monthKey(now),
         ),
+      },
+      // Opt-in auto-subscribe (D167): whether it will start Build when Free
+      // runs out, on which card, why it turned itself off if it did, and
+      // whether it already started a plan, which it does only once.
+      autoSubscribe: {
+        enabled: autoSubscribe?.enabled ?? false,
+        card: autoSubscribe?.card ?? null,
+        disabledReason: autoSubscribe?.disabledReason ?? null,
+        used: autoSubscribe?.used ?? false,
+        buildMonthlyUsdCents: PRICE_USD_CENTS.buildMonthly,
       },
       // The paid plan on its own, so the panel offers "Cancel plan" only
       // where there is a subscription to cancel, which a gift is not.
@@ -4039,6 +4060,17 @@ async function route(
   if (pathname === '/api/billing/auto-reload') {
     return handleBillingAutoReload(request, env, (userId) =>
       autoReloadFor(env, userId).then((outcome) => outcome ?? 'off'),
+    );
+  }
+
+  if (pathname === '/api/billing/auto-subscribe') {
+    return handleBillingAutoSubscribe(
+      request,
+      env,
+      (userId) => autoReloadFor(env, userId).then(() => undefined),
+      undefined,
+      async (principal) =>
+        (await decideAccessFor(env, principal)).allowed ? undefined : refusal(),
     );
   }
 

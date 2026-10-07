@@ -8,6 +8,7 @@ import type {
 import {
   AUTO_RELOAD_ATTEMPT_METADATA_KEY,
   AUTO_RELOAD_PURPOSE,
+  AUTO_SUBSCRIBE_PURPOSE,
   PURPOSE_METADATA_KEY,
   SIGNUP_CARD_PURPOSE,
   TOPUP_CREDIT_USD_CENTS,
@@ -274,6 +275,14 @@ async function applyCheckoutSessionCompleted(
         session: session.id,
         paymentStatus: session.payment_status,
       }),
+    );
+    // Kept until it settles or fails, so auto-subscribe (D167) waits for it.
+    await store.recordUnsettledTopup(
+      session.id,
+      userId,
+      typeof session.payment_intent === 'string'
+        ? session.payment_intent
+        : (session.payment_intent?.id ?? null),
     );
     return 'applied';
   }
@@ -649,7 +658,24 @@ async function applySubscriptionEvent(
   }
 
   await store.upsertSubscription(record);
+  // A plan auto-subscribe started (D167) has done the one thing it does:
+  // the setting turns itself off saying so, if the reply to the request
+  // that started it has not already.
+  if (
+    record.userId &&
+    isAutoSubscribe(subscription.metadata) &&
+    (subscription.status === 'active' || subscription.status === 'trialing')
+  ) {
+    await store.settleAutoSubscribed(record.userId, subscription.id);
+  }
   return 'applied';
+}
+
+/** Whether a Stripe subscription was started by auto-subscribe (D167). */
+function isAutoSubscribe(
+  metadata: Stripe.Metadata | null | undefined,
+): boolean {
+  return metadata?.[PURPOSE_METADATA_KEY] === AUTO_SUBSCRIBE_PURPOSE;
 }
 
 /**
@@ -881,7 +907,9 @@ export async function applyStripeEvent(
       return await applyAutoReloadFailed(store, event.data.object);
     case 'checkout.session.async_payment_failed':
       // Nothing to undo, which is the whole reason the grant is gated on
-      // `payment_status` rather than on the session having completed.
+      // `payment_status` rather than on the session having completed. Only
+      // the marker auto-subscribe waits on goes (D167).
+      await store.dropUnsettledTopup(event.data.object.id);
       return 'applied';
     case 'customer.subscription.created':
     case 'customer.subscription.updated':

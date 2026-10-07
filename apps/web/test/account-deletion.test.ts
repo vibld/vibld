@@ -358,6 +358,16 @@ async function seed(w: World, { siteLive = false } = {}) {
     USER,
     at,
   );
+  // Auto-subscribe on (D167): the setting goes with the account.
+  await exec(
+    db,
+    `INSERT INTO billing_auto_subscribe
+       (user_id, enabled, payment_method_id, card_brand, card_last4,
+        updated_at)
+     VALUES (?1, 1, 'pm_leaver', 'visa', '4242', ?2)`,
+    USER,
+    at,
+  );
   // Auto-reload on, and one charge it made (D166): the setting goes with
   // the account, and the charge is a money record like the rest.
   await exec(
@@ -614,6 +624,31 @@ describe('the immediate steps', () => {
     const record = await w.store.find(USER);
     await runImmediateSteps(w.deps, record!);
     assert.equal(w.stripe.cancelled.length, 1);
+  });
+
+  it('waits out an auto-subscribe request in flight before calling it done', async () => {
+    const w = world();
+    await seed(w);
+    // Sent two minutes before the request: it may yet start a plan.
+    await exec(
+      w.db,
+      `UPDATE billing_auto_subscribe
+          SET attempt_id = 'att_1', attempt_claimed_at = ?2,
+              attempt_version = version, attempt_dispatched_at = ?2
+        WHERE user_id = ?1`,
+      USER,
+      new Date(Date.parse(REQUESTED) - 2 * 60_000).toISOString(),
+    );
+    const { result } = await requestAccountDeletion(w.deps, USER);
+    assert.ok(!result.done.includes('subscription'));
+
+    // Once its lease has run out, whatever it started is in the list.
+    w.clock.now = new Date(Date.parse(REQUESTED) + 10 * 60_000);
+    const retried = await runImmediateSteps(
+      w.deps,
+      (await w.store.find(USER))!,
+    );
+    assert.ok(retried.done.includes('subscription'));
   });
 
   it('asks Stripe for nothing when the account never reached Checkout', async () => {
@@ -1346,6 +1381,9 @@ describe('the purge', () => {
       'user_models.user_id',
       // D166: deleted in `deleteAccountRows`; its charges are kept above.
       'billing_auto_reload.user_id',
+      // D167: deleted in `deleteAccountRows`.
+      'billing_auto_subscribe.user_id',
+      'billing_unsettled_topups.user_id',
       'user_bans.user_id',
       'admin_audit_log.target_user_id',
     ]);

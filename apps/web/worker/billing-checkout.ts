@@ -90,6 +90,10 @@ export async function createCheckoutSession(
   option: PurchaseOption,
   urls: CheckoutUrls,
 ): Promise<string> {
+  // A top-up as much as a plan: the plan auto-subscribe starts is bought in
+  // place of a top-up, so neither is sold beside it.
+  const before = await store.autoSubscribeState(userId);
+  if (before.inFlight) throw new AutoSubscribeInFlightError();
   const customer = await findOrCreateCustomer(stripe, store, userId);
   const price = await priceIdFor(stripe, lookupKeyFor(option));
 
@@ -111,11 +115,34 @@ export async function createCheckoutSession(
         }),
   });
 
+  // Asked again once the session exists. Auto-subscribe expires the open
+  // Checkouts it can see before it starts a plan, and one created too late
+  // for it to see is expired here instead, so the two are never both
+  // bought: an attempt in flight now, or a plan it started since the first
+  // read (its attempt already settled), both mean it acted between.
+  const after = await store.autoSubscribeState(userId);
+  if (after.inFlight || after.subscriptionId !== before.subscriptionId) {
+    await stripe.checkout.sessions.expire(session.id).catch((error) => {
+      console.error(
+        'could not expire a Checkout raced by auto-subscribe',
+        error,
+      );
+    });
+    throw new AutoSubscribeInFlightError();
+  }
   if (!session.url) {
     throw new Error('Stripe did not return a Checkout URL.');
   }
   await store.recordPurchaseStarted(userId);
   return session.url;
+}
+
+/** A Checkout refused while auto-subscribe is starting a plan (D167). */
+export class AutoSubscribeInFlightError extends Error {
+  constructor() {
+    super('Auto-subscribe is starting a plan for this account.');
+    this.name = 'AutoSubscribeInFlightError';
+  }
 }
 
 /**

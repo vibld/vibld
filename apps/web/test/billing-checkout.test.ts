@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import type Stripe from 'stripe';
 
 import {
+  AutoSubscribeInFlightError,
   createCardSetupSession,
   createCheckoutSession,
 } from '../worker/billing-checkout.ts';
@@ -274,5 +275,114 @@ describe('what starting a checkout means for a referral claim', () => {
       ),
     );
     assert.equal(await billing.hasBegunAPurchase('user_new'), false);
+  });
+});
+
+describe('a plan Checkout and auto-subscribe (D167)', () => {
+  const PLAN: PurchaseOption = {
+    kind: 'subscription',
+    tier: 'build',
+    interval: 'monthly',
+  };
+
+  async function inFlight(db: SqliteD1Database, userId: string) {
+    await (db as unknown as D1Database)
+      .prepare(
+        `INSERT INTO billing_auto_subscribe
+           (user_id, enabled, payment_method_id, attempt_id,
+            attempt_claimed_at, updated_at)
+         VALUES (?1, 1, 'pm_card', 'att_1', 'now', 'now')`,
+      )
+      .bind(userId)
+      .run();
+  }
+
+  it('refuses a plan Checkout while auto-subscribe is starting one', async () => {
+    const db = newDb();
+    await inFlight(db, 'user_1');
+    const { stripe, sessions } = fakeStripe();
+    await assert.rejects(
+      createCheckoutSession(stripe, new BillingStore(db), 'user_1', PLAN, URLS),
+      AutoSubscribeInFlightError,
+    );
+    assert.equal(sessions.length, 0);
+  });
+
+  it('expires its own session when auto-subscribe claimed meanwhile', async () => {
+    const db = newDb();
+    const { stripe, sessions } = fakeStripe();
+    const expired: string[] = [];
+    const checkout = stripe.checkout.sessions as unknown as {
+      create: (params: Record<string, unknown>) => Promise<{ id: string }>;
+      expire: (id: string) => Promise<unknown>;
+    };
+    const create = checkout.create;
+    checkout.create = async (params) => {
+      const session = await create(params);
+      await inFlight(db, 'user_1');
+      return session;
+    };
+    checkout.expire = async (id) => {
+      expired.push(id);
+      return {};
+    };
+    const billing = new BillingStore(db);
+    await assert.rejects(
+      createCheckoutSession(stripe, billing, 'user_1', PLAN, URLS),
+      AutoSubscribeInFlightError,
+    );
+    assert.equal(sessions.length, 1);
+    assert.deepEqual(expired, ['cs_1']);
+    assert.equal(await billing.hasBegunAPurchase('user_1'), false);
+  });
+
+  it('expires its own session when auto-subscribe started a plan meanwhile', async () => {
+    const db = newDb();
+    const { stripe } = fakeStripe();
+    const expired: string[] = [];
+    const checkout = stripe.checkout.sessions as unknown as {
+      create: (params: Record<string, unknown>) => Promise<{ id: string }>;
+      expire: (id: string) => Promise<unknown>;
+    };
+    const create = checkout.create;
+    checkout.create = async (params) => {
+      const session = await create(params);
+      // Claimed, started and settled while the session was being made.
+      await (db as unknown as D1Database)
+        .prepare(
+          `INSERT INTO billing_auto_subscribe
+             (user_id, enabled, disabled_reason, stripe_subscription_id,
+              updated_at)
+           VALUES ('user_1', 0, 'subscribed', 'sub_auto', 'now')`,
+        )
+        .run();
+      return session;
+    };
+    checkout.expire = async (id) => {
+      expired.push(id);
+      return {};
+    };
+    await assert.rejects(
+      createCheckoutSession(stripe, new BillingStore(db), 'user_1', PLAN, URLS),
+      AutoSubscribeInFlightError,
+    );
+    assert.deepEqual(expired, ['cs_1']);
+  });
+
+  it('sells no top-up either while auto-subscribe is starting a plan', async () => {
+    const db = newDb();
+    await inFlight(db, 'user_1');
+    const { stripe, sessions } = fakeStripe();
+    await assert.rejects(
+      createCheckoutSession(
+        stripe,
+        new BillingStore(db),
+        'user_1',
+        { kind: 'topup' },
+        URLS,
+      ),
+      AutoSubscribeInFlightError,
+    );
+    assert.equal(sessions.length, 0);
   });
 });
