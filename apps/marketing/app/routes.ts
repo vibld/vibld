@@ -8,6 +8,7 @@ import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
 import { STYLE_GALLERY_INDEX } from '@vibld/ai/style-gallery-index';
 
 import { LAYERS } from './layers';
+import { STYLE_CARD_PATHS } from './style-cards';
 import { USE_CASES } from './use-cases';
 
 export default [
@@ -59,6 +60,11 @@ export default [
     route(`templates/${sub.group}/${sub.slug}`, 'routes/templates.tsx', {
       id: `templates-${sub.group}-${sub.slug}`,
     }),
+  ),
+  // The style cards' previews, fetched by the gallery (D162). Files, not
+  // pages, so they are not in ROUTES or the sitemap.
+  ...STYLE_CARD_PATHS.map((path, n) =>
+    route(path.slice(1), 'routes/style-cards.ts', { id: `style-cards-${n}` }),
   ),
   // One module for every design, declared once per path for the same reason
   // as the use cases above.

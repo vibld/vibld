@@ -56,9 +56,11 @@ export interface PreviewSpec {
   body: string;
 }
 
-interface TemplateLike {
+export interface TemplateLike {
   name: string;
   summary: string;
+  /** Its pitch where the build prompt's goal does not give one. */
+  headline?: string;
   kind: 'site' | 'app';
   /** 'screen' draws one app screen rather than a homepage (D110). */
   format?: string;
@@ -321,7 +323,7 @@ export function previewSpec(
       : (radius?.md ?? radius?.base ?? radius?.lg ?? '10px');
   return {
     name: t.name,
-    headline: headlineFor(t),
+    headline: t.headline ?? headlineFor(t),
     sub: t.summary,
     cta: ctaFor(t.category, t.kind),
     shell:
@@ -351,5 +353,84 @@ export function previewSpec(
       ? fontStack(display, genericOf(display))
       : 'system-ui, sans-serif',
     body: body ? fontStack(body, genericOf(body)) : 'system-ui, sans-serif',
+  };
+}
+
+/** What a style gallery entry gives a preview (D162). */
+export interface StyleLike {
+  name: string;
+  kind: string;
+  group: string;
+  layout: readonly string[];
+  build_prompt: string;
+  design_tokens: {
+    colors: readonly { role: string; hex: string }[];
+    fonts: { display: string; body: string };
+    radius: Record<string, string>;
+  };
+}
+
+/** The kind of site a gallery industry draws as, for its sections and CTA. */
+const STYLE_FLAVOUR: Record<string, string> = {
+  ecommerce: 'ecommerce',
+  'agency-portfolio': 'portfolio',
+  'media-publishing': 'editorial',
+  general: 'brand',
+};
+
+/**
+ * A style gallery entry as a design to preview (D162): its own layout, its
+ * colors by the role each plays (a color can play several, "canvas /
+ * primary action label"), and its two faces. A role it has no color for
+ * falls back as a design's missing token does.
+ */
+export function styleTemplate(s: StyleLike): TemplateLike {
+  const byRole = (...roles: string[]) => {
+    for (const role of roles) {
+      const found = s.design_tokens.colors.find((c) =>
+        c.role.split(' / ').some((r) => r.trim() === role),
+      );
+      if (found) return found.hex;
+    }
+    return undefined;
+  };
+  const colors: Record<string, string> = {};
+  const set = (key: string, value: string | undefined) => {
+    if (value) colors[key] = value;
+  };
+  set('background', byRole('canvas'));
+  set('foreground', byRole('text'));
+  set('card', byRole('surface'));
+  set('cardForeground', byRole('text'));
+  set('muted', byRole('surface'));
+  set('mutedForeground', byRole('muted text'));
+  set('primary', byRole('primary action fill', 'accent', 'text'));
+  set('onPrimary', byRole('primary action label', 'canvas'));
+  set('accent', byRole('accent', 'link text'));
+  set('border', byRole('input border', 'divider (decorative)'));
+  const { radius, fonts } = s.design_tokens;
+  // Its goal names what it is for: "a fictional consumer brand store".
+  const subject = /for a fictional (.+?) in the "/.exec(s.build_prompt)?.[1];
+  return {
+    name: s.name,
+    summary: s.kind,
+    ...(subject
+      ? { headline: subject.charAt(0).toUpperCase() + subject.slice(1) }
+      : {}),
+    kind: 'site',
+    category: STYLE_FLAVOUR[s.group] ?? 'saas',
+    layout: s.layout,
+    buildPrompt: s.build_prompt,
+    style: {
+      tokens: {
+        colors,
+        radius:
+          radius.cards ?? radius.buttons ?? Object.values(radius)[0] ?? '0px',
+      },
+      typeSet: [
+        { family: fonts.display, role: 'display' },
+        { family: fonts.body, role: 'body' },
+      ],
+    },
   };
 }

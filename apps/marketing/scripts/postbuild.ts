@@ -68,7 +68,8 @@ function plans(): Plans {
  * lastmod that is always today is one a search engine learns to ignore.
  */
 function sourcesFor(path: string): string[] {
-  // The gallery and its category pages, which are not templates (D161).
+  // The gallery and its category pages, which are not templates (D161),
+  // and which list the style gallery too (D162).
   const gallery = path === '/templates' || placeOf(path).group !== '';
   const module =
     path === '/'
@@ -104,7 +105,7 @@ function sourcesFor(path: string): string[] {
   const extra = path.startsWith('/use-cases/')
     ? ['use-cases.ts']
     : gallery
-      ? [catalog, '../../../packages/ai/src/design-categories.ts']
+      ? [catalog, '../../../packages/ai/src/design-categories.ts', styles]
       : path.startsWith('/templates') || path === '/inspiration'
         ? [catalog]
         : path.startsWith('/styles/gallery')

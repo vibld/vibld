@@ -3,26 +3,78 @@ import { useEffect, useId, useRef, useState } from 'react';
 import {
   TEMPLATE_GROUPS,
   TEMPLATE_SUBCATEGORIES,
+  styleSubcategory,
   templateGroup,
   templateSubcategories,
 } from '@vibld/ai/design-categories';
+import {
+  STYLE_CATEGORY_LABELS,
+  STYLE_GROUP_LABELS,
+} from '@vibld/ai/style-gallery';
 
 import { loadTemplateBrief } from '../templates/template-brief-client.ts';
 
-type IndexModule = typeof import('@vibld/ai/design-template-index');
+/** How many cards the picker draws at once; "Show more" adds as many. */
+const PAGE = 60;
+
+/** One entry the picker lists: a design template or a style (D162). */
+interface Entry {
+  id: string;
+  name: string;
+  summary: string;
+  group: string;
+  subcategories: string[];
+}
+
+/**
+ * Whether this build wrote the styles' briefs. A copy built without the
+ * gallery's data writes none (scripts/template-assets.ts), so it lists no
+ * styles rather than ones that cannot be added. Unset outside a Vite build,
+ * as in the tests.
+ */
+const STYLES_BUILT =
+  typeof __VIBLD_STYLE_GALLERY__ === 'undefined' || __VIBLD_STYLE_GALLERY__;
+
+/**
+ * Every listed design, then every style gallery entry under the website
+ * subcategory its industry names (D162), as vibld.com/templates lists them.
+ */
+async function loadEntries(withStyles: boolean): Promise<Entry[]> {
+  const [designs, styles] = await Promise.all([
+    import('@vibld/ai/design-template-index'),
+    withStyles
+      ? import('@vibld/ai/style-gallery-index')
+      : { STYLE_GALLERY_INDEX: [] },
+  ]);
+  return [
+    ...designs.DESIGN_TEMPLATE_INDEX.filter((t) => !t.mergedInto).map(
+      (t): Entry => ({
+        id: t.id,
+        name: t.name,
+        summary: t.summary,
+        group: templateGroup(t),
+        subcategories: templateSubcategories(t).map((sub) => sub.slug),
+      }),
+    ),
+    ...styles.STYLE_GALLERY_INDEX.map((style): Entry => ({
+      id: style.id,
+      name: style.name,
+      summary: `${STYLE_CATEGORY_LABELS[style.category]} style for ${STYLE_GROUP_LABELS[style.group]} sites, ${style.theme} theme`,
+      group: 'websites',
+      subcategories: [styleSubcategory(style.group)?.slug ?? ''],
+    })),
+  ];
+}
 
 /**
  * Whether a design is in a place as vibld.com/templates names it (D161): a
  * category, `websites`, or a subcategory, `websites/ecommerce`.
  */
-function inCategory(
-  template: Parameters<typeof templateSubcategories>[0],
-  place: string,
-): boolean {
+function inCategory(entry: Entry, place: string): boolean {
   if (!place) return true;
   const [group, sub] = place.split('/');
-  if (templateGroup(template) !== group) return false;
-  return !sub || templateSubcategories(template).some((s) => s.slug === sub);
+  if (entry.group !== group) return false;
+  return !sub || entry.subcategories.includes(sub);
 }
 
 /**
@@ -31,6 +83,10 @@ function inCategory(
  * added to the message as text, as "Start from this template" on vibld.com
  * fills it (D106). What a build is asked for stays in view and can be
  * edited.
+ *
+ * The style gallery's entries are listed too, each a website under its
+ * industry's subcategory, and add their own build prompt the same way
+ * (D162).
  *
  * The names load when the panel first opens; a brief loads when it is
  * added, one at a time, because the catalog itself is far too large to ship
@@ -43,6 +99,7 @@ export function TemplatePicker({
   room,
   onAdd,
   loader = loadTemplateBrief,
+  withStyles = STYLES_BUILT,
 }: {
   /** The panel is open. */
   active: boolean;
@@ -54,11 +111,14 @@ export function TemplatePicker({
   onAdd: (text: string) => void;
   /** For tests. */
   loader?: (id: string) => ReturnType<typeof loadTemplateBrief>;
+  /** For tests: list the style gallery's entries. */
+  withStyles?: boolean;
 }) {
-  const [index, setIndex] = useState<IndexModule | null>(null);
+  const [index, setIndex] = useState<Entry[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [category, setCategory] = useState('');
   const [query, setQuery] = useState('');
+  const [limit, setLimit] = useState(PAGE);
   const [chosen, setChosen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -72,9 +132,9 @@ export function TemplatePicker({
   useEffect(() => {
     if (!active || index) return;
     let live = true;
-    import('@vibld/ai/design-template-index').then(
-      (module) => {
-        if (live) setIndex(module);
+    loadEntries(withStyles).then(
+      (entries) => {
+        if (live) setIndex(entries);
       },
       () => {
         if (live) setFailed(true);
@@ -83,7 +143,7 @@ export function TemplatePicker({
     return () => {
       live = false;
     };
-  }, [active, index]);
+  }, [active, index, withStyles]);
 
   if (failed) {
     return (
@@ -97,18 +157,21 @@ export function TemplatePicker({
   }
 
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = index.DESIGN_TEMPLATE_INDEX.filter(
+  const shown = index.filter(
     (template) =>
-      !template.mergedInto &&
       inCategory(template, category) &&
       words.every((word) =>
         `${template.name} ${template.summary}`.toLowerCase().includes(word),
       ),
   );
 
+  // The catalog runs to thousands with the styles: drawing every card at
+  // once would mount them all in the composer.
+  const visible = shown.slice(0, limit);
+
   // A choice the filters hide is no choice: what is added is what is seen.
   const selected =
-    chosen !== null && shown.some((template) => template.id === chosen)
+    chosen !== null && visible.some((template) => template.id === chosen)
       ? chosen
       : null;
 
@@ -150,7 +213,10 @@ export function TemplatePicker({
             id={categoryId}
             className="prompt__input"
             value={category}
-            onChange={(event) => setCategory(event.target.value)}
+            onChange={(event) => {
+              setCategory(event.target.value);
+              setLimit(PAGE);
+            }}
             disabled={disabled}
           >
             <option value="">Everything</option>
@@ -180,13 +246,16 @@ export function TemplatePicker({
             className="prompt__input"
             value={query}
             placeholder="Name or what it is"
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setLimit(PAGE);
+            }}
             disabled={disabled}
           />
         </div>
       </div>
       <ul className="gallery__grid" aria-label="Templates">
-        {shown.map((template) => {
+        {visible.map((template) => {
           const on = chosen === template.id;
           return (
             <li key={template.id}>
@@ -209,6 +278,15 @@ export function TemplatePicker({
           );
         })}
       </ul>
+      {shown.length > visible.length ? (
+        <button
+          type="button"
+          className="button button--small"
+          onClick={() => setLimit((had) => had + PAGE)}
+        >
+          Show more
+        </button>
+      ) : null}
       <p className="option-panel__about" role="status">
         {shown.length === 0
           ? 'No template matches.'

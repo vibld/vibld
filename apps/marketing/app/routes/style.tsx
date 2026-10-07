@@ -4,6 +4,7 @@ import { Link, data, useLoaderData } from 'react-router';
 import {
   STYLE_CATEGORY_LABELS,
   STYLE_GROUP_LABELS,
+  styleGalleryBrief,
 } from '@vibld/ai/style-gallery';
 
 import type { Route } from './+types/style';
@@ -117,7 +118,7 @@ export default function Style() {
     pairs,
   } = useLoaderData<typeof loader>();
   const tokens = s.design_tokens;
-  const brief = `${baseline.trim()}\n\n## ${s.name}\n\n${s.build_prompt.trim()}\n`;
+  const brief = styleGalleryBrief(baseline, s);
 
   return (
     <>

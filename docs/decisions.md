@@ -229,6 +229,20 @@ cases, while each design's own catalog category,
   builder's picker uses the same one, in place of its kind and use-case
   filters, and so does the gallery, in place of its Show, Use case and Kind
   filters. The use-case pages are unchanged.
+- **D162. The style gallery is listed under the template categories too
+  (Chris, 2026-10-07: "Yes" to folding them in).** Chris asked "I thought we
+  had like 1200+ templates?": the 1,342 style gallery entries were only at
+  `/styles/gallery`. Each one is a website with a full build prompt, so
+  each is now also a card on `/templates` and in the builder's Templates
+  option, under the website subcategory its industry names: Agency and
+  portfolio under Portfolio, E-commerce under Ecommerce, AI under AI
+  products, General brand under Landing page, Media and publishing under
+  Editorial, and SaaS, Design tools, Developer tools, Fintech, Productivity
+  and Web3 under SaaS (the closest existing subcategory; no new ones were
+  added). A card links to the style's own gallery page, and in the builder
+  adds its build prompt to the message as a design's brief is. The
+  gallery's Source filter lists them as "Style gallery". `/styles/gallery`
+  is unchanged.
 
 ### Pricing, 2026-10-04
 

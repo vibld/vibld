@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Link,
   useLoaderData,
@@ -12,8 +12,6 @@ import {
   findSubcategory,
   subcategoryPhrase,
   subcategoryTitle,
-  templateGroup,
-  templateSubcategories,
   type TemplateGroup,
 } from '@vibld/ai/design-categories';
 
@@ -22,6 +20,7 @@ import { TemplatePreview } from '../components/TemplatePreview';
 import { approxCount } from '../counts';
 import { LAYERS } from '../layers';
 import { SITE, metaFor } from '../site';
+import { STYLE_BATCH } from '../style-cards';
 import type { PreviewSpec } from '../template-preview';
 import { placeHref, placeOf, placePath, type Place } from '../template-places';
 
@@ -43,6 +42,8 @@ export type TypeStyle = 'serif' | 'sans' | 'mono' | 'display' | 'script';
 /** One card's worth of a design, and nothing the card does not draw. */
 export interface TemplateCard {
   id: string;
+  /** Its own page: a design's under /templates, a style's in the gallery. */
+  href: string;
   name: string;
   summary: string;
   kind: 'site' | 'app';
@@ -65,34 +66,10 @@ export interface TemplateCard {
   typeStyle: TypeStyle;
   /** Each family once, with every role it plays in the design. */
   faces: { family: string; roles: string[]; css: string }[];
-  preview: PreviewSpec;
-}
-
-const TYPE_STYLE: Record<string, TypeStyle> = {
-  serif: 'serif',
-  'sans-serif': 'sans',
-  monospace: 'mono',
-  display: 'display',
-  handwriting: 'script',
-};
-
-const GENERIC: Record<TypeStyle, string> = {
-  serif: 'Georgia, serif',
-  sans: 'system-ui, sans-serif',
-  mono: 'ui-monospace, monospace',
-  display: 'system-ui, sans-serif',
-  script: 'cursive',
-};
-
-/** WCAG relative luminance of a hex colour, 0 (black) to 1 (white). */
-function luminance(hex: string): number {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return 1;
-  const [r, g, b] = [0, 2, 4].map((i) => {
-    const v = parseInt(m[1]!.slice(i, i + 2), 16) / 255;
-    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  /** Absent on a style card past the first page, which fetches it. */
+  preview?: PreviewSpec;
+  /** The style-cards file its preview is in (app/style-cards.ts). */
+  visuals?: number;
 }
 
 /**
@@ -104,81 +81,20 @@ export async function loader({ request }: { request: Request }) {
   // A client navigation asks for `<path>.data`, and that is the URL the
   // loader is handed.
   const place = placeOf(new URL(request.url).pathname.replace(/\.data$/, ''));
-  const {
-    listedDesignTemplates,
-    DESIGN_TEMPLATES,
-    DESIGN_BATCHES,
-    SCREEN_TYPES,
-  } = await import('@vibld/ai/design-templates');
-  const { TEMPLATE_FONTS } = await import('../template-fonts.gen');
-  const { previewSpec, fontStack } = await import('../template-preview');
-  const styleOf = (family: string): TypeStyle =>
-    TYPE_STYLE[TEMPLATE_FONTS[family]?.category ?? ''] ?? 'sans';
-  const genericOf = (family: string) => GENERIC[styleOf(family)];
-  const cards = listedDesignTemplates().map((t, order): TemplateCard => {
-    const display =
-      t.style.typeSet.find((f) => f.role === 'display')?.family ??
-      t.style.tokens.typography.headingFont;
-    const roles = new Map<string, string[]>();
-    for (const f of t.style.typeSet) {
-      roles.set(f.family, [...(roles.get(f.family) ?? []), f.role]);
-    }
-    return {
-      id: t.id,
-      name: t.name,
-      summary: t.summary,
-      kind: t.kind,
-      group: templateGroup(t),
-      subcategories: templateSubcategories(t).map((sub) => sub.slug),
-      category: t.category,
-      complexity: t.complexity,
-      format: t.format,
-      batch: t.batch,
-      screenTypes: [...(t.screenTypes ?? [])],
-      addedOn: t.addedOn,
-      order,
-      tone:
-        luminance(t.style.tokens.colors.background) < 0.2 ? 'dark' : 'light',
-      typeStyle: styleOf(display),
-      faces: [...roles].map(([family, played]) => ({
-        family,
-        roles: played,
-        css: fontStack(family, genericOf(family)),
-      })),
-      preview: previewSpec(t, genericOf),
-    };
-  });
-  const nameOf = new Map(DESIGN_TEMPLATES.map((t) => [t.id, t.name]));
-  const mergedOf = (collection: 'examples' | 'templates') =>
-    DESIGN_TEMPLATES.filter((t) => t.mergedInto?.collection === collection).map(
-      (t) => ({
-        id: t.id,
-        name: t.name,
-        into: t.mergedInto!.slug,
-        intoName: nameOf.get(t.mergedInto!.slug) ?? t.mergedInto!.slug,
-      }),
-    );
-  // How many designs each category and subcategory holds, for the links
-  // between them; the page itself carries only its own place's cards.
-  const counts: Record<string, number> = {};
-  for (const card of cards) {
-    counts[card.group] = (counts[card.group] ?? 0) + 1;
-    for (const sub of card.subcategories) {
-      const key = `${card.group}/${sub}`;
-      counts[key] = (counts[key] ?? 0) + 1;
-    }
-  }
+  const { templateCatalog } = await import('../template-cards.server');
+  const { cards, ...rest } = await templateCatalog();
   return {
     place,
-    counts,
-    cards: cards.filter((card) => inPlace(card, place)),
-    merged: mergedOf('examples'),
-    alternates: mergedOf('templates'),
-    batches: Object.entries(DESIGN_BATCHES).map(([id, b]) => [id, b.name]) as [
-      string,
-      string,
-    ][],
-    screenTypes: [...SCREEN_TYPES].sort(),
+    ...rest,
+    // Every card is listed, so search and the filters reach them all, but
+    // a style's preview ships only on the first page (D162).
+    cards: cards
+      .filter((card) => inPlace(card, place))
+      .map((card, i): TemplateCard => {
+        if (i < PAGE || card.visuals === undefined) return card;
+        const { preview: _drawn, ...listed } = card;
+        return listed;
+      }),
   };
 }
 
@@ -287,9 +203,11 @@ export function sorted(cards: TemplateCard[], sort: Sort): TemplateCard[] {
  * The template gallery (D83, D106): every design in the catalog, each card
  * a mocked-up homepage in its own palette and typefaces, filtered and
  * sorted in the page. The filters live in the address, so a filtered view
- * can be shared. Every card is in the prerendered page, for readers and
- * crawlers without script; past the first page they are hidden until asked
- * for, which also keeps their typefaces from loading.
+ * can be shared. Every design's card is in the prerendered page, for
+ * readers and crawlers without script; past the first page they are hidden
+ * until asked for, which also keeps their typefaces from loading. The style
+ * gallery's entries, listed after them (D162), are drawn only as far as
+ * the reader has asked.
  */
 export default function Templates() {
   const { place, counts, cards, merged, alternates, batches, screenTypes } =
@@ -305,8 +223,15 @@ export default function Templates() {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
   const filters = hydrated ? readFilters(params) : EMPTY;
-  const [shown, setShown] = useState(PAGE);
-  useEffect(() => setShown(PAGE), [params]);
+  // How many cards are drawn, for the filters it was counted under: new
+  // filters start from one page in the same render, so nothing below fetches
+  // previews for cards that render is about to hide.
+  const where = params.toString();
+  const [page, setPage] = useState({ where, shown: PAGE });
+  const shown = page.where === where ? page.shown : PAGE;
+  // The previews of the style cards in view, fetched a file at a time.
+  const [drawn, setDrawn] = useState<Record<string, PreviewSpec>>({});
+  const asked = useRef(new Set<number>());
 
   const results = useMemo(
     () =>
@@ -316,6 +241,20 @@ export default function Templates() {
       ),
     [cards, params, hydrated],
   );
+  useEffect(() => {
+    for (const card of results.slice(0, shown)) {
+      const n = card.visuals;
+      if (card.preview || n === undefined || asked.current.has(n)) continue;
+      asked.current.add(n);
+      fetch(`/templates/style-cards/${n}.json`)
+        .then((response) => (response.ok ? response.json() : {}))
+        .then((got: Record<string, PreviewSpec>) =>
+          setDrawn((had) => ({ ...had, ...got })),
+        )
+        // Asked again when the reader next reaches a card in it.
+        .catch(() => asked.current.delete(n));
+    }
+  }, [results, shown]);
   const set = (key: keyof Filters, value: string) => {
     const next = new URLSearchParams(params);
     if (value && value !== EMPTY[key]) next.set(key, value);
@@ -442,16 +381,26 @@ export default function Templates() {
             ) : null}
           </p>
           <ul className="lb-tpls lb-tpls--rich">
-            {results.map((card, i) => (
-              <TemplateCardView key={card.id} card={card} hidden={i >= shown} />
-            ))}
+            {results.map((card, i) =>
+              // A style past the first pages is drawn only when asked for:
+              // every one has its own page, linked from the gallery, and
+              // drawing them all would make this page megabytes (D162).
+              i >= shown && card.batch === STYLE_BATCH ? null : (
+                <TemplateCardView
+                  key={card.id}
+                  card={card}
+                  preview={card.preview ?? drawn[card.id]}
+                  hidden={i >= shown}
+                />
+              ),
+            )}
           </ul>
           {results.length > shown ? (
             <p className="lb-tfilters__more">
               <button
                 type="button"
                 className="button"
-                onClick={() => setShown((n) => n + PAGE)}
+                onClick={() => setPage({ where, shown: shown + PAGE })}
               >
                 Show more
               </button>
@@ -584,16 +533,24 @@ const ROLE_LABEL: Record<string, string> = {
 
 export function TemplateCardView({
   card,
+  preview = card.preview,
   hidden,
 }: {
   card: TemplateCard;
+  preview?: PreviewSpec;
   hidden?: boolean;
 }) {
   const single = card.faces.length === 1;
   return (
     <li className="lb-tpl" id={`template-${card.id}`} hidden={hidden}>
-      <Link to={`/templates/${card.id}`} className="lb-tpl__link">
-        <TemplatePreview spec={card.preview} />
+      <Link to={card.href} className="lb-tpl__link">
+        {preview ? (
+          <TemplatePreview spec={preview} />
+        ) : (
+          <div className="tp" aria-hidden="true">
+            <div className="tp__page" />
+          </div>
+        )}
         <div className="lb-tpl__meta">
           <h3>{card.name}</h3>
           <p>{card.summary}</p>

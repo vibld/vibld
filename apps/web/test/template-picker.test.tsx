@@ -8,6 +8,7 @@ import { createRoot } from 'react-dom/client';
 
 import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
 import { designBrief } from '@vibld/ai/design-templates';
+import { STYLE_GALLERY_INDEX } from '@vibld/ai/style-gallery-index';
 
 import { TemplatePicker } from '../src/components/TemplatePicker.tsx';
 import { loadTemplateBrief } from '../src/templates/template-brief-client.ts';
@@ -25,6 +26,11 @@ import { handleTemplateBrief } from '../worker/template-briefs.ts';
 
 const listed = DESIGN_TEMPLATE_INDEX.filter((t) => !t.mergedInto);
 const first = listed[0]!;
+// The style gallery is listed beside the designs, every style a website
+// (D162).
+const styles = STYLE_GALLERY_INDEX;
+const stylesIn = (...groups: string[]) =>
+  styles.filter((s) => groups.includes(s.group)).length;
 
 async function settle() {
   await act(async () => {
@@ -60,6 +66,7 @@ async function mount(props: {
   room?: number;
   message?: string;
   loader?: (id: string) => Promise<TemplateBriefResult>;
+  withStyles?: boolean;
 }) {
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -83,6 +90,7 @@ async function mount(props: {
         room={props.room ?? 40_000}
         onAdd={(text) => added.push(text)}
         loader={loader}
+        withStyles={props.withStyles ?? true}
       />,
     );
   await act(async () => render(props.active));
@@ -99,9 +107,22 @@ async function mount(props: {
       message = next;
       await act(async () => render(shown));
     },
-    cards: () => [...container.querySelectorAll('.gallery__card')],
+    /** The cards drawn, as they are. */
+    drawn: () => [...container.querySelectorAll('.gallery__card')],
+    /** Every card the filters pass, after "Show more" until there is none. */
+    cards: () => {
+      for (let more = showMore(container); more; more = showMore(container)) {
+        click(more);
+      }
+      return [...container.querySelectorAll('.gallery__card')];
+    },
   };
 }
+
+const showMore = (container: Element) =>
+  [...container.querySelectorAll('button')].find(
+    (b) => b.textContent === 'Show more',
+  );
 
 const addButton = (container: Element) =>
   [...container.querySelectorAll('button')].find((b) =>
@@ -109,15 +130,29 @@ const addButton = (container: Element) =>
   );
 
 describe('the template picker', () => {
-  it('loads nothing until its panel opens, then lists every template', async () => {
+  it('loads nothing until its panel opens, then lists every template and style', async () => {
     const view = await mount({ active: false });
     assert.match(view.container.textContent ?? '', /Loading templates/);
     await view.open();
-    assert.equal(view.cards().length, listed.length);
+    assert.equal(view.cards().length, listed.length + styles.length);
     assert.ok(
       DESIGN_TEMPLATE_INDEX.some((t) => t.mergedInto),
       'the catalog has merged entries, which are not listed',
     );
+  });
+
+  it('draws the cards a page at a time, from the top again when the filters change', async () => {
+    const view = await mount({ active: true });
+    assert.equal(view.drawn().length, 60);
+    click(showMore(view.container));
+    assert.equal(view.drawn().length, 120);
+    type(view.container.querySelector('select'), 'websites');
+    assert.equal(view.drawn().length, 60);
+  });
+
+  it('lists no styles in a copy built without their briefs', async () => {
+    const view = await mount({ active: true, withStyles: false });
+    assert.equal(view.cards().length, listed.length);
   });
 
   it('filters by category and subcategory (D161), and searches name and summary', async () => {
@@ -132,7 +167,13 @@ describe('the template picker', () => {
     assert.equal(
       view.cards().length,
       listed.filter((t) => t.kind === 'site' && t.category === 'ecommerce')
-        .length,
+        .length + stylesIn('ecommerce'),
+    );
+    type(category, 'websites/portfolio');
+    assert.equal(
+      view.cards().length,
+      listed.filter((t) => t.kind === 'site' && t.category === 'portfolio')
+        .length + stylesIn('agency-portfolio'),
     );
     type(category, 'websites/shopify');
     assert.deepEqual(
@@ -145,6 +186,10 @@ describe('the template picker', () => {
       listed.filter((t) => t.format === 'screen').length,
     );
     type(category, '');
+    type(view.container.querySelector('input[type="search"]'), styles[0]!.name);
+    assert.ok(
+      view.cards().some((c) => c.textContent?.includes(styles[0]!.name)),
+    );
     type(view.container.querySelector('input[type="search"]'), first.name);
     assert.ok(view.cards().some((c) => c.textContent?.includes(first.summary)));
     type(view.container.querySelector('input[type="search"]'), 'zzzzqqq');
@@ -242,7 +287,7 @@ describe('the template picker', () => {
 });
 
 describe('the template briefs the build writes', () => {
-  it('writes one file per template, each its brief', () => {
+  it('writes one file per template and per style, each its brief', () => {
     const dir = mkdtempSync(join(tmpdir(), 'templates-'));
     try {
       const count = writeTemplateAssets(dir);
@@ -258,6 +303,25 @@ describe('the template briefs the build writes', () => {
         ),
       );
       assert.deepEqual(written, { brief: designBrief(first.id) });
+      for (const style of styles) {
+        assert.ok(files.includes(`${style.id}.json`), style.id);
+      }
+      assert.equal(
+        files.length,
+        listed.length +
+          styles.length +
+          DESIGN_TEMPLATE_INDEX.filter((t) => t.mergedInto).length,
+      );
+      const style = JSON.parse(
+        readFileSync(
+          join(dir, '_templates', 'briefs', `${styles[0]!.id}.json`),
+          'utf8',
+        ),
+      );
+      assert.match(
+        style.brief,
+        new RegExp(`\\n## ${styles[0]!.name}\\n\\n### Goal`),
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

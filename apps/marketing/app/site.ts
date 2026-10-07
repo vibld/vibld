@@ -10,6 +10,7 @@
 import {
   TEMPLATE_GROUPS,
   TEMPLATE_SUBCATEGORIES,
+  styleSubcategory,
   subcategoryPhrase,
   subcategoryTitle,
   templateGroup,
@@ -28,6 +29,13 @@ import { approxCount } from './counts.ts';
 
 /** The designs the gallery lists: none merged into another entry. */
 const LISTED_TEMPLATES = DESIGN_TEMPLATE_INDEX.filter((t) => !t.mergedInto);
+/** The style gallery's entries in a template subcategory (D162). */
+const stylesIn = (sub: { group: string; slug: string }) =>
+  STYLE_GALLERY_INDEX.filter(
+    (style) =>
+      sub.group === 'websites' &&
+      styleSubcategory(style.group)?.slug === sub.slug,
+  ).length;
 
 export interface SiteRoute {
   path: string;
@@ -420,12 +428,12 @@ export const ROUTES: SiteRoute[] = [
   {
     path: '/templates',
     title: `Templates | ${SITE.name}`,
-    description: `${approxCount(DESIGN_TEMPLATE_INDEX.filter((t) => t.format !== 'screen').length)} app and website designs and ${approxCount(DESIGN_TEMPLATE_INDEX.filter((t) => t.format === 'screen').length)} app screens to start from, each with a layout, a checked palette, typefaces and a build prompt.`,
+    description: `${approxCount(DESIGN_TEMPLATE_INDEX.filter((t) => t.format !== 'screen').length + STYLE_GALLERY_INDEX.length)} app and website designs and ${approxCount(DESIGN_TEMPLATE_INDEX.filter((t) => t.format === 'screen').length)} app screens to start from, each with a layout, a checked palette, typefaces and a build prompt.`,
   },
   ...TEMPLATE_GROUPS.map((group) => {
-    const n = LISTED_TEMPLATES.filter(
-      (t) => templateGroup(t) === group.slug,
-    ).length;
+    const n =
+      LISTED_TEMPLATES.filter((t) => templateGroup(t) === group.slug).length +
+      (group.slug === 'websites' ? STYLE_GALLERY_INDEX.length : 0);
     return {
       path: `/templates/${group.slug}`,
       title: `${group.noun.charAt(0).toUpperCase()}${group.noun.slice(1)} templates | ${SITE.name}`,
@@ -437,9 +445,9 @@ export const ROUTES: SiteRoute[] = [
   }),
   ...TEMPLATE_SUBCATEGORIES.map((sub) => {
     const noun = TEMPLATE_GROUPS.find((g) => g.slug === sub.group)!.noun;
-    const n = LISTED_TEMPLATES.filter((t) =>
-      templateSubcategories(t).includes(sub),
-    ).length;
+    const n =
+      LISTED_TEMPLATES.filter((t) => templateSubcategories(t).includes(sub))
+        .length + stylesIn(sub);
     return {
       path: `/templates/${sub.group}/${sub.slug}`,
       title: `${subcategoryTitle(sub)} | ${SITE.name}`,

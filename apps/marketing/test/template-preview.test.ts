@@ -8,7 +8,9 @@ import {
   ctaFor,
   headlineFor,
   previewSpec,
+  styleTemplate,
 } from '../app/template-preview.ts';
+import { styleGalleryCatalog } from '../app/style-gallery.server.ts';
 
 describe('a template card’s mocked homepage (D106)', () => {
   it('draws each layout line as the block it describes', () => {
@@ -97,5 +99,52 @@ describe('each template’s share image (D106)', () => {
       (route) => route.image && !existsSync(publicDir + route.image.path),
     ).map((route) => route.path);
     assert.deepEqual(missing, [], 'run scripts/template-og.mjs');
+  });
+});
+
+describe('a style gallery entry drawn as a template card (D162)', () => {
+  const entries = styleGalleryCatalog().entries;
+  const generic = () => 'system-ui, sans-serif';
+
+  it('draws every style in its own colors and faces, with its subject as the headline', () => {
+    for (const entry of entries) {
+      const spec = previewSpec(styleTemplate(entry), generic);
+      const canvas = entry.design_tokens.colors.find((c) =>
+        c.role.split(' / ').includes('canvas'),
+      );
+      if (canvas) assert.equal(spec.colors.background, canvas.hex, entry.id);
+      for (const value of Object.values(spec.colors))
+        assert.match(value, /^#[0-9a-f]{3,8}$/i, entry.id);
+      assert.match(spec.display, new RegExp(entry.design_tokens.fonts.display));
+      assert.doesNotMatch(spec.headline, / on$/, entry.id);
+      assert.equal(spec.blocks[0]?.kind, 'nav', entry.id);
+    }
+  });
+
+  it('reads the subject out of the goal', () => {
+    const spec = previewSpec(
+      styleTemplate({
+        name: 'Amberbrae',
+        kind: 'Warm minimal online store site',
+        group: 'ecommerce',
+        layout: ['top navigation: wordmark left'],
+        build_prompt:
+          '### Goal\nBuild a responsive light-theme marketing site for a fictional consumer brand store in the "Amberbrae" style.',
+        design_tokens: {
+          colors: [
+            { role: 'canvas / primary action label', hex: '#ffffff' },
+            { role: 'text / primary action fill', hex: '#111111' },
+          ],
+          fonts: { display: 'Raleway', body: 'Poppins' },
+          radius: { cards: '0px' },
+        },
+      }),
+      generic,
+    );
+    assert.equal(spec.headline, 'Consumer brand store');
+    assert.equal(spec.cta, 'Shop now');
+    assert.equal(spec.colors.primary, '#111111');
+    assert.equal(spec.colors.onPrimary, '#ffffff');
+    assert.equal(spec.radius, '0px');
   });
 });

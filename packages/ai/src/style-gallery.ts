@@ -556,6 +556,18 @@ export function styleCardOf(entry: StyleGalleryEntry): StyleCard {
   };
 }
 
+/**
+ * A style as a template's brief (D162): the rules every build prompt
+ * assumes, then its own build prompt, as a design template's brief is laid
+ * out (`designBrief`) and as its page on vibld.com shows it.
+ */
+export function styleGalleryBrief(
+  baseline: string,
+  entry: Pick<StyleGalleryEntry, 'name' | 'build_prompt'>,
+): string {
+  return `${baseline.trim()}\n\n## ${entry.name}\n\n${entry.build_prompt.trim()}\n`;
+}
+
 /** A stored id: kebab-case, at most 64 characters. */
 export function isStyleGalleryId(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 64 && KEBAB.test(value);

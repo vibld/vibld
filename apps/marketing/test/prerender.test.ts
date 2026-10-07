@@ -16,10 +16,12 @@ import {
   guidesIn,
 } from '../app/site.ts';
 import { PROVIDER_NAMES } from '@vibld/ai/select-client';
+import { STYLE_GALLERY_INDEX } from '@vibld/ai/style-gallery-index';
 import { STYLE_PRESETS } from '@vibld/ai/style-presets';
 import { LOG } from '../app/demo-script.ts';
 import { dollars, priceLabel, readPlans } from '../app/plans.ts';
 import { USE_CASES } from '../app/use-cases.ts';
+import { STYLE_CARD_CHUNK, STYLE_CARD_PATHS } from '../app/style-cards.ts';
 import { TEMPLATES } from '../app/templates.ts';
 import { ROADMAP_GROUPS, ROADMAP_ITEMS, VOTABLE_IDS } from '../app/roadmap.ts';
 
@@ -1024,6 +1026,34 @@ describe('the templates on /examples', () => {
       ).size;
       assert.ok(size < 150_000, `${template.screenshot} is ${size} bytes`);
     }
+  });
+});
+
+describe('the style cards on /templates, drawn as a reader reaches them', () => {
+  // A style card past the first page carries no preview in the page's data;
+  // the page fetches it from these files (D162). Every style has to be in
+  // exactly one of them, the one its place in the gallery names, or its card
+  // stays a blank page.
+  it('puts every style in the file its place in the gallery names', () => {
+    const seen = new Set<string>();
+    STYLE_CARD_PATHS.forEach((path, n) => {
+      const file = join(CLIENT, path.replace(/^\//, ''));
+      assert.ok(existsSync(file), `${path} was not built`);
+      const ids = Object.keys(JSON.parse(readFileSync(file, 'utf8')));
+      for (const id of ids) {
+        assert.ok(!seen.has(id), `${id} is in more than one file`);
+        seen.add(id);
+        const at = STYLE_GALLERY_INDEX.findIndex((entry) => entry.id === id);
+        assert.equal(Math.floor(at / STYLE_CARD_CHUNK), n, `${id} in ${path}`);
+      }
+    });
+    assert.equal(seen.size, STYLE_GALLERY_INDEX.length);
+  });
+
+  it('keeps the previews out of the page data', () => {
+    // With every preview inline the data was 1.7 MB.
+    const size = statSync(join(CLIENT, 'templates.data')).size;
+    assert.ok(size < 1_200_000, `templates.data is ${size} bytes`);
   });
 });
 

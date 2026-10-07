@@ -5,12 +5,18 @@ import {
   TEMPLATE_GROUPS,
   TEMPLATE_SUBCATEGORIES,
   findSubcategory,
+  styleSubcategory,
   subcategoryPhrase,
   subcategoryTitle,
   templateGroup,
   templateSubcategories,
 } from '../src/design-categories.ts';
 import { DESIGN_TEMPLATE_INDEX } from '../src/design-template-index.ts';
+import { STYLE_GALLERY_INDEX } from '../src/style-gallery-index.ts';
+import {
+  STYLE_GALLERY_GROUPS,
+  styleGalleryBrief,
+} from '../src/style-gallery.ts';
 import {
   findDesignTemplate,
   listedDesignTemplates,
@@ -92,5 +98,45 @@ describe('subcategories in a sentence (D161)', () => {
     assert.equal(phrase('websites', 'saas'), 'SaaS');
     assert.equal(phrase('websites', 'ai-products'), 'AI products');
     assert.equal(phrase('websites', 'shopify'), 'Shopify');
+  });
+});
+
+describe('the style gallery under the template categories (D162)', () => {
+  it('lists every gallery industry under exactly one website subcategory', () => {
+    for (const group of STYLE_GALLERY_GROUPS) {
+      const subs = TEMPLATE_SUBCATEGORIES.filter((s) =>
+        s.styleGroups?.includes(group),
+      );
+      assert.equal(subs.length, 1, `${group} is under ${subs.length}`);
+      assert.equal(subs[0]!.group, 'websites');
+      assert.equal(styleSubcategory(group), subs[0]);
+    }
+    assert.equal(styleSubcategory('nothing'), undefined);
+  });
+
+  it('names only industries the gallery has', () => {
+    const known = new Set<string>(STYLE_GALLERY_GROUPS);
+    for (const s of TEMPLATE_SUBCATEGORIES)
+      for (const g of s.styleGroups ?? [])
+        assert.ok(known.has(g), `${s.slug} names ${g}`);
+  });
+
+  it('shares no id between a style and a design template', () => {
+    const designs = new Set(DESIGN_TEMPLATE_INDEX.map((t) => t.id));
+    const shared = STYLE_GALLERY_INDEX.filter((s) => designs.has(s.id));
+    assert.deepEqual(
+      shared.map((s) => s.id),
+      [],
+    );
+  });
+
+  it('lays a style out as a brief the way a design is', () => {
+    assert.equal(
+      styleGalleryBrief('  Rules.\n', {
+        name: 'Amberbrae',
+        build_prompt: '\n### Goal\nA store.\n',
+      }),
+      'Rules.\n\n## Amberbrae\n\n### Goal\nA store.\n',
+    );
   });
 });

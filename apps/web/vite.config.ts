@@ -2,7 +2,12 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 
-import { writeStyleGalleryAssets } from './scripts/style-gallery-assets.ts';
+import { existsSync } from 'node:fs';
+
+import {
+  STYLE_GALLERY_DATA,
+  writeStyleGalleryAssets,
+} from './scripts/style-gallery-assets.ts';
 import { writeTemplateAssets } from './scripts/template-assets.ts';
 
 /**
@@ -29,6 +34,11 @@ function styleGallery(): Plugin {
 
 export default defineConfig({
   plugins: [react(), styleGallery()],
+  // Whether this copy has the style gallery's data, and so its briefs: the
+  // Templates option lists the styles only when it does (D162).
+  define: {
+    __VIBLD_STYLE_GALLERY__: JSON.stringify(existsSync(STYLE_GALLERY_DATA)),
+  },
   server: {
     port: 5173,
   },

@@ -9,6 +9,10 @@
  * catalog category says it (the Shopify storefronts, whose purpose names
  * Shopify).
  *
+ * The style gallery's entries are listed here too (D162). Every one is a
+ * website, and `styleGroups` names the gallery industries a website
+ * subcategory takes.
+ *
  * Small on purpose: the builder and every vibld.com page read it, and it
  * never imports the catalog.
  */
@@ -38,6 +42,8 @@ export interface TemplateSubcategory {
   ids?: readonly string[];
   /** The label starts with a proper noun, kept capitalized in a sentence. */
   proper?: boolean;
+  /** The style gallery industries it takes (D162), websites only. */
+  styleGroups?: readonly string[];
 }
 
 /** In the order a gallery lists them. */
@@ -46,6 +52,7 @@ export const TEMPLATE_SUBCATEGORIES: readonly TemplateSubcategory[] = [
     slug: 'portfolio',
     label: 'Portfolio',
     group: 'websites',
+    styleGroups: ['agency-portfolio'],
     categories: ['portfolio'],
   },
   {
@@ -58,6 +65,7 @@ export const TEMPLATE_SUBCATEGORIES: readonly TemplateSubcategory[] = [
     slug: 'ecommerce',
     label: 'Ecommerce',
     group: 'websites',
+    styleGroups: ['ecommerce'],
     categories: ['ecommerce'],
   },
   {
@@ -72,6 +80,14 @@ export const TEMPLATE_SUBCATEGORIES: readonly TemplateSubcategory[] = [
     slug: 'saas',
     label: 'SaaS',
     group: 'websites',
+    styleGroups: [
+      'saas',
+      'design-tools',
+      'devtools',
+      'fintech',
+      'productivity',
+      'web3',
+    ],
     categories: [
       'crm-sales',
       'analytics',
@@ -87,12 +103,14 @@ export const TEMPLATE_SUBCATEGORIES: readonly TemplateSubcategory[] = [
     slug: 'ai-products',
     label: 'AI products',
     group: 'websites',
+    styleGroups: ['ai'],
     categories: ['ai-product', 'automation'],
   },
   {
     slug: 'landing-page',
     label: 'Landing page',
     group: 'websites',
+    styleGroups: ['general'],
     categories: [
       'landing-page',
       'marketing-site',
@@ -105,6 +123,7 @@ export const TEMPLATE_SUBCATEGORIES: readonly TemplateSubcategory[] = [
     slug: 'editorial',
     label: 'Editorial',
     group: 'websites',
+    styleGroups: ['media-publishing'],
     categories: ['editorial', 'documentation'],
   },
   { slug: 'music', label: 'Music', group: 'websites', categories: ['music'] },
@@ -212,6 +231,15 @@ export function templateSubcategories(t: Categorized): TemplateSubcategory[] {
     (s) =>
       s.group === group &&
       (s.categories.includes(t.category) || (s.ids?.includes(t.id) ?? false)),
+  );
+}
+
+/** The subcategory a style gallery entry is listed under, by its industry. */
+export function styleSubcategory(
+  styleGroup: string,
+): TemplateSubcategory | undefined {
+  return TEMPLATE_SUBCATEGORIES.find((s) =>
+    s.styleGroups?.includes(styleGroup),
   );
 }
 

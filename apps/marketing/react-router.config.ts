@@ -1,6 +1,7 @@
 import type { Config } from '@react-router/dev/config';
 
 import { ROUTE_PATHS } from './app/site';
+import { STYLE_CARD_PATHS } from './app/style-cards';
 
 /**
  * Every route is rendered to HTML at build time.
@@ -17,7 +18,9 @@ export default {
   prerender: {
     // '/404' is prerendered but deliberately absent from ROUTE_PATHS, so it
     // stays out of the sitemap; postbuild.ts relocates it to /404.html.
-    paths: [...ROUTE_PATHS, '/404'],
+    // The style cards' preview files (app/style-cards.ts) are prerendered
+    // too, and are not pages either.
+    paths: [...ROUTE_PATHS, '/404', ...STYLE_CARD_PATHS],
     // Each page is a request to a local preview server, and most of a
     // request's time is spent waiting on it rather than rendering. In
     // series, the style gallery's pages (D143) alone took five minutes.
