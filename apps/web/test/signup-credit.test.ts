@@ -42,6 +42,9 @@ const ENV = {
   // open deployment. The gate has its own test below, and `access.test.ts`
   // owns the question of what opens one.
   VIBLD_ACCESS_MODE: 'open',
+  // The credit is retired by default (D163); these tests are about a
+  // deployment that still offers one.
+  VIBLD_SIGNUP_CREDIT_USD_CENTS: '100',
 };
 
 /** A signed-in account, which is all `signupCreditStatus` needs of one. */
@@ -55,9 +58,9 @@ function who(userId: string) {
 }
 
 describe('signupCreditCents', () => {
-  it('defaults to a dollar', () => {
+  it('defaults to none, since the credit is retired (D163)', () => {
     assert.equal(signupCreditCents({}), DEFAULT_SIGNUP_CREDIT_USD_CENTS);
-    assert.equal(signupCreditCents({}), 100);
+    assert.equal(signupCreditCents({}), 0);
   });
 
   it('honours an explicit amount, including zero', () => {
@@ -68,7 +71,7 @@ describe('signupCreditCents', () => {
     assert.equal(signupCreditCents({ VIBLD_SIGNUP_CREDIT_USD_CENTS: '0' }), 0);
   });
 
-  it('falls back to the default on an unreadable amount, never to zero', () => {
+  it('falls back to the default on an unreadable amount', () => {
     for (const raw of ['', '   ', 'free', '1.5', '-100', 'NaN']) {
       assert.equal(
         signupCreditCents({ VIBLD_SIGNUP_CREDIT_USD_CENTS: raw }),
@@ -305,6 +308,18 @@ describe('signupCreditStatus', () => {
     );
   });
 
+  it('offers nothing by default, since the credit is retired (D163)', async () => {
+    const store = newStore();
+    const { VIBLD_SIGNUP_CREDIT_USD_CENTS: _amount, ...unset } = ENV;
+    const status = await signupCreditStatus(
+      store,
+      who('user_retired'),
+      unset,
+      clerkSaying(AFTER),
+    );
+    assert.deepEqual(status, { state: 'none', reason: 'disabled' });
+  });
+
   it('offers nothing when no cohort is configured', async () => {
     // No safe default exists: any cutoff early enough to catch new accounts
     // also catches every account that already exists.
@@ -312,7 +327,11 @@ describe('signupCreditStatus', () => {
     const status = await signupCreditStatus(
       store,
       who('user_x'),
-      { CLERK_SECRET_KEY: 'sk_test', VIBLD_ACCESS_MODE: 'open' },
+      {
+        CLERK_SECRET_KEY: 'sk_test',
+        VIBLD_ACCESS_MODE: 'open',
+        VIBLD_SIGNUP_CREDIT_USD_CENTS: '100',
+      },
       clerkSaying(AFTER),
     );
     assert.deepEqual(status, { state: 'none', reason: 'no-cohort-configured' });
@@ -358,7 +377,11 @@ describe('signupCreditStatus', () => {
       // Open, so this test is about the missing Clerk key and not about the
       // gate. Access is checked before Clerk is asked, deliberately: an
       // account that may not use the product is not worth an external call.
-      { VIBLD_SIGNUP_CREDIT_FROM: OFFER_START, VIBLD_ACCESS_MODE: 'open' },
+      {
+        VIBLD_SIGNUP_CREDIT_FROM: OFFER_START,
+        VIBLD_ACCESS_MODE: 'open',
+        VIBLD_SIGNUP_CREDIT_USD_CENTS: '100',
+      },
       clerkSaying(AFTER),
     );
     assert.deepEqual(status, { state: 'none', reason: 'age-unknown' });
@@ -408,6 +431,81 @@ describe('signupCreditStatus', () => {
     assert.equal(asked, false);
   });
 
+  it('keeps an offer whose claim was granted but not yet paid (D163)', async () => {
+    // A delivery that wrote the `granted` claim and died before the credit.
+    // Stripe's retry reads the amount from the offer, so withdrawing it
+    // may not take it first.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new BillingStore(db);
+    await signupCreditStatus(store, who('user_mid'), ENV, clerkSaying(AFTER));
+    await db
+      .prepare(
+        `INSERT INTO billing_signup_cards
+           (stripe_setup_intent_id, user_id, card_fingerprint, outcome, created_at)
+         VALUES ('seti_mid', 'user_mid', 'fp_mid', 'granted', '2026-10-07T00:00:00Z')`,
+      )
+      .run();
+
+    await signupCreditStatus(
+      store,
+      who('user_mid'),
+      { ...ENV, VIBLD_SIGNUP_CREDIT_USD_CENTS: '0' },
+      clerkSaying(AFTER),
+    );
+    assert.equal(await store.findSignupOffer('user_mid'), 100);
+
+    const retried = await store.claimSignupCardCredit({
+      setupIntentId: 'seti_mid',
+      userId: 'user_mid',
+      cardFingerprint: 'fp_mid',
+      grantId: signupGrantId('user_mid'),
+      grantedByEmail: SIGNUP_GRANT_ACTOR,
+      note: 'test',
+      offerOpen: false,
+    });
+    assert.deepEqual(retried, { outcome: 'granted', paid: true });
+  });
+
+  it('withdraws an unpaid offer once the amount is zero (D163)', async () => {
+    const store = newStore();
+    await signupCreditStatus(store, who('user_open'), ENV, clerkSaying(AFTER));
+    await signupCreditStatus(store, who('user_paid'), ENV, clerkSaying(AFTER));
+    await store.claimSignupCardCredit({
+      setupIntentId: 'seti_paid',
+      userId: 'user_paid',
+      cardFingerprint: 'fp_paid',
+      grantId: signupGrantId('user_paid'),
+      grantedByEmail: SIGNUP_GRANT_ACTOR,
+      note: 'test',
+      offerOpen: true,
+    });
+
+    const off = { ...ENV, VIBLD_SIGNUP_CREDIT_USD_CENTS: '0' };
+    for (const user of ['user_open', 'user_paid']) {
+      await signupCreditStatus(store, who(user), off, clerkSaying(AFTER));
+    }
+    assert.equal(await store.findSignupOffer('user_open'), undefined);
+    assert.equal(await store.findSignupOffer('user_paid'), 100);
+
+    // A card saved afterwards pays nothing, and still counts for the
+    // monthly allowance.
+    const claim = await store.claimSignupCardCredit({
+      setupIntentId: 'seti_open',
+      userId: 'user_open',
+      cardFingerprint: 'fp_open',
+      grantId: signupGrantId('user_open'),
+      grantedByEmail: SIGNUP_GRANT_ACTOR,
+      note: 'test',
+      offerOpen: true,
+    });
+    assert.deepEqual(claim, { outcome: 'no-offer', paid: false });
+    assert.equal(
+      await store.findAdminCredit(signupGrantId('user_open')),
+      undefined,
+    );
+    assert.equal((await store.freeCardOf('user_open')).onFile, true);
+  });
+
   it('says when the last card saved had already claimed the credit elsewhere', async () => {
     const store = newStore();
     for (const user of ['user_first', 'user_second']) {
@@ -420,6 +518,7 @@ describe('signupCreditStatus', () => {
       grantId: signupGrantId('user_first'),
       grantedByEmail: SIGNUP_GRANT_ACTOR,
       note: 'test',
+      offerOpen: true,
     });
     await store.claimSignupCardCredit({
       setupIntentId: 'seti_2',
@@ -428,6 +527,7 @@ describe('signupCreditStatus', () => {
       grantId: signupGrantId('user_second'),
       grantedByEmail: SIGNUP_GRANT_ACTOR,
       note: 'test',
+      offerOpen: true,
     });
 
     assert.deepEqual(
@@ -460,6 +560,7 @@ describe('signupCreditStatus', () => {
         throw new Error('D1 unavailable');
       },
       findSignupOffer: async () => undefined,
+      closeSignupOffer: async () => undefined,
       latestSignupCardOutcome: async () => undefined,
     };
     assert.deepEqual(

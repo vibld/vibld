@@ -25,8 +25,8 @@ export default function Refunds() {
       <p>
         Usage stops at your plan&apos;s monthly allowance and any credit you
         hold; nothing is billed for going past it. More spend means buying a
-        top-up yourself. The welcome credit ({dollars(PLANS.signupCents)} when
-        you save a card) charges nothing, so there is nothing to refund.
+        top-up yourself. Saving a card for the Free plan&apos;s monthly
+        allowance charges nothing, so there is nothing to refund.
       </p>
 
       <h2>Canceling a subscription</h2>

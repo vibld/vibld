@@ -676,7 +676,7 @@ unauthenticated, which is the fail-closed behavior `isConfigured` in
   genuinely new accounts also catches every account that already exists, so
   a default would quietly pay the entire existing user base on the first
   request after deploy. `VIBLD_SIGNUP_CREDIT_USD_CENTS` sets the amount
-  (default 100); `0` turns the grant off without touching the cutoff.
+  (default 0, off, since D163); a cutoff alone grants nothing.
 
 ### Abuse controls required before Access came off (docs/decisions.md L29)
 
@@ -1300,8 +1300,18 @@ actually drawn from it first (`BillingStore.totalTopupCreditMicroUsd`).
 
 ### The welcome credit (card first, 2026-09-27)
 
-A new account can get a one-time credit (`VIBLD_SIGNUP_CREDIT_USD_CENTS`,
-default $1.00) once it has a card on file. It used to arrive with the
+D163 (2026-10-07) retired this credit: `VIBLD_SIGNUP_CREDIT_USD_CENTS`
+defaults to 0, which offers nothing, and vibld.com no longer offers it. A
+deployment that sets an amount and a cutoff still gets the flow below, and
+accounts already granted it keep it until it expires. An offer opened and
+not yet paid is withdrawn the next time that account asks while the amount is
+0 (`closeSignupOffer`). The webhook also asks the switch itself
+(`signupCreditOpen`), so a card form opened while the credit was offered and
+submitted after it was switched off pays nothing; the card counts only for the
+monthly allowance.
+
+A new account can get a one-time credit (`VIBLD_SIGNUP_CREDIT_USD_CENTS`)
+once it has a card on file. It used to arrive with the
 account; with sign-up open to anybody that is a dollar per email address,
 so it now waits for a card, saved through a Stripe Checkout Session in
 `setup` mode that charges nothing.

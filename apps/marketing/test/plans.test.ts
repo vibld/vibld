@@ -159,8 +159,16 @@ describe('the plans the pricing page states', () => {
         `the guide does not say: ${expected}`,
       );
     }
-    assert.ok(guide.includes(`<strong>${dollars(signupCents)} once</strong>`));
-    if (readPlans(sources).signupRequiresCard) {
+    if (signupCents <= 0) {
+      // D163: the welcome credit is retired, so the guide says so rather
+      // than offering it.
+      assert.ok(guide.includes('is no longer offered'));
+    } else {
+      assert.ok(
+        guide.includes(`<strong>${dollars(signupCents)} once</strong>`),
+      );
+    }
+    if (signupCents > 0 && readPlans(sources).signupRequiresCard) {
       // The guide is what a customer is pointed to when they ask why their
       // dollar has not arrived, so it has to say what the builder waits for.
       assert.ok(guide.includes('by adding a card'));

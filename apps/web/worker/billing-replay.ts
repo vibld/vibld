@@ -239,6 +239,8 @@ export async function replayStripeEvents(
   resolveSetupIntent?: ResolveSetupIntent,
   /** What a missed refund or lost dispute needs to remove what it bought. */
   clawback?: ClawbackDeps,
+  /** As `applyStripeEvent`'s: whether the welcome credit is still offered. */
+  signupCreditOpen = false,
 ): Promise<ReplayResult> {
   const pageSize = pageSizeFor(queryBudget);
   // What a page costs at its worst, which is what decides whether there is
@@ -367,6 +369,7 @@ export async function replayStripeEvents(
           resolveCharge,
           resolveSetupIntent,
           clawback,
+          signupCreditOpen,
         );
         if (outcome === 'unresolved') {
           // Nothing was written, so it is not done, and marking it processed
@@ -731,6 +734,8 @@ export async function retryUnattributedEvents(
   resolveSetupIntent?: ResolveSetupIntent,
   /** The same as the replay's: a parked refund is retried in full or not at all. */
   clawback?: ClawbackDeps,
+  /** As `applyStripeEvent`'s: whether the welcome credit is still offered. */
+  signupCreditOpen = false,
 ): Promise<RetryResult> {
   // Least recently tried first, so a row that can never be attributed costs
   // one attempt a night rather than holding the front of the queue for ever.
@@ -760,6 +765,7 @@ export async function retryUnattributedEvents(
         resolveCharge,
         resolveSetupIntent,
         clawback,
+        signupCreditOpen,
       );
       if (outcome === 'unresolved') {
         waiting += 1;

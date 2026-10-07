@@ -317,7 +317,7 @@ export function PlanCards({ headingLevel = 3 }: { headingLevel?: 2 | 3 }) {
           <p className="lb-plan__alt">
             {plan.price
               ? `or ${priceLabel(plan.price.annual)} a year${monthsFree(plan.price)}`
-              : `${dollars(PLANS.freeTrialCents)} to try it without a card, plus ${signupGrant()}`}
+              : `${dollars(PLANS.freeTrialCents)} to try it without a card${signupGrant()}`}
           </p>
           <p className="lb-plan__spend">
             <b>{dollars(plan.monthlyCents)}</b> of model spend included each
@@ -335,24 +335,34 @@ export function PlanCards({ headingLevel = 3 }: { headingLevel?: 2 | 3 }) {
 }
 
 /**
- * The new-account grant, with its condition, as a phrase: "$1.00 once, when
- * a new account adds a card". The condition comes from the builder's source
- * (`PLANS.signupRequiresCard`), so no page can promise the dollar on sign-up
- * alone while the builder waits for a card (Chris, 2026-09-27).
+ * The new-account grant, with its condition, as a trailing phrase: ", plus
+ * $1.00 once, when a new account adds a card". The condition comes from the
+ * builder's source (`PLANS.signupRequiresCard`), so no page can promise the
+ * dollar on sign-up alone while the builder waits for a card (Chris,
+ * 2026-09-27). Nothing while the grant is retired (D163: zero cents).
  */
 function signupGrant(): string {
+  if (PLANS.signupCents <= 0) return '';
   return PLANS.signupRequiresCard
-    ? `${dollars(PLANS.signupCents)} once, when a new account adds a card`
-    : `${dollars(PLANS.signupCents)} once, on a new account`;
+    ? `, plus ${dollars(PLANS.signupCents)} once, when a new account adds a card`
+    : `, plus ${dollars(PLANS.signupCents)} once, on a new account`;
 }
 
-/** The same grant as a sentence, for the home page's way in. */
+/** How a new account starts, as a sentence, for the home page's way in. */
 export function SignupCreditLine() {
+  if (PLANS.signupCents > 0) {
+    return (
+      <>
+        {PLANS.signupRequiresCard
+          ? `Add a card and get ${dollars(PLANS.signupCents)} of build credit. The card is saved, not charged.`
+          : `A new account gets ${dollars(PLANS.signupCents)} of build credit.`}
+      </>
+    );
+  }
+  const free = PLANS.plans.find((plan) => !plan.price);
   return (
     <>
-      {PLANS.signupRequiresCard
-        ? `Add a card and get ${dollars(PLANS.signupCents)} of build credit. The card is saved, not charged.`
-        : `A new account gets ${dollars(PLANS.signupCents)} of build credit.`}
+      {`A new account gets ${dollars(PLANS.freeTrialCents)} of model spend to try it, and ${dollars(free?.monthlyCents ?? 0)} a month once a card is saved. The card is saved, not charged.`}
     </>
   );
 }
@@ -376,10 +386,12 @@ export function PlanFacts() {
       <div>
         <dt>New accounts</dt>
         <dd>
-          {`A Free account without a card has ${dollars(PLANS.freeTrialCents)} of model spend once, to try it. Saving a card (saved, not charged) starts the Free plan’s monthly allowance, once per card. `}
-          {PLANS.signupRequiresCard
-            ? `Add a card and get ${dollars(PLANS.signupCents)} of model spend once. The card is saved, not charged. One grant per account and per card, separate from the monthly allowance, and it expires twelve months after it is granted.`
-            : `Granted ${dollars(PLANS.signupCents)} once, separate from the monthly allowance. It expires twelve months after it is granted.`}
+          {`A Free account without a card has ${dollars(PLANS.freeTrialCents)} of model spend once, to try it. Saving a card (saved, not charged) starts the Free plan’s monthly allowance, once per card.${PLANS.signupCents > 0 ? ' ' : ''}`}
+          {PLANS.signupCents <= 0
+            ? ''
+            : PLANS.signupRequiresCard
+              ? `Add a card and get ${dollars(PLANS.signupCents)} of model spend once. The card is saved, not charged. One grant per account and per card, separate from the monthly allowance, and it expires twelve months after it is granted.`
+              : `Granted ${dollars(PLANS.signupCents)} once, separate from the monthly allowance. It expires twelve months after it is granted.`}
         </dd>
       </div>
       <div>

@@ -47,9 +47,16 @@ export function signupGrantId(userId: string): string {
  */
 export async function grantSignupCreditForCard(
   billing: Pick<BillingStore, 'claimSignupCardCredit'>,
-  card: { userId: string; setupIntentId: string; cardFingerprint: string },
+  card: {
+    userId: string;
+    setupIntentId: string;
+    cardFingerprint: string;
+    /** False once the deployment no longer offers the credit (D163). */
+    offerOpen: boolean;
+  },
 ): Promise<{ outcome: SignupCardOutcome; paid: boolean }> {
   return billing.claimSignupCardCredit({
+    offerOpen: card.offerOpen,
     setupIntentId: card.setupIntentId,
     userId: card.userId,
     cardFingerprint: card.cardFingerprint,

@@ -19,7 +19,7 @@ import {
 } from './billing-checkout.ts';
 import { createStripeClient, stripeConfigured } from './stripe-client.ts';
 import type { PurchaseOption } from './stripe-client.ts';
-import { signupCreditStatus } from './signup-credit.ts';
+import { signupCreditCents, signupCreditStatus } from './signup-credit.ts';
 import type { SignupCreditEnv } from './signup-credit.ts';
 import type {
   CancelSubscription,
@@ -377,7 +377,7 @@ export async function handleBillingCancel(
  */
 export async function handleStripeWebhook(
   request: Request,
-  env: BillingEnv,
+  env: BillingEnv & SignupCreditEnv,
   /**
    * Injectable so a test can put a signed event through the real
    * verification and answer the one lookup a saved card needs, without a
@@ -456,6 +456,10 @@ export async function handleStripeWebhook(
       // same terms as the referral above: a clawback that cannot finish
       // answers `unresolved`, so this delivery fails and Stripe retries it.
       clawbackDepsFor(stripe, env.USER_BUDGET),
+      // Asked here rather than trusted from the offer row: a card form opened
+      // while the welcome credit was offered can be submitted after it was
+      // switched off (D163).
+      signupCreditCents(env) > 0,
     );
 
     // `unresolved` means the handler wrote nothing, so the event is not

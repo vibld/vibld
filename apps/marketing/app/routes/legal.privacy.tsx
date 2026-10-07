@@ -122,9 +122,9 @@ export default function Privacy() {
         keep: the Stripe customer id linked to your account, your
         subscription&apos;s plan, status and period, the amount and Stripe ids
         of each payment, top-ups and credit grants, and, when you save a card
-        for the welcome credit, Stripe&apos;s fingerprint of that card, which is
-        how the credit is limited to one account per card. We never see or store
-        the card number.
+        for the Free plan&apos;s monthly allowance, Stripe&apos;s fingerprint of
+        that card, which is how the allowance is limited to one account per
+        card. We never see or store the card number.
       </p>
 
       <h2>Referrals</h2>

@@ -3,7 +3,7 @@ import { DOC_GUIDES, metaFor } from '../site';
 import { FREE_PLAN } from '../plan-sources';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'credits-and-plans')!;
-const CHECKED = '2026-10-06';
+const CHECKED = '2026-10-07';
 
 export function meta() {
   return metaFor('/docs/credits-and-plans');
@@ -59,12 +59,10 @@ export default function CreditsAndPlans() {
         paid for a plan or a top-up already has one on file.
       </p>
       <p>
-        A new account can also get <strong>$1.00 once</strong>, by adding a
-        card, the same button. The credit arrives once Stripe confirms the card,
-        usually within a minute. It is granted once per account and once per
-        card. It does not reset, is separate from the monthly allowance, and
-        expires twelve months after it is granted. Accounts that received it on
-        creation, before a card was required, keep it.
+        The one-time <strong>$1.00 welcome credit</strong> is no longer offered,
+        from 7 October 2026. An account that received it keeps it, separate from
+        the monthly allowance, until it expires twelve months after it was
+        granted.
       </p>
 
       <h2>Top-up credit</h2>

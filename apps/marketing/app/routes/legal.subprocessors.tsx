@@ -40,7 +40,7 @@ const CURRENT: Subprocessor[] = [
   {
     name: 'Stripe, Inc.',
     purpose:
-      'Payments, subscriptions, and the card you save for the welcome credit. Receives your card and billing details directly',
+      'Payments, subscriptions, and the card you save for the Free plan’s monthly allowance. Receives your card and billing details directly',
     location: 'United States',
   },
   {

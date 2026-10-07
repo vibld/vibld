@@ -132,9 +132,8 @@ export default function HostedVsSelfHosted() {
         <li>
           <strong>Billing and plans.</strong> Stripe integration exists in the
           source, but a self-hosted copy with no Stripe configuration simply has
-          no billing: everyone gets whatever Free-tier allowance you set, and no
-          one gets the welcome credit, which waits for a card saved through
-          Stripe.
+          no billing: everyone gets whatever Free-tier allowance you set every
+          month, with no trial and no card asked for.
         </li>
         <li>
           <strong>Publishing to a vibld URL.</strong> Self-hosted, the same

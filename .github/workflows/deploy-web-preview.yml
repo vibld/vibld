@@ -376,8 +376,13 @@ jobs:
             printf '%s' "$VIBLD_SIGNUP_CREDIT_FROM" | pnpm dlx wrangler@4.137.0 secret put VIBLD_SIGNUP_CREDIT_FROM
             echo "Signup credit: accounts created from $VIBLD_SIGNUP_CREDIT_FROM." >> "$GITHUB_STEP_SUMMARY"
           fi
-          # Optional. Unset means the default of 100 cents; "0" turns the
-          # grant off without touching the cutoff.
+          # Optional. Unset means the default, 0 cents since D163 (the credit
+          # is retired). An existing Worker secret stays until replaced, so
+          # set this to 0 rather than deleting it to retire the grant.
+          # `secret put` publishes a new version of the Worker already live,
+          # before this run deploys its own code, so retire it on a deploy
+          # that follows one carrying the webhook's own check of this switch
+          # (`signupCreditOpen`, D163); the old webhook pays any open offer.
           if [ -n "$VIBLD_SIGNUP_CREDIT_USD_CENTS" ]; then
             printf '%s' "$VIBLD_SIGNUP_CREDIT_USD_CENTS" | pnpm dlx wrangler@4.137.0 secret put VIBLD_SIGNUP_CREDIT_USD_CENTS
             echo "Signup credit amount: ${VIBLD_SIGNUP_CREDIT_USD_CENTS}c." >> "$GITHUB_STEP_SUMMARY"

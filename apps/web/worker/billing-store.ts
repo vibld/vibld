@@ -727,6 +727,28 @@ export class BillingStore {
       .run();
   }
 
+  /**
+   * Withdraw an offer the account has not been paid for yet, so a card saved
+   * after the credit was switched off pays nothing (D163). A paid offer is
+   * left alone: the grant is the record, and the row is harmless. With no
+   * offer row, `claimSignupCardCredit` records the card as `no-offer`, and
+   * the card still counts for the monthly allowance. An offer with a
+   * `granted` claim not yet paid is kept too: the claim's retry reads the
+   * amount from it.
+   */
+  async closeSignupOffer(userId: string, grantId: string): Promise<void> {
+    await this.#db
+      .prepare(
+        `DELETE FROM billing_signup_offers
+          WHERE user_id = ?1
+            AND NOT EXISTS (SELECT 1 FROM billing_admin_credits WHERE id = ?2)
+            AND NOT EXISTS (SELECT 1 FROM billing_signup_cards
+                             WHERE user_id = ?1 AND outcome = 'granted')`,
+      )
+      .bind(userId, grantId)
+      .run();
+  }
+
   /** The cents this account was offered, or undefined if it never was. */
   async findSignupOffer(userId: string): Promise<number | undefined> {
     const row = await this.#db
@@ -835,21 +857,29 @@ export class BillingStore {
     grantId: string;
     grantedByEmail: string;
     note: string;
+    /**
+     * Whether the deployment still offers the credit. False records the
+     * card as `no-offer` whatever offer row is left (D163): the card still
+     * counts for the monthly allowance, and nothing is paid.
+     */
+    offerOpen: boolean;
   }): Promise<{ outcome: SignupCardOutcome; paid: boolean }> {
     const now = new Date().toISOString();
     const { setupIntentId, userId, cardFingerprint, grantId } = claim;
+    const open = claim.offerOpen ? 1 : 0;
 
     await this.#db
       .prepare(
         `INSERT INTO billing_signup_cards
            (stripe_setup_intent_id, user_id, card_fingerprint, outcome, created_at)
          SELECT ?1, ?2, ?3, 'granted', ?4
-          WHERE EXISTS (SELECT 1 FROM billing_signup_offers
+          WHERE ?6 = 1
+            AND EXISTS (SELECT 1 FROM billing_signup_offers
                          WHERE user_id = ?2 AND credit_usd_cents > 0)
             AND NOT EXISTS (SELECT 1 FROM billing_admin_credits WHERE id = ?5)
          ON CONFLICT DO NOTHING`,
       )
-      .bind(setupIntentId, userId, cardFingerprint, now, grantId)
+      .bind(setupIntentId, userId, cardFingerprint, now, grantId, open)
       .run();
 
     // The order of the CASE is the order the reasons are worth telling
@@ -869,7 +899,8 @@ export class BillingStore {
                     OR EXISTS (SELECT 1 FROM billing_signup_cards
                                 WHERE user_id = ?2 AND outcome = 'granted')
                     THEN 'account-granted'
-                  WHEN NOT EXISTS (SELECT 1 FROM billing_signup_offers
+                  WHEN ?6 = 0
+                    OR NOT EXISTS (SELECT 1 FROM billing_signup_offers
                                     WHERE user_id = ?2 AND credit_usd_cents > 0)
                     THEN 'no-offer'
                   ELSE 'card-used'
@@ -878,7 +909,7 @@ export class BillingStore {
           WHERE 1
          ON CONFLICT DO NOTHING`,
       )
-      .bind(setupIntentId, userId, cardFingerprint, now, grantId)
+      .bind(setupIntentId, userId, cardFingerprint, now, grantId, open)
       .run();
 
     const row = await this.#db

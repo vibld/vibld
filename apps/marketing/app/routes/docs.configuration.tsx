@@ -185,12 +185,13 @@ export default function Configuration() {
         </li>
         <li>
           <code>VIBLD_SIGNUP_CREDIT_USD_CENTS</code> and{' '}
-          <code>VIBLD_SIGNUP_CREDIT_FROM</code>: the one-time grant for a new
-          account, and the instant from which accounts count as new. The second
-          has no default: any default early enough to catch new accounts would
-          also catch every existing one. The grant waits for a card saved
-          through Stripe, so it needs billing configured and the Stripe webhook
-          subscribed to <code>checkout.session.completed</code> or{' '}
+          <code>VIBLD_SIGNUP_CREDIT_FROM</code>: an optional one-time grant for
+          a new account (0 cents, off, unless set), and the instant from which
+          accounts count as new. The second has no default: any default early
+          enough to catch new accounts would also catch every existing one. The
+          grant waits for a card saved through Stripe, so it needs billing
+          configured and the Stripe webhook subscribed to{' '}
+          <code>checkout.session.completed</code> or{' '}
           <code>setup_intent.succeeded</code>; without Stripe nobody gets it.
         </li>
       </ul>

@@ -34,13 +34,21 @@ function costAnswer(plans: Plans): string {
       ? `${plan.name} is ${planPrice(plan.price)} and includes ${dollars(plan.monthlyCents)} of model spend each month.`
       : `${plan.name} costs nothing and includes ${dollars(plan.monthlyCents)} of model spend each month once a card is saved (it is not charged), and ${dollars(plans.freeTrialCents)} once to try it without one.`,
   );
-  const signup = plans.signupRequiresCard
-    ? `A new account that adds a card also gets ${dollars(plans.signupCents)} of build credit once; the card is saved, not charged.`
-    : `A new account also gets ${dollars(plans.signupCents)} of build credit once.`;
+  // Nothing while the welcome credit is retired (D163: zero cents).
+  const signup =
+    plans.signupCents <= 0
+      ? []
+      : plans.signupRequiresCard
+        ? [
+            `A new account that adds a card also gets ${dollars(plans.signupCents)} of build credit once; the card is saved, not charged.`,
+          ]
+        : [
+            `A new account also gets ${dollars(plans.signupCents)} of build credit once.`,
+          ];
   return [
     ...parts,
     `A top-up is ${priceLabel(plans.topup.priceCents)} for ${dollars(plans.topup.creditCents)} of model spend, on any plan.`,
-    signup,
+    ...signup,
     'Prices are in US dollars.',
   ].join(' ');
 }

@@ -871,11 +871,17 @@ describe('the product pages', () => {
           );
         }
       }
-      assert.ok(text.includes(dollars(signupCents)));
+      // D163: a retired welcome credit is offered nowhere.
+      if (signupCents <= 0) {
+        assert.doesNotMatch(text, /of build credit\. The card is saved/);
+        assert.doesNotMatch(text, /once, when a new account adds a card/);
+      } else {
+        assert.ok(text.includes(dollars(signupCents)));
+      }
       // The condition goes wherever the amount does. A dollar promised on
       // sign-up alone, while the builder waits for a card, is a promise the
       // product breaks on the first day (Chris, 2026-09-27).
-      if (signupRequiresCard) {
+      if (signupCents > 0 && signupRequiresCard) {
         assert.ok(
           text.includes(
             `${dollars(signupCents)} once, when a new account adds a card`,

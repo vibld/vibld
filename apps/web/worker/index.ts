@@ -112,7 +112,7 @@ import {
   isModelRoute,
   modelGrantSource,
 } from './model-grants.ts';
-import { signupCreditStatus } from './signup-credit.ts';
+import { signupCreditCents, signupCreditStatus } from './signup-credit.ts';
 import {
   handleReferralClaim,
   handleReferralStatus,
@@ -350,7 +350,7 @@ export interface Env extends PrincipalEnv, StyleGalleryEnv {
   /**
    * Cents of one-time credit a new account is granted once it has a card on
    * file (a Stripe setup-mode Checkout, which charges nothing). Defaults to
-   * 100 ($1.00); "0" stops new offers.
+   * 0, which offers nothing (D163 retired the credit).
    *
    * Separate money from VIBLD_FREE_MONTHLY_MICRO_USD above, which resets
    * every month. This does not reset, and is spent from the same top-up
@@ -3333,6 +3333,9 @@ export default {
       // delivery: the same Stripe client, and the same spend ledger for the
       // floor that keeps a refund from leaving anybody owing.
       const clawback = clawbackDepsFor(stripe, env.USER_BUDGET);
+      // Asked on every replayed card, as on delivery: a card saved after the
+      // welcome credit was switched off pays nothing (D163).
+      const signupCreditOpen = signupCreditCents(env) > 0;
       const reversed = (
         userId: string,
         reason: string,
@@ -3365,6 +3368,7 @@ export default {
           readCharge,
           readCard,
           clawback,
+          signupCreditOpen,
         )
           .then(
             (result) => {
@@ -3407,6 +3411,7 @@ export default {
               readCharge,
               readCard,
               clawback,
+              signupCreditOpen,
             ),
           )
           .then(
@@ -3501,6 +3506,7 @@ export default {
             readCharge,
             readCard,
             clawback,
+            signupCreditOpen,
           ).then(
             (result) =>
               console.log(
@@ -3518,6 +3524,7 @@ export default {
             readCharge,
             readCard,
             clawback,
+            signupCreditOpen,
           ).then(
             (result) =>
               console.log(

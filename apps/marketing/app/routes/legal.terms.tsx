@@ -102,11 +102,9 @@ export default function Terms() {
           spend that expires twelve months after purchase.
         </li>
         <li>
-          <strong>Welcome credit</strong>: an account created after the offer
-          started can save a card through Stripe and receive{' '}
-          {dollars(PLANS.signupCents)} of model spend once. The card is saved,
-          not charged. The credit is given once per account and once per card,
-          and expires twelve months after it is granted.
+          <strong>Welcome credit</strong>: no longer offered, from 7 October
+          2026. An account that received it keeps it until it expires, twelve
+          months after it was granted.
         </li>
       </ul>
       <p>
@@ -144,14 +142,14 @@ export default function Terms() {
       <p>
         Your referral link is under <strong>Refer a friend</strong> in the
         builder&apos;s settings. If a new account arrives through it, claims it
-        before starting any purchase (saving a card for the welcome credit does
-        not count as one), and then makes its first payment, both accounts
-        receive $5.00 of credit. A referral code cannot be your own, an account
-        can be credited for at most 25 referrals, and a referral is attributed
-        once and never changed. If the payment that earned the reward is
-        refunded, or a dispute over it is lost, both rewards are taken back from
-        granted credit, down to zero at most; purchased top-up credit is never
-        reduced to do this.
+        before starting any purchase (saving a card for the Free plan&apos;s
+        monthly allowance does not count as one), and then makes its first
+        payment, both accounts receive $5.00 of credit. A referral code cannot
+        be your own, an account can be credited for at most 25 referrals, and a
+        referral is attributed once and never changed. If the payment that
+        earned the reward is refunded, or a dispute over it is lost, both
+        rewards are taken back from granted credit, down to zero at most;
+        purchased top-up credit is never reduced to do this.
       </p>
 
       <h2>6. Your content and the code vibld generates</h2>

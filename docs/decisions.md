@@ -295,6 +295,13 @@ paying accounts until midnight UTC.
 - **D160. The Free plan keeps Luna (Chris, 2026-10-05: "Keep Luna").** The
   question was which DeepSeek model the Free plan should default to; the
   answer was no change to its model or default.
+- **D163. The welcome credit is retired (Chris, 2026-10-07: "Retire").**
+  With D159 the same card buys the Free plan's monthly dollar, so the one-time
+  $1.00 for saving it is no longer offered. `DEFAULT_SIGNUP_CREDIT_USD_CENTS`
+  is 0, and production retires it with `VIBLD_SIGNUP_CREDIT_USD_CENTS` set to
+  0 on the deploy environment (the Worker secret persists until replaced).
+  Accounts already granted it keep it until it expires. vibld.com states the
+  grant only while it is above zero.
 
 ### Checkpoint history, 2026-10-03
 

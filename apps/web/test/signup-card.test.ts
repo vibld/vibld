@@ -46,6 +46,7 @@ function claim(
     userId,
     setupIntentId,
     cardFingerprint,
+    offerOpen: true,
   });
 }
 
@@ -275,7 +276,16 @@ function apply(
   e: Stripe.Event,
   resolve?: (id: string) => Promise<Stripe.SetupIntent>,
 ) {
-  return applyStripeEvent(store, e, undefined, undefined, undefined, resolve);
+  return applyStripeEvent(
+    store,
+    e,
+    undefined,
+    undefined,
+    undefined,
+    resolve,
+    undefined,
+    true,
+  );
 }
 
 describe('applyStripeEvent: a card saved for the welcome credit', () => {
@@ -425,6 +435,8 @@ describe('the Stripe webhook, signed, for a saved card', () => {
       STRIPE_SECRET_KEY: 'sk_test_fake',
       STRIPE_WEBHOOK_SECRET: SECRET,
       DB: db,
+      // The credit is off by default since D163; these tests pay it.
+      VIBLD_SIGNUP_CREDIT_USD_CENTS: '100',
     };
   }
 
@@ -484,6 +496,29 @@ describe('the Stripe webhook, signed, for a saved card', () => {
     // was asked anything.
     assert.deepEqual(calls, ['seti_1']);
     assert.equal(await store.wasEventProcessed('evt_card_1'), true);
+  });
+
+  it('pays nothing once the credit is switched off, offer or not (D163)', async () => {
+    // A card form opened while the credit was offered and submitted after
+    // it was switched off reaches only this webhook.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new BillingStore(db);
+    await offered(store, 'user_a');
+    const { stripe } = offlineStripe();
+    const body = JSON.stringify(
+      event('setup_intent.succeeded', setupIntent(), 'evt_card_off'),
+    );
+
+    const response = await deliver(
+      stripe,
+      { ...webhookEnv(db), VIBLD_SIGNUP_CREDIT_USD_CENTS: '0' },
+      body,
+    );
+    assert.equal(response.status, 200);
+    assert.equal(await store.totalSpendableCreditMicroUsd('user_a'), 0);
+    assert.equal(await store.latestSignupCardOutcome('user_a'), 'no-offer');
+    // The card still counts for the Free plan's monthly allowance (D159).
+    assert.equal((await store.freeCardOf('user_a')).onFile, true);
   });
 
   it('fails the delivery, retryably, when the card cannot be read yet', async () => {

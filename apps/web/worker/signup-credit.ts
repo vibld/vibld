@@ -51,8 +51,13 @@ export {
   signupGrantId,
 } from './signup-grant.ts';
 
-/** $1.00, as `grantAdminCredit` counts it. */
-export const DEFAULT_SIGNUP_CREDIT_USD_CENTS = 100;
+/**
+ * None: the welcome credit is retired (D163, Chris, 2026-10-07), since the
+ * Free plan's monthly allowance now waits for the same card (D159). Accounts
+ * already granted it keep it until it expires. A deployment can still offer
+ * one with `VIBLD_SIGNUP_CREDIT_USD_CENTS`.
+ */
+export const DEFAULT_SIGNUP_CREDIT_USD_CENTS = 0;
 
 /**
  * Whether the credit waits for a card on file. Not a switch: nothing in this
@@ -153,10 +158,9 @@ const ISO_INSTANT =
 /**
  * How much a new account gets, in cents.
  *
- * An unreadable value falls back to the default rather than to zero. Getting
- * this wrong in the generous direction costs a dollar per account in the
- * cohort; the other direction silently stops every new user receiving what
- * they were promised, and nothing would report it.
+ * An unreadable value falls back to the default, which is zero since the
+ * credit was retired (D163): a deployment that means to offer one sets a
+ * readable amount.
  */
 export function signupCreditCents(env: SignupCreditEnv): number {
   const raw = env.VIBLD_SIGNUP_CREDIT_USD_CENTS?.trim();
@@ -228,6 +232,7 @@ export async function signupCreditStatus(
     | 'findAdminCredit'
     | 'openSignupOffer'
     | 'findSignupOffer'
+    | 'closeSignupOffer'
     | 'latestSignupCardOutcome'
   >,
   principal: Principal,
@@ -247,7 +252,13 @@ export async function signupCreditStatus(
     }
 
     const cents = signupCreditCents(env);
-    if (cents <= 0) return { state: 'none', reason: 'disabled' };
+    if (cents <= 0) {
+      // Switched off with offers still open (D163): withdrawn here, because
+      // every card form is opened through this question (`handleBillingCard`)
+      // and the Stripe webhook pays any open offer it finds.
+      await billing.closeSignupOffer(userId, signupGrantId(userId));
+      return { state: 'none', reason: 'disabled' };
+    }
     const cohortStart = signupCohortStart(env);
     if (cohortStart === null) {
       return { state: 'none', reason: 'no-cohort-configured' };

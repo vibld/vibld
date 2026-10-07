@@ -217,6 +217,7 @@ async function applyCheckoutSessionCompleted(
   session: Stripe.Checkout.Session,
   onPurchaseCleared?: OnPurchaseCleared,
   resolveSetupIntent?: ResolveSetupIntent,
+  signupCreditOpen = false,
 ): Promise<EventOutcome> {
   const userId =
     metadataUserId(session.metadata) ??
@@ -247,6 +248,7 @@ async function applyCheckoutSessionCompleted(
       idsOf(session.setup_intent)[0],
       userId,
       resolveSetupIntent,
+      signupCreditOpen,
     );
   }
 
@@ -329,6 +331,7 @@ async function applyCardSaved(
   setupIntentId: string | undefined,
   fallbackUserId: string | undefined,
   resolveSetupIntent?: ResolveSetupIntent,
+  signupCreditOpen = false,
 ): Promise<EventOutcome> {
   if (!setupIntentId) {
     // A setup-mode Checkout always creates one. Nothing a retry can supply.
@@ -397,6 +400,7 @@ async function applyCardSaved(
     userId,
     setupIntentId: intent.id,
     cardFingerprint: fingerprint,
+    offerOpen: signupCreditOpen,
   });
   // The fingerprint is left out on purpose: it identifies a card across
   // every Stripe account that has seen it, and the outcome says enough.
@@ -718,6 +722,13 @@ export async function applyStripeEvent(
    * parked retry).
    */
   clawback?: ClawbackDeps,
+  /**
+   * Whether this deployment still offers the welcome credit
+   * (`signupCreditCents(env) > 0`). Asked here, on the webhook, because a
+   * card form opened while it was offered can be submitted after it was
+   * switched off (D163). Absent means off, the default since D163.
+   */
+  signupCreditOpen = false,
 ): Promise<EventOutcome> {
   switch (event.type) {
     case 'checkout.session.completed':
@@ -730,6 +741,7 @@ export async function applyStripeEvent(
         event.data.object,
         onPurchaseCleared,
         resolveSetupIntent,
+        signupCreditOpen,
       );
     case 'setup_intent.succeeded':
       // Every saved card fires this, the Billing Portal's included, so the
@@ -740,6 +752,7 @@ export async function applyStripeEvent(
         event.data.object.id,
         undefined,
         resolveSetupIntent,
+        signupCreditOpen,
       );
     case 'checkout.session.async_payment_failed':
       // Nothing to undo, which is the whole reason the grant is gated on

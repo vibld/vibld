@@ -168,9 +168,8 @@ export default function SelfHosting() {
         <li>
           <strong>Stripe</strong>, unless you intend to charge somebody. Without
           it, billing endpoints report themselves unconfigured and everyone is
-          on the Free tier’s allowance, which you can set to whatever you like.
-          The one-time welcome credit waits for a card saved through Stripe, so
-          without it nobody receives that either.
+          on the Free tier’s allowance, which you can set to whatever you like,
+          every month, with no trial and no card asked for.
         </li>
         <li>
           <strong>A GitHub App</strong>, unless you want the push-to-repository
