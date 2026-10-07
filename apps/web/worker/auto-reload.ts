@@ -89,6 +89,12 @@ export interface AutoReloadDeps {
    */
   access?: AutoReloadAccess;
   now?: number;
+  /**
+   * The time as the request is sent, read again then rather than taken from
+   * `now`: the dispatch is stamped with it, and the lease another check
+   * waits out runs from it (`DISPATCH_LEASE_MS`).
+   */
+  clock?: () => number;
 }
 
 export type AutoReloadOutcome =
@@ -169,18 +175,17 @@ export async function maybeAutoReload(
   // again in between is the setting this charge answers to.
   const claimed = await store.pendingAutoReload(userId);
   if (claimed?.id !== attempt) return 'skipped';
-  // The referral barrier's earliest term, before the charge, as a Checkout
-  // writes it before the page opens (purchase-barrier.ts).
-  await store.recordPurchaseStarted(userId);
   // Still the setting the claim read, under its cap, the account not barred,
-  // asked in one statement as the last thing before Stripe.
+  // asked in one statement as the last thing before Stripe. It writes the
+  // referral barrier's earliest term with the dispatch, before the charge,
+  // as a Checkout writes it before the page opens (purchase-barrier.ts).
   if (
     !(await store.autoReloadAttemptCurrent(
       userId,
       attempt,
       monthKey(now),
       access,
-      new Date(now).toISOString(),
+      sentAt(deps),
     ))
   ) {
     await store.settleAutoReloadAttempt(attempt, 'failed', null, 'superseded');
@@ -190,6 +195,11 @@ export async function maybeAutoReload(
     id: attempt,
     amount: claimed.amountUsdCents,
   });
+}
+
+/** The dispatch stamp: the time now, as the request is about to be sent. */
+function sentAt(deps: AutoReloadDeps): string {
+  return new Date(deps.clock?.() ?? deps.now ?? Date.now()).toISOString();
 }
 
 /**
@@ -435,20 +445,20 @@ async function resume(
       );
       return 'skipped';
     }
-    // Written again first: a Worker that stopped right after the claim never
-    // reached the first write (`recordPurchaseStarted` keeps the earliest).
-    await deps.store.recordPurchaseStarted(userId);
-    // And whether it may still be charged at all, asked in one statement as
-    // the last thing before Stripe: a setting saved since the claim (a cap
+    // Whether it may still be charged at all, asked in one statement as the
+    // last thing before Stripe: a setting saved since the claim (a cap
     // lowered, a card changed, turned off and on) is what decides now, so
-    // this attempt gives way and the check goes on to claim afresh.
+    // this attempt gives way and the check goes on to claim afresh. It
+    // writes the referral barrier again with the dispatch: a Worker that
+    // stopped right after the claim never reached the first write, and the
+    // barrier keeps the earliest.
     if (
       !(await deps.store.autoReloadAttemptCurrent(
         userId,
         pending.id,
         pending.period,
         deps.access,
-        new Date(pending.now).toISOString(),
+        sentAt(deps),
       ))
     ) {
       return (await deps.store.giveUpAutoReloadAttempt(

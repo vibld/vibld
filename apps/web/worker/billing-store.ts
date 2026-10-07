@@ -2111,7 +2111,9 @@ export class BillingStore {
    * the month's charges still under that cap, and the account not barred.
    * True also records the dispatch (`dispatched_at`), which keeps the
    * attempt from being given up while its request may be in flight
-   * (`giveUpAutoReloadAttempt`).
+   * (`giveUpAutoReloadAttempt`), and in the same batch writes the referral
+   * barrier's earliest term (purchase-barrier.ts): written exactly when a
+   * charge may follow, and never for an attempt that gives way here.
    */
   async autoReloadAttemptCurrent(
     userId: string,
@@ -2120,9 +2122,10 @@ export class BillingStore {
     access: AutoReloadAccess = INVITE_GATED,
     now: string = new Date().toISOString(),
   ): Promise<boolean> {
-    const result = await this.#db
-      .prepare(
-        `UPDATE billing_auto_reload_attempts
+    const [dispatched] = await this.#db.batch([
+      this.#db
+        .prepare(
+          `UPDATE billing_auto_reload_attempts
             SET dispatched_at = ?6
           WHERE id = ?2 AND user_id = ?1 AND state = 'pending'
             AND EXISTS (
@@ -2136,10 +2139,22 @@ export class BillingStore {
                          < s.monthly_cap_usd_cents
                            / billing_auto_reload_attempts.amount_usd_cents)
             AND NOT (${autoReloadBarredSql('?4', '?5')})`,
-      )
-      .bind(userId, attemptId, period, ...accessParams(access), now)
-      .run();
-    return result.meta.changes > 0;
+        )
+        .bind(userId, attemptId, period, ...accessParams(access), now),
+      // Only when the statement above recorded this dispatch.
+      this.#db
+        .prepare(
+          `INSERT INTO billing_purchase_starts (user_id, started_at)
+           SELECT ?1, ?3
+            WHERE EXISTS (
+                    SELECT 1 FROM billing_auto_reload_attempts
+                     WHERE id = ?2 AND user_id = ?1 AND state = 'pending'
+                       AND dispatched_at = ?3)
+           ON CONFLICT(user_id) DO NOTHING`,
+        )
+        .bind(userId, attemptId, now),
+    ]);
+    return (dispatched?.meta.changes ?? 0) > 0;
   }
 
   /**

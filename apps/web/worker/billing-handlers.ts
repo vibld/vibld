@@ -324,6 +324,11 @@ export async function handleBillingAutoReload(
   env: BillingEnv,
   reloadNow?: (userId: string) => Promise<AutoReloadOutcome>,
   client?: Pick<Stripe, 'customers'>,
+  /**
+   * The access decision for turning it on, which the route table leaves to
+   * this handler (access-gate.ts): a refusal, or undefined when admitted.
+   */
+  gate?: (principal: Principal) => Promise<Response | undefined>,
 ): Promise<Response> {
   if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
   if (!billingConfigured(env)) {
@@ -362,6 +367,8 @@ export async function handleBillingAutoReload(
     });
     return json({ enabled: false, monthlyCapUsdCents: cap });
   }
+  const refused = await gate?.(resolved.principal);
+  if (refused) return refused;
   if (await store.isSuspended(userId)) {
     return json({ error: SUSPENDED_MESSAGE }, 403);
   }

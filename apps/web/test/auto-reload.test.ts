@@ -569,6 +569,41 @@ describe('a reload', () => {
     assert.equal((await rows(db))[0]?.failure_code, 'superseded');
   });
 
+  it('closes no referral barrier for an attempt that gave way before Stripe', async () => {
+    const { store } = await world();
+    const fake = fakeStripe();
+    const { deps: d } = deps(store, fake.stripe);
+    let reads = 0;
+    d.spendableLeftMicroUsd = async () => {
+      if (++reads === 2) {
+        await store.saveAutoReloadSettings(USER, {
+          enabled: true,
+          monthlyCapUsdCents: 1000,
+        });
+      }
+      return 500_000;
+    };
+    assert.equal(await maybeAutoReload(d, USER), 'skipped');
+    assert.equal(fake.created.length, 0);
+    assert.equal(await store.hasBegunAPurchase(USER), false);
+  });
+
+  it('stamps the dispatch with the time it was sent, not the time the check began', async () => {
+    const { db, store } = await world();
+    const fake = fakeStripe([{ throws: { type: 'StripeConnectionError' } }]);
+    const sent = NOW + 15 * 60_000;
+    const { deps: d } = deps(store, fake.stripe);
+    assert.equal(
+      await maybeAutoReload({ ...d, clock: () => sent }, USER),
+      'pending',
+    );
+    const row = await db
+      .prepare(`SELECT dispatched_at FROM billing_auto_reload_attempts`)
+      .first<{ dispatched_at: string }>();
+    assert.equal(row?.dispatched_at, new Date(sent).toISOString());
+    assert.equal(await store.hasBegunAPurchase(USER), true);
+  });
+
   it('charges nothing when credit arrived while the claim was being made', async () => {
     const { db, store } = await world();
     const fake = fakeStripe();
@@ -1072,10 +1107,13 @@ describe('POST /api/billing/auto-reload', () => {
       { id: 'pm_new', card: { brand: 'mastercard', last4: '5555' } },
     ],
     reloadNow?: () => Promise<'credited'>,
+    gate?: () => Promise<Response | undefined>,
+    before?: (store: BillingStore) => Promise<void>,
   ) {
     const db = new SqliteD1Database(SCHEMA) as unknown as D1Database;
     const store = new BillingStore(db);
     await store.linkCustomer(OWNER, CUSTOMER);
+    await before?.(store);
     const { token, keys } = await signedIn();
     const original = globalThis.fetch;
     globalThis.fetch = (async () =>
@@ -1102,6 +1140,7 @@ describe('POST /api/billing/auto-reload', () => {
             listPaymentMethods: (async () => ({ data: cards })) as never,
           } as never,
         },
+        gate,
       );
       return { response, store };
     } finally {
@@ -1147,6 +1186,42 @@ describe('POST /api/billing/auto-reload', () => {
 
   it('turns off without asking Stripe', async () => {
     const { response, store } = await post({ enabled: false }, []);
+    assert.equal(response.status, 200);
+    assert.equal((await store.autoReloadSettings(OWNER))?.enabled, false);
+  });
+
+  const refusedByGate = () =>
+    Promise.resolve(new Response('not invited', { status: 403 }));
+
+  it('does not let an account the gate refuses turn it on', async () => {
+    let asked = 0;
+    const { response, store } = await post(
+      { enabled: true },
+      undefined,
+      async () => {
+        asked++;
+        return 'credited';
+      },
+      refusedByGate,
+    );
+    assert.equal(response.status, 403);
+    assert.equal(await store.autoReloadSettings(OWNER), undefined);
+    assert.equal(asked, 0);
+  });
+
+  it('lets an account the gate refuses turn it off', async () => {
+    const { response, store } = await post(
+      { enabled: false },
+      [],
+      undefined,
+      refusedByGate,
+      (billing) =>
+        billing.saveAutoReloadSettings(OWNER, {
+          enabled: true,
+          monthlyCapUsdCents: 3000,
+          card: { paymentMethodId: 'pm_card', brand: 'visa', last4: '4242' },
+        }),
+    );
     assert.equal(response.status, 200);
     assert.equal((await store.autoReloadSettings(OWNER))?.enabled, false);
   });

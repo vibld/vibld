@@ -337,7 +337,9 @@ paying accounts until midnight UTC.
   confirmed, or a card no longer saved turns it off, and the builder says why
   above the one-click top-up, which stays. A refund or a lost dispute of the
   charge takes the credit back as for a Checkout top-up. The refund policy and
-  the Terms say so.
+  the Terms say so. Turning it on needs an invite, as checkout does; turning
+  it off never does, so an account whose invite was withdrawn can still take
+  the permission back.
 - **D167. Opt-in auto-subscribe starts Build, once (Chris, 2026-10-07:
   decision card D167, "Start Build"; amends L37).** Off unless a Free account
   turns it on in the builder, which needs a card Stripe can charge again. With

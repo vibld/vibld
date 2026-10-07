@@ -4058,8 +4058,14 @@ async function route(
   }
 
   if (pathname === '/api/billing/auto-reload') {
-    return handleBillingAutoReload(request, env, (userId) =>
-      autoReloadFor(env, userId).then((outcome) => outcome ?? 'off'),
+    return handleBillingAutoReload(
+      request,
+      env,
+      (userId) =>
+        autoReloadFor(env, userId).then((outcome) => outcome ?? 'off'),
+      undefined,
+      async (principal) =>
+        (await decideAccessFor(env, principal)).allowed ? undefined : refusal(),
     );
   }
 
