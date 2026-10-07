@@ -52,7 +52,9 @@ function offer(
 /** The builder as a product, with one Offer per price the pricing page shows. */
 export function softwareApplicationSchema(plans: Plans) {
   const offers = plans.plans.flatMap((plan) => {
-    const spend = `Includes ${dollars(plan.monthlyCents)} of model spend each month.`;
+    const spend = plan.price
+      ? `Includes ${dollars(plan.monthlyCents)} of model spend each month.`
+      : `Includes ${dollars(plan.monthlyCents)} of model spend each month once a card is saved, and ${dollars(plans.freeTrialCents)} once without one.`;
     if (!plan.price) return [offer(plan.name, 0, null, spend)];
     return [
       offer(`${plan.name}, monthly`, plan.price.monthly, 'P1M', spend),

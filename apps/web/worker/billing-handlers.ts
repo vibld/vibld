@@ -220,12 +220,13 @@ export function clawbackDepsFor(
 
 /**
  * POST -> { url } for a Stripe-hosted page that saves a card and charges
- * nothing, which is what the welcome credit waits for (Chris, 2026-09-27).
+ * nothing, which is what the welcome credit waits for (Chris, 2026-09-27),
+ * and what the Free plan's monthly allowance waits for (D159).
  *
- * Refused unless the caller is actually offered the credit. The webhook
- * would pay nothing for anybody else anyway, since it pays only against an
- * open offer; refusing here is so nobody is sent to enter a card for a
- * credit they will not get.
+ * Refused unless saving a card would give the caller something: the
+ * welcome credit it is offered, or the monthly allowance, which an account
+ * without a card on file does not yet have. Refusing here is so nobody is
+ * sent to enter a card for nothing.
  */
 export async function handleBillingCard(
   request: Request,
@@ -247,13 +248,16 @@ export async function handleBillingCard(
 
   const store = new BillingStore(env.DB!);
   const offer = await signupCreditStatus(store, principal, env, fetchImpl);
-  if (offer.state !== 'needs-card') {
+  if (
+    offer.state !== 'needs-card' &&
+    (await store.freeCardOf(principal.userId)).onFile
+  ) {
     return json(
       {
         error:
           offer.state === 'granted'
-            ? 'This account already has its welcome credit.'
-            : 'This account is not offered the welcome credit.',
+            ? 'This account already has its welcome credit and a card on file.'
+            : 'This account already has a card on file.',
       },
       409,
     );

@@ -64,6 +64,17 @@ describe('the plans the pricing page states', () => {
     );
   });
 
+  it('reads the Free trial the Worker enforces (D159)', async () => {
+    const path = join(WORKER, 'entitlement.ts');
+    const worker = (await import(path)) as {
+      DEFAULT_FREE_TRIAL_MICRO_USD: number;
+    };
+    assert.equal(
+      readPlans(sources).freeTrialCents,
+      worker.DEFAULT_FREE_TRIAL_MICRO_USD / 10_000,
+    );
+  });
+
   it('reads the new-account grant', () => {
     const declared = /DEFAULT_SIGNUP_CREDIT_USD_CENTS\s*=\s*(\d+)/.exec(
       sources.signupCredit,
@@ -133,12 +144,16 @@ describe('the plans the pricing page states', () => {
       ),
       'utf8',
     ).replace(/\s+/g, ' ');
-    const { plans, signupCents, topup } = readPlans(sources);
+    const { plans, signupCents, topup, freeTrialCents } = readPlans(sources);
     for (const plan of plans) {
       const price = plan.price
         ? `${priceLabel(plan.price.monthly)} a month, or ${priceLabel(plan.price.annual)} a year.`
         : 'no charge.';
-      const expected = `<strong>${plan.name}</strong>: ${price} Includes ${dollars(plan.monthlyCents)} of model spend per month.`;
+      // D159: Free's month waits for a card, and a trial comes before it.
+      const spend = plan.price
+        ? `Includes ${dollars(plan.monthlyCents)} of model spend per month.`
+        : `Includes ${dollars(plan.monthlyCents)} of model spend per month once a card is saved, and ${dollars(freeTrialCents)} once to try it without one.`;
+      const expected = `<strong>${plan.name}</strong>: ${price} ${spend}`;
       assert.ok(
         guide.includes(expected),
         `the guide does not say: ${expected}`,

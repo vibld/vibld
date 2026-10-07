@@ -317,11 +317,11 @@ export function PlanCards({ headingLevel = 3 }: { headingLevel?: 2 | 3 }) {
           <p className="lb-plan__alt">
             {plan.price
               ? `or ${priceLabel(plan.price.annual)} a year${monthsFree(plan.price)}`
-              : `plus ${signupGrant()}`}
+              : `${dollars(PLANS.freeTrialCents)} to try it without a card, plus ${signupGrant()}`}
           </p>
           <p className="lb-plan__spend">
             <b>{dollars(plan.monthlyCents)}</b> of model spend included each
-            month
+            month{plan.price ? '' : ' once a card is saved'}
           </p>
           <p className="lb-plan__d">
             {plan.price
@@ -376,6 +376,7 @@ export function PlanFacts() {
       <div>
         <dt>New accounts</dt>
         <dd>
+          {`A Free account without a card has ${dollars(PLANS.freeTrialCents)} of model spend once, to try it. Saving a card (saved, not charged) starts the Free plan’s monthly allowance, once per card. `}
           {PLANS.signupRequiresCard
             ? `Add a card and get ${dollars(PLANS.signupCents)} of model spend once. The card is saved, not charged. One grant per account and per card, separate from the monthly allowance, and it expires twelve months after it is granted.`
             : `Granted ${dollars(PLANS.signupCents)} once, separate from the monthly allowance. It expires twelve months after it is granted.`}

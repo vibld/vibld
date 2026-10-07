@@ -22,6 +22,21 @@ export const TIER_INCLUDED_MICRO_USD: Record<Exclude<Tier, 'free'>, number> = {
 /** L36: Free is $1/mo. The one tier an operator may still override -- see index.ts's `VIBLD_FREE_MONTHLY_MICRO_USD`. */
 export const DEFAULT_FREE_INCLUDED_MICRO_USD = 1_000_000;
 
+/**
+ * D159: a Free account with no card on file has a trial instead of the
+ * monthly dollar, $0.20 once, about two builds on Luna. The one an operator
+ * may override is `VIBLD_FREE_TRIAL_MICRO_USD` (spendable.ts).
+ */
+export const DEFAULT_FREE_TRIAL_MICRO_USD = 200_000;
+
+/**
+ * The ledger period a trial is spent against: one for the life of the
+ * account, so it never resets. Opaque to `UserBudget`, as a month key is.
+ * Saving a card moves the account to the month's period, and what the
+ * trial spent stays where it was.
+ */
+export const TRIAL_PERIOD_KEY = 'trial';
+
 const ACTIVE_STATUSES = new Set(['active', 'trialing']);
 
 /**

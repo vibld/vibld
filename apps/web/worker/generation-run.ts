@@ -227,6 +227,12 @@ export interface WorkflowParams {
    * which then holds against the whole day only, as it always did.
    */
   freePool?: true;
+  /**
+   * The allowance period the run was admitted against, when it is not the
+   * month's: a Free account's trial (D159). Absent on an older instance,
+   * which then holds against the month, as it always did.
+   */
+  allowancePeriod?: string;
 }
 
 /**
@@ -1685,7 +1691,12 @@ export async function verifyAndRepair(
         now(),
         undefined,
         undefined,
-        { freePool: params.freePool === true },
+        {
+          freePool: params.freePool === true,
+          ...(params.allowancePeriod
+            ? { allowancePeriod: params.allowancePeriod }
+            : {}),
+        },
       ),
       LEDGER_CALL_TIMEOUT_MS,
     );

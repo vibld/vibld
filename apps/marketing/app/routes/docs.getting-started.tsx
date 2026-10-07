@@ -32,11 +32,11 @@ export default function GettingStarted() {
         <a href={SITE.signUpUrl} rel="noopener noreferrer">
           app.vibld.com/sign-up
         </a>
-        . A new account can get <strong>$1.00 of model spend</strong> by adding
-        a card: the <strong>Add a card</strong> button above the composer opens
-        a Stripe page that saves the card and charges nothing. It is a one-time
-        grant, one per account and one per card, and it does not reset. It is
-        enough to build something small.
+        . A new account starts with <strong>$0.20 of model spend</strong> to try
+        it, about two builds. Adding a card makes that{' '}
+        <strong>$1.00 every month</strong>: the <strong>Add a card</strong>{' '}
+        button above the composer opens a Stripe page that saves the card and
+        charges nothing. A card counts for one account.
       </p>
 
       <h2>2. Describe what you want</h2>

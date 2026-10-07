@@ -82,6 +82,7 @@ const DETAIL = {
     tierActiveProjects: null,
     monthlyAllowanceMicroUsd: 40_000_000,
     tierMonthlyAllowanceMicroUsd: 40_000_000,
+    trial: false,
   },
   spend: { monthMicroUsd: 1_000, creditRemainingMicroUsd: 0 },
   suspended: false,

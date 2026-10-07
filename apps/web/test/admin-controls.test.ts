@@ -967,6 +967,28 @@ describe('the audit log', () => {
 });
 
 describe('the account page', () => {
+  it("shows a Free account on the trial its trial, not a month's (D159)", async () => {
+    const w = world();
+    const periods: (string | undefined)[] = [];
+    const response = await handleAdminUsers(
+      new Request(`${ORIGIN}/api/admin/user/detail?userId=${USER}`),
+      { DB: w.db, STRIPE_SECRET_KEY: 'sk', STRIPE_WEBHOOK_SECRET: 'wh' },
+      {
+        ...w.deps,
+        usage: async (_userId, _now, period) => {
+          periods.push(period);
+          return { monthMicroUsd: 150_000, topupMicroUsd: 0 };
+        },
+      },
+    );
+    const body = (await response.json()) as Record<string, any>;
+    assert.deepEqual(periods, ['trial']);
+    assert.equal(body.limits.trial, true);
+    assert.equal(body.limits.monthlyAllowanceMicroUsd, 200_000);
+    assert.equal(body.limits.tierMonthlyAllowanceMicroUsd, 1_000_000);
+    assert.equal(body.spend.monthMicroUsd, 150_000);
+  });
+
   it('finds an account by email and shows what it has', async () => {
     const w = world();
     await seedProject(w, 'proj_a');

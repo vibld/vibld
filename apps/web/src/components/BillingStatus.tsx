@@ -81,7 +81,8 @@ export function BillingStatusPanel() {
     <div className="billing">
       <p className="billing__usage">
         {TIER_LABELS[status.tier]} · {formatUsd(status.spentMicroUsd)} /{' '}
-        {formatUsd(status.allowanceMicroUsd)} this month
+        {formatUsd(status.allowanceMicroUsd)}{' '}
+        {status.freeTrial ? 'trial' : 'this month'}
         {/*
          * Credit is spendable money this readout used to drop on the floor.
          * `reserveBudget` falls through to it automatically once the monthly

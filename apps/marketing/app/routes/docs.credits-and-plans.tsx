@@ -3,7 +3,7 @@ import { DOC_GUIDES, metaFor } from '../site';
 import { FREE_PLAN } from '../plan-sources';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'credits-and-plans')!;
-const CHECKED = '2026-10-04';
+const CHECKED = '2026-10-06';
 
 export function meta() {
   return metaFor('/docs/credits-and-plans');
@@ -22,7 +22,7 @@ export default function CreditsAndPlans() {
       <ul>
         <li>
           <strong>Free</strong>: no charge. Includes $1.00 of model spend per
-          month.
+          month once a card is saved, and $0.20 once to try it without one.
         </li>
         <li>
           <strong>Build</strong>: $19 a month, or $190 a year. Includes $14.00
@@ -50,15 +50,21 @@ export default function CreditsAndPlans() {
         thirty days.
       </p>
       <p>
-        A new account can also get <strong>$1.00 once</strong>, by adding a
-        card. <strong>Plan and usage</strong> in the settings menu, and a note
+        A Free account starts with a <strong>$0.20 trial</strong>, about two
+        builds, which does not reset. Saving a card moves it to the $1.00 a
+        month: <strong>Plan and usage</strong> in the settings menu, and a note
         above the composer, offer it with an <strong>Add a card</strong> button,
-        which opens a Stripe page that saves the card and charges nothing. The
-        credit arrives once Stripe confirms the card, usually within a minute.
-        It is granted once per account and once per card. It does not reset, is
-        separate from the monthly allowance, and expires twelve months after it
-        is granted. Accounts that received it on creation, before a card was
-        required, keep it.
+        which opens a Stripe page that saves the card and charges nothing. A
+        card counts for the first account that saves it, and an account that has
+        paid for a plan or a top-up already has one on file.
+      </p>
+      <p>
+        A new account can also get <strong>$1.00 once</strong>, by adding a
+        card, the same button. The credit arrives once Stripe confirms the card,
+        usually within a minute. It is granted once per account and once per
+        card. It does not reset, is separate from the monthly allowance, and
+        expires twelve months after it is granted. Accounts that received it on
+        creation, before a card was required, keep it.
       </p>
 
       <h2>Top-up credit</h2>

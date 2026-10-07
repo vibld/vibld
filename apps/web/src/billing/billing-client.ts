@@ -38,6 +38,15 @@ export interface BillingStatus {
    */
   signupCredit?: SignupCredit;
   /**
+   * A Free account with no card on file is on a trial rather than the
+   * monthly allowance (D159): `allowanceMicroUsd` and `spentMicroUsd` above
+   * are the trial's, for the life of the account, and saving a card moves it
+   * to `monthlyMicroUsd` a month. `cardAlreadyUsed` says every card it saved
+   * was first saved by another account. Absent otherwise, and from a Worker
+   * deployed before D159.
+   */
+  freeTrial?: { cardAlreadyUsed: boolean; monthlyMicroUsd: number };
+  /**
    * A lost dispute has this account's paid features refused until an
    * operator lifts it. Optional for the same reason `signupCredit` is.
    */
@@ -243,6 +252,41 @@ export function formatCredit(cents: number): string {
 }
 
 /**
+ * What the builder says about saving a card, if anything: the monthly
+ * allowance a Free account on the trial gets for one (D159), and the
+ * welcome credit where it is offered too.
+ *
+ * Said in the same three kinds as the welcome credit alone, below.
+ */
+function freeTrialPrompt(
+  trial: NonNullable<BillingStatus['freeTrial']>,
+  credit: SignupCredit | undefined,
+  pathname: string,
+): { kind: 'offer' | 'card-used' | 'pending'; message: string } {
+  const monthly = formatCredit(Math.floor(trial.monthlyMicroUsd / 10_000));
+  const welcome =
+    credit?.state === 'needs-card' ? formatCredit(credit.cents) : null;
+  const offer = welcome
+    ? `Add a card to get ${welcome} of free build credit now and ${monthly} every month. You won't be charged.`
+    : `Add a card to get ${monthly} of free builds every month. You won't be charged.`;
+  // Before the pending note: a reused card may be recorded before the page
+  // Stripe returns to has loaded, and its month will never start.
+  if (trial.cardAlreadyUsed) {
+    return {
+      kind: 'card-used',
+      message: `That card is already on file for another account. ${offer}`,
+    };
+  }
+  if (pathname === CARD_ADDED_PATH) {
+    return {
+      kind: 'pending',
+      message: `Card saved. Your ${monthly} a month starts once Stripe confirms it, usually within a minute.`,
+    };
+  }
+  return { kind: 'offer', message: offer };
+}
+
+/**
  * What the builder says about the welcome credit, if anything.
  *
  * Pure, so the three things it can say are tested without a browser:
@@ -263,6 +307,9 @@ export function signupCreditPrompt(
   pathname: string,
 ): { kind: 'offer' | 'card-used' | 'pending'; message: string } | null {
   const credit = status.signupCredit;
+  if (status.billingConfigured && status.freeTrial) {
+    return freeTrialPrompt(status.freeTrial, credit, pathname);
+  }
   if (!status.billingConfigured || credit?.state !== 'needs-card') {
     return null;
   }

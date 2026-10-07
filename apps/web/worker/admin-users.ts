@@ -46,18 +46,21 @@ import type {
 import {
   DEFAULT_FREE_INCLUDED_MICRO_USD,
   activeProjectLimitFor,
-  monthlyAllowanceFor,
 } from './entitlement.ts';
 import type { Tier } from './entitlement.ts';
 import type { HoldResult } from './publish-client.ts';
 import { DEFAULT_PUBLISH_HOSTNAME } from './project-handlers.ts';
 import { parseModelIds, savedPlanModels } from './model-grants.ts';
 import { planLimitsFor, savedPlanLimits } from './plan-limits.ts';
-import { planOf } from './spendable.ts';
+import { allowanceOf, planOf } from './spendable.ts';
 
 export interface AdminUsersEnv {
   DB?: D1Database;
   VIBLD_FREE_MONTHLY_MICRO_USD?: string;
+  /** Read for the Free trial (D159), as `spendableFor` reads them. */
+  VIBLD_FREE_TRIAL_MICRO_USD?: string;
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
   /** The domain published sites are served under (`index.ts` Env). */
   PUBLISH_HOSTNAME?: string;
 }
@@ -78,13 +81,15 @@ export interface AdminUsersDeps {
   /** Ban or unban at Clerk. */
   setClerkBan: (userId: string, banned: boolean) => Promise<ClerkBanResult>;
   /**
-   * What the account has spent: this month's allowance, and its top-up
-   * credit over its life. Null where there is no ledger to ask.
+   * What the account has spent: its allowance's period (this month's, or
+   * the Free trial's, D159), and its top-up credit over its life. Null
+   * where there is no ledger to ask.
    */
   usage:
     | ((
         userId: string,
         now: Date,
+        allowancePeriod?: string,
       ) => Promise<{ monthMicroUsd: number; topupMicroUsd: number }>)
     | null;
   /**
@@ -741,15 +746,6 @@ async function detail(
     store.personModels(userId),
     savedPlanModels(db),
   ]);
-  let usage: { monthMicroUsd: number; topupMicroUsd: number } | null = null;
-  if (deps.usage) {
-    try {
-      usage = await deps.usage(userId, now);
-    } catch (error) {
-      console.error('admin detail: ledger unavailable', error);
-    }
-  }
-
   const freeAllowance = positiveInt(
     env.VIBLD_FREE_MONTHLY_MICRO_USD,
     DEFAULT_FREE_INCLUDED_MICRO_USD,
@@ -762,6 +758,25 @@ async function detail(
     await savedPlanLimits(db),
     freeAllowance,
   );
+  // What the account's runs are held to now, and the period they spend
+  // against: the reservation's own answer, so a Free account on the trial
+  // is shown its trial (D159).
+  const allowance = await allowanceOf(
+    env,
+    billing,
+    userId,
+    tier,
+    overrides,
+    planLimits,
+  );
+  let usage: { monthMicroUsd: number; topupMicroUsd: number } | null = null;
+  if (deps.usage) {
+    try {
+      usage = await deps.usage(userId, now, allowance.allowancePeriod);
+    } catch (error) {
+      console.error('admin detail: ledger unavailable', error);
+    }
+  }
   return json({
     userId,
     email: clerk?.email ?? null,
@@ -788,13 +803,11 @@ async function detail(
     limits: {
       activeProjects: activeProjectLimitFor(tier, overrides, planLimits),
       tierActiveProjects: planLimits.activeProjectLimit,
-      monthlyAllowanceMicroUsd: monthlyAllowanceFor(
-        tier,
-        freeAllowance,
-        overrides,
-        planLimits,
-      ),
+      monthlyAllowanceMicroUsd: allowance.monthlyAllowance,
       tierMonthlyAllowanceMicroUsd: planLimits.monthlyAllowanceMicroUsd,
+      // A Free account with no card on file: the allowance is its trial,
+      // which does not reset (D159).
+      trial: allowance.allowancePeriod !== undefined,
     },
     spend: {
       monthMicroUsd: usage?.monthMicroUsd ?? null,

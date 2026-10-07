@@ -228,8 +228,12 @@ function Overview({ user }: { user: AdminUserDetail }) {
         {spend.monthMicroUsd === null
           ? 'unknown'
           : formatUsd(spend.monthMicroUsd)}{' '}
-        of {formatUsd(limits.monthlyAllowanceMicroUsd)} this month
-        {limits.monthlyAllowanceMicroUsd !== limits.tierMonthlyAllowanceMicroUsd
+        of {formatUsd(limits.monthlyAllowanceMicroUsd)}{' '}
+        {limits.trial
+          ? `of the Free trial (no card on file; ${formatUsd(limits.tierMonthlyAllowanceMicroUsd)} a month with one)`
+          : 'this month'}
+        {!limits.trial &&
+        limits.monthlyAllowanceMicroUsd !== limits.tierMonthlyAllowanceMicroUsd
           ? ` (override; the plan gives ${formatUsd(limits.tierMonthlyAllowanceMicroUsd)})`
           : ''}
         .{' '}

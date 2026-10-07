@@ -3,11 +3,18 @@ import { BillingStore } from './billing-store.ts';
 import type { SubscriptionRecord } from './billing-store.ts';
 import {
   DEFAULT_FREE_INCLUDED_MICRO_USD,
+  DEFAULT_FREE_TRIAL_MICRO_USD,
+  TRIAL_PERIOD_KEY,
   activeProjectLimitFor,
   effectiveTier,
   monthlyAllowanceFor,
 } from './entitlement.ts';
-import type { EffectiveTier, Tier } from './entitlement.ts';
+import type {
+  EffectiveTier,
+  PlanLimitsInForce,
+  Tier,
+  UserOverrides,
+} from './entitlement.ts';
 import { billingConfigured } from './billing-handlers.ts';
 import { planLimitsFor, savedPlanLimits } from './plan-limits.ts';
 import type { Principal } from './principal.ts';
@@ -16,6 +23,8 @@ import type { Principal } from './principal.ts';
 export interface SpendableEnv {
   DB?: D1Database;
   VIBLD_FREE_MONTHLY_MICRO_USD?: string;
+  /** The trial a Free account without a card has (D159), else $0.20. */
+  VIBLD_FREE_TRIAL_MICRO_USD?: string;
   /** Read only to know whether this deployment sells plans (`tierOf`). */
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
@@ -34,8 +43,78 @@ export function freeAllowanceOf(env: SpendableEnv): number {
   );
 }
 
+/**
+ * Free's trial in code: `VIBLD_FREE_TRIAL_MICRO_USD`, else $0.20. Zero is
+ * allowed, and means a Free account builds nothing until it saves a card.
+ */
+export function freeTrialOf(env: SpendableEnv): number {
+  const value = Number(env.VIBLD_FREE_TRIAL_MICRO_USD);
+  return env.VIBLD_FREE_TRIAL_MICRO_USD !== undefined &&
+    env.VIBLD_FREE_TRIAL_MICRO_USD.trim() !== '' &&
+    Number.isInteger(value) &&
+    value >= 0
+    ? value
+    : DEFAULT_FREE_TRIAL_MICRO_USD;
+}
+
+/**
+ * The allowance an account's runs are held to, and the ledger period it is
+ * spent against.
+ *
+ * D159 (Chris, 2026-10-05: "Trial, then $1/mo"): on a deployment that sells
+ * plans, a Free account with no card on file has a trial, $0.20 for the life
+ * of the account, in `TRIAL_PERIOD_KEY`; one with a card has the monthly
+ * allowance, as every Free account had before. An admin's cap for the
+ * account (D73) is a monthly figure and replaces either, as it replaces any
+ * plan's. A paid or gifted plan, or a deployment with no billing, is the
+ * monthly allowance as before.
+ */
+export interface Allowance {
+  monthlyAllowance: number;
+  /** Absent for the month's period, the default. */
+  allowancePeriod?: typeof TRIAL_PERIOD_KEY;
+  /**
+   * Only for a Free account on the trial: whether the cards it saved were
+   * all first saved by another account, so it is asked for a different one.
+   */
+  trial?: { cardAlreadyUsed: boolean };
+}
+
+export async function allowanceOf(
+  env: SpendableEnv,
+  billing: Pick<BillingStore, 'freeCardOf'>,
+  userId: string,
+  tier: Tier,
+  overrides: UserOverrides | null,
+  plan: PlanLimitsInForce | undefined,
+): Promise<Allowance> {
+  const freeAllowance = freeAllowanceOf(env);
+  const monthly = {
+    monthlyAllowance: monthlyAllowanceFor(tier, freeAllowance, overrides, plan),
+  };
+  if (
+    tier !== 'free' ||
+    !billingConfigured(env) ||
+    overrides?.monthlySpendCapMicroUsd != null
+  ) {
+    return monthly;
+  }
+  const card = await billing.freeCardOf(userId);
+  if (card.onFile) return monthly;
+  return {
+    monthlyAllowance: freeTrialOf(env),
+    allowancePeriod: TRIAL_PERIOD_KEY,
+    trial: { cardAlreadyUsed: card.cardAlreadyUsed },
+  };
+}
+
 export interface Spendable {
   monthlyAllowance: number;
+  /**
+   * The ledger period `monthlyAllowance` is spent against: the trial's, for
+   * a Free account with no card (D159). Absent for the month's.
+   */
+  allowancePeriod?: typeof TRIAL_PERIOD_KEY;
   topupCeiling: number;
   /**
    * A lost dispute has this account suspended (docs/decisions.md, resolved
@@ -98,19 +177,25 @@ export async function spendableFor(
     savedPlanLimits(env.DB!),
   ]);
   const freeAllowance = freeAllowanceOf(env);
+  // An admin's cap for this account, where one is set, in place of the
+  // tier's included amount (D73). Read here, beside the tier, for the
+  // reason this function exists: one answer to "what may this account
+  // spend" for every route that reserves. Then the plan's, as an admin set
+  // it in the panel (D134), else the code's; or the trial, for a Free
+  // account with no card (D159).
+  const allowance = await allowanceOf(
+    env,
+    billing,
+    principal.userId,
+    plan.tier,
+    overrides,
+    planLimitsFor(plan.tier, saved, freeAllowance),
+  );
   return {
-    // An admin's cap for this account, where one is set, in place of the
-    // tier's included amount (D73). Read here, beside the tier, for the
-    // reason this function exists: one answer to "what may this account
-    // spend" for every route that reserves.
-    // Then the plan's, as an admin set it in the panel (D134), else the
-    // code's.
-    monthlyAllowance: monthlyAllowanceFor(
-      plan.tier,
-      freeAllowance,
-      overrides,
-      planLimitsFor(plan.tier, saved, freeAllowance),
-    ),
+    monthlyAllowance: allowance.monthlyAllowance,
+    ...(allowance.allowancePeriod
+      ? { allowancePeriod: allowance.allowancePeriod }
+      : {}),
     // Stripe top-ups and admin-granted credit (L4) combined -- see
     // `totalSpendableCreditMicroUsd`'s own comment.
     topupCeiling: await billing.totalSpendableCreditMicroUsd(principal.userId),

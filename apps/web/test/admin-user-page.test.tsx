@@ -56,6 +56,7 @@ const DETAIL = (over: Record<string, unknown> = {}) => ({
     tierActiveProjects: null,
     monthlyAllowanceMicroUsd: 10_000_000,
     tierMonthlyAllowanceMicroUsd: 10_000_000,
+    trial: false,
   },
   spend: { monthMicroUsd: 500_000, creditRemainingMicroUsd: 1_000_000 },
   suspended: false,

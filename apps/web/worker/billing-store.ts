@@ -739,6 +739,51 @@ export class BillingStore {
   }
 
   /**
+   * Whether this account has a card on file for the Free plan's monthly
+   * allowance (D159), and, when it has not, whether that is because every
+   * card it saved was first saved by another account.
+   *
+   * A card counts for the account that saved it first (the SetupIntent id
+   * breaks a tie in the same millisecond), so one card buys one
+   * account its dollar a month, as it buys one account the welcome credit.
+   * Every card saved through the builder is a row in `billing_signup_cards`,
+   * whatever the welcome credit made of it. An account that has paid, for a
+   * plan or a top-up, has had a card charged, so it counts too.
+   */
+  async freeCardOf(
+    userId: string,
+  ): Promise<{ onFile: boolean; cardAlreadyUsed: boolean }> {
+    const row = await this.#db
+      .prepare(
+        `SELECT
+           EXISTS (
+             SELECT 1 FROM billing_signup_cards c
+              WHERE c.user_id = ?1
+                AND NOT EXISTS (
+                  SELECT 1 FROM billing_signup_cards o
+                   WHERE o.card_fingerprint = c.card_fingerprint
+                     AND o.user_id <> ?1
+                     AND (o.created_at < c.created_at
+                          OR (o.created_at = c.created_at
+                              AND o.stripe_setup_intent_id
+                                  < c.stripe_setup_intent_id)))
+           )
+           OR EXISTS (
+             SELECT 1 FROM billing_subscriptions
+              WHERE user_id = ?1
+                AND status NOT IN ('incomplete', 'incomplete_expired'))
+           OR EXISTS (SELECT 1 FROM billing_topups WHERE user_id = ?1)
+             AS on_file,
+           EXISTS (SELECT 1 FROM billing_signup_cards WHERE user_id = ?1)
+             AS any_card`,
+      )
+      .bind(userId)
+      .first<{ on_file: number; any_card: number }>();
+    const onFile = row?.on_file === 1;
+    return { onFile, cardAlreadyUsed: !onFile && row?.any_card === 1 };
+  }
+
+  /**
    * What became of the most recent card this account saved for the offer,
    * or undefined if it has saved none. Read by the status route, so the
    * builder can say why a card that was added did not pay anything.

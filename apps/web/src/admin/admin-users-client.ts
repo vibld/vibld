@@ -124,6 +124,8 @@ export interface AdminUserDetail {
     tierActiveProjects: number | null;
     monthlyAllowanceMicroUsd: number;
     tierMonthlyAllowanceMicroUsd: number;
+    /** The allowance is the Free trial, for life, not a month's (D159). */
+    trial: boolean;
   };
   spend: {
     monthMicroUsd: number | null;
@@ -388,6 +390,7 @@ export function readAdminUser(body: unknown): AdminUserDetail | null {
       monthlyAllowanceMicroUsd: num(limits.monthlyAllowanceMicroUsd) ?? 0,
       tierMonthlyAllowanceMicroUsd:
         num(limits.tierMonthlyAllowanceMicroUsd) ?? 0,
+      trial: limits.trial === true,
     },
     spend: {
       monthMicroUsd: num(spend.monthMicroUsd),

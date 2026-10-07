@@ -80,7 +80,10 @@ export default function Terms() {
       <ul>
         <li>
           <strong>Free</strong>: no charge, and {dollars(FREE.monthlyCents)} of
-          model spend each month.
+          model spend each month once a card is saved through Stripe (the card
+          is saved, not charged, and counts for the first account that saves
+          it). Without a card, {dollars(PLANS.freeTrialCents)} of model spend
+          once.
         </li>
         <li>
           <strong>Build</strong>: {priceLabel(BUILD.price!.monthly)} a month or{' '}

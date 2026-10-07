@@ -32,7 +32,7 @@ function costAnswer(plans: Plans): string {
   const parts = plans.plans.map((plan) =>
     plan.price
       ? `${plan.name} is ${planPrice(plan.price)} and includes ${dollars(plan.monthlyCents)} of model spend each month.`
-      : `${plan.name} costs nothing and includes ${dollars(plan.monthlyCents)} of model spend each month.`,
+      : `${plan.name} costs nothing and includes ${dollars(plan.monthlyCents)} of model spend each month once a card is saved (it is not charged), and ${dollars(plans.freeTrialCents)} once to try it without one.`,
   );
   const signup = plans.signupRequiresCard
     ? `A new account that adds a card also gets ${dollars(plans.signupCents)} of build credit once; the card is saved, not charged.`

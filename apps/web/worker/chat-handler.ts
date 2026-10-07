@@ -222,7 +222,12 @@ export async function handleChat(
       Date.now(),
       undefined,
       undefined,
-      { freePool: allowed.freePool === true },
+      {
+        freePool: allowed.freePool === true,
+        ...(allowed.allowancePeriod
+          ? { allowancePeriod: allowed.allowancePeriod }
+          : {}),
+      },
     );
   } catch (error) {
     console.error('budget unavailable', error);

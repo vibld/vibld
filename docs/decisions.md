@@ -114,7 +114,7 @@ Accepted 2026-09-09 (internal PR 70). L1 and L24 amend D30 -- D23 is untouched b
 | Legal entity                   | Recorded in the site's legal pages                       |
 | Public mailing address         | 285 W Wieuca Rd NE STE 62715, Atlanta, GA 30342          |
 | Data retention after deletion  | project content 30 days; audit log 12 months, tombstoned |
-| Free tier                      | $0 -- $1/mo model spend                                  |
+| Free tier                      | $0 -- $1/mo model spend with a card, $0.20 once without  |
 | Build tier                     | $19/mo -- $14/mo model spend                             |
 | Ship tier                      | $49/mo -- $40/mo model spend                             |
 | Top-up                         | $10 -- $8 model spend, expires 12 months                 |
@@ -280,6 +280,21 @@ paying accounts until midnight UTC.
   those five are idle, which is the one exception to L9's "queued only when
   full". apps/web decides which previews are Free (`freePreviewFor`): the
   account's own in the builder, the project owner's for a shared link.
+- **D159. Free's monthly dollar waits for a card (Chris, 2026-10-05:
+  "Trial, then $1/mo").** A Free account with no card on file gets a trial
+  of $0.20 (about two builds, `VIBLD_FREE_TRIAL_MICRO_USD`), which never
+  resets: it is its own `trial` period in the account's ledger, inside the
+  Free share of the day (D158). Saving a card through the same Stripe setup
+  page the welcome credit uses moves the account to the $1.00 a month, and
+  nothing is charged. A card counts for the first account that saved it
+  (`billing_signup_cards`, by fingerprint); an account that has had a
+  subscription or bought a top-up already counts as having one. This applies
+  to every Free account, existing ones included. A run refused on the trial
+  asks for a card rather than naming the 1st. Auto-reload and
+  auto-subscribe, once a card is on file, are separate and opt-in.
+- **D160. The Free plan keeps Luna (Chris, 2026-10-05: "Keep Luna").** The
+  question was which DeepSeek model the Free plan should default to; the
+  answer was no change to its model or default.
 
 ### Checkpoint history, 2026-10-03
 

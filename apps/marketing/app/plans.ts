@@ -43,6 +43,12 @@ export interface Plans {
   /** The one-time grant a new account gets, in US cents. */
   signupCents: number;
   /**
+   * What a Free account without a card on file may spend, once, in US
+   * cents (D159). The Free plan's monthly allowance waits for a card, read
+   * from `DEFAULT_FREE_TRIAL_MICRO_USD` in entitlement.ts.
+   */
+  freeTrialCents: number;
+  /**
    * Whether that grant waits for a card on file (a Stripe setup that charges
    * nothing), read from `SIGNUP_CREDIT_REQUIRES_CARD` beside the amount. The
    * copy states the condition from this rather than from memory, so the day
@@ -90,6 +96,11 @@ export function readPlans(sources: PlanSources): Plans {
     sources.entitlement,
     /DEFAULT_FREE_INCLUDED_MICRO_USD\s*=\s*([\d_]+)/,
     'the Free allowance',
+  );
+  const trial = find(
+    sources.entitlement,
+    /DEFAULT_FREE_TRIAL_MICRO_USD\s*=\s*([\d_]+)/,
+    'the Free trial',
   );
   const build = find(
     sources.entitlement,
@@ -156,6 +167,7 @@ export function readPlans(sources: PlanSources): Plans {
       },
     ],
     signupCents: signup,
+    freeTrialCents: cents(trial),
     signupRequiresCard: requiresCard === 'true',
     topup: {
       priceCents: price(s, 'topup'),

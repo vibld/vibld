@@ -78,6 +78,7 @@ import { handleShare, handleShareHold } from './share-handlers.ts';
 import { sharePreviewKey, shareTokenFromLink } from './share-link.ts';
 import { MediaStore } from './media-store.ts';
 import {
+  allowanceOf,
   freeAllowanceOf,
   freePreviewFor,
   SUSPENDED_MESSAGE,
@@ -746,14 +747,19 @@ async function handleBillingStatus(
     ]);
     const { subscription, tier } = plan;
     const freeAllowance = freeAllowanceOf(env);
-    const allowanceMicroUsd = monthlyAllowanceFor(
+    // The trial in place of the month for a Free account with no card on
+    // file (D159), read the way `spendableFor` reads it.
+    const allowance = await allowanceOf(
+      env,
+      billing,
+      principal.userId,
       tier,
-      freeAllowance,
       overrides,
       planLimitsFor(tier, savedPlans, freeAllowance),
     );
+    const allowanceMicroUsd = allowance.monthlyAllowance;
     const usage = await env.USER_BUDGET.getByName(principal.userId).usageFor(
-      allowancePeriodKey(now),
+      allowance.allowancePeriod ?? allowancePeriodKey(now),
     );
     // Stripe top-ups and admin-granted credit (L4) combined -- see
     // `totalSpendableCreditMicroUsd`'s own comment.
@@ -784,6 +790,21 @@ async function handleBillingStatus(
       hasStripeCustomer,
       billingConfigured: billingConfigured(env),
       signupCredit,
+      // On the trial rather than the month (D159): the builder says so, and
+      // offers to save a card for the monthly allowance.
+      ...(allowance.trial
+        ? {
+            freeTrial: {
+              cardAlreadyUsed: allowance.trial.cardAlreadyUsed,
+              monthlyMicroUsd: monthlyAllowanceFor(
+                tier,
+                freeAllowance,
+                overrides,
+                planLimitsFor(tier, savedPlans, freeAllowance),
+              ),
+            },
+          }
+        : {}),
       suspended,
       // The paid plan on its own, so the panel offers "Cancel plan" only
       // where there is a subscription to cancel, which a gift is not.
@@ -1360,6 +1381,8 @@ async function handlePlan(
   // Carried into the Workflow, so a repair turn's hold counts against the
   // same Free share of the day this run was admitted against (D158).
   let freePool = false;
+  // And against the same allowance period: a Free account's trial (D159).
+  let allowancePeriod: string | undefined;
   try {
     const now = Date.now();
     const spendable = await spendableFor(env, principal);
@@ -1369,7 +1392,7 @@ async function handlePlan(
     if (spendable.suspended) {
       return refuse('account-suspended', SUSPENDED_MESSAGE, 403);
     }
-    ({ monthlyAllowance, topupCeiling } = spendable);
+    ({ monthlyAllowance, topupCeiling, allowancePeriod } = spendable);
     freePool = spendable.freePool === true;
 
     const sized = await sizedReservation(
@@ -1385,7 +1408,7 @@ async function handlePlan(
           now,
           undefined,
           undefined,
-          { freePool },
+          { freePool, ...(allowancePeriod ? { allowancePeriod } : {}) },
         ),
       // A caller with less left than the whole run's worst case gets a
       // smaller run rather than a refusal, down to the floor.
@@ -1600,6 +1623,7 @@ async function handlePlan(
         monthlyAllowance,
         topupCeiling,
         ...(freePool ? { freePool: true as const } : {}),
+        ...(allowancePeriod ? { allowancePeriod } : {}),
       },
     });
   } catch (error) {
@@ -2104,7 +2128,7 @@ async function handleMockups(
     if (spendable.suspended) {
       return refuse('account-suspended', SUSPENDED_MESSAGE, 403);
     }
-    const { monthlyAllowance, topupCeiling } = spendable;
+    const { monthlyAllowance, topupCeiling, allowancePeriod } = spendable;
     freePool = spendable.freePool === true;
     reserved = await reserveBudget(
       env,
@@ -2115,7 +2139,7 @@ async function handleMockups(
       now,
       undefined,
       undefined,
-      { freePool },
+      { freePool, ...(allowancePeriod ? { allowancePeriod } : {}) },
     );
   } catch (error) {
     console.error('budget unavailable', error);
@@ -3096,11 +3120,11 @@ function adminUsersDeps(env: Env): AdminUsersDeps {
     setClerkBan: (userId, banned) =>
       accountDirectoryFor(env).setBan(userId, banned),
     usage: env.USER_BUDGET
-      ? async (userId, now) => {
+      ? async (userId, now, allowancePeriod) => {
           const [month, topup] = await Promise.all([
             env
               .USER_BUDGET!.getByName(userId)
-              .usageFor(allowancePeriodKey(now.getTime())),
+              .usageFor(allowancePeriod ?? allowancePeriodKey(now.getTime())),
             env
               .USER_BUDGET!.getByName(topupKeyFor(userId))
               .usageFor('lifetime'),

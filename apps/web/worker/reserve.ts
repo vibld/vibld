@@ -1,6 +1,6 @@
 import { ACCOUNT_BUDGET_KEY, dayKey } from './spend.ts';
 import type { SpendVerdict } from './spend.ts';
-import { allowancePeriodKey } from './entitlement.ts';
+import { TRIAL_PERIOD_KEY, allowancePeriodKey } from './entitlement.ts';
 import type { Pool, Reservation, UserBudget } from './budget.ts';
 import { retryingWithin, sleep, withinDeadline } from '@vibld/core';
 
@@ -93,6 +93,11 @@ export interface ReserveOptions {
    * run turns out to draw on top-up credit, which is paid money.
    */
   freePool?: boolean;
+  /**
+   * The ledger period the allowance is spent against, when it is not the
+   * month's: a Free account's trial (D159, `TRIAL_PERIOD_KEY`).
+   */
+  allowancePeriod?: string;
 }
 
 export interface BudgetLayers {
@@ -146,6 +151,11 @@ export type CeilingRefusal =
        * it was asked. Absent when they have none.
        */
       topupLeftMicroUsd?: number;
+      /**
+       * The allowance is a Free account's trial (D159), which does not
+       * reset: the refusal asks for a card rather than the 1st.
+       */
+      trial?: true;
     };
 
 export type ReserveOutcome =
@@ -258,6 +268,8 @@ export async function reserveBudget(
   options: ReserveOptions = {},
 ): Promise<ReserveOutcome> {
   const ledger = env.USER_BUDGET!;
+  const allowancePeriod = options.allowancePeriod ?? allowancePeriodKey(now);
+  const onTrial = allowancePeriod === TRIAL_PERIOD_KEY;
   // Bounded, as every other ledger call here is (internal PR 374 review): an account
   // ledger that accepts the call and never answers must end the request
   // as "accounting unavailable", not leave it pending. Not retried, since
@@ -415,7 +427,7 @@ export async function reserveBudget(
       // Zero still asks the in-flight question, which comes first.
       topupOnly ? 0 : monthlyAllowance,
       maxInFlight,
-      allowancePeriodKey(now),
+      allowancePeriod,
     ),
   );
   if (primary.verdict.allow) {
@@ -457,7 +469,11 @@ export async function reserveBudget(
     return {
       ok: false,
       verdict: primary.verdict,
-      ceiling: { layer: 'user', allowanceLeftMicroUsd },
+      ceiling: {
+        layer: 'user',
+        allowanceLeftMicroUsd,
+        ...(onTrial ? { trial: true as const } : {}),
+      },
     };
   }
 
@@ -485,7 +501,7 @@ export async function reserveBudget(
     topup.verdict.allow &&
     (await overLimit(
       { key: topupKey, reservation: topup },
-      { key: userId, period: allowancePeriodKey(now) },
+      { key: userId, period: allowancePeriod },
     ))
   ) {
     return tooManyInFlight;
@@ -521,6 +537,7 @@ export async function reserveBudget(
       layer: 'user',
       allowanceLeftMicroUsd,
       topupLeftMicroUsd: Math.max(0, topupCeiling - topup.spentMicroUsd),
+      ...(onTrial ? { trial: true as const } : {}),
     },
   };
 }
@@ -587,6 +604,17 @@ export function refusalFor(
     };
   }
   const allowance = dollars(ceiling.allowanceLeftMicroUsd, 'down');
+  if (ceiling.trial) {
+    // D159: the trial does not reset, and a card is what comes next.
+    const trialLeft =
+      ceiling.topupLeftMicroUsd === undefined
+        ? `the free trial has ${allowance} left`
+        : `the free trial has ${allowance} left and your top-up credit ${dollars(ceiling.topupLeftMicroUsd, 'down')}`;
+    return {
+      reason: 'account-ceiling',
+      error: `${what} needs at least ${needed} set aside, and ${trialLeft}. Add a card to get free builds every month (you won't be charged), or choose a paid plan or a top-up.`,
+    };
+  }
   const left =
     ceiling.topupLeftMicroUsd === undefined
       ? `this month's allowance has ${allowance} left`
