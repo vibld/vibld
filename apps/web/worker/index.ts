@@ -125,6 +125,8 @@ import {
   worstCaseMicroUsd,
 } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
+import { buildEstimates } from './build-estimate.ts';
+import type { BuildEstimate } from './build-estimate.ts';
 import {
   BOUNDED_BUILD_INPUT_CHARS,
   MOCKUP_INPUT_CHARS,
@@ -3753,9 +3755,30 @@ async function route(
           access,
         )
       : { ok: false as const, error: 'not configured' };
+    // What a build on each model is expected to cost, shown beside the
+    // send button (Chris, 2026-10-05; `build-estimate.ts`). Left out rather
+    // than guessed when the traces cannot be read: the picker still works,
+    // and a figure made up here is the one thing it must not show.
+    let estimates = new Map<string, BuildEstimate>();
+    if (configured && env.DB && models.length > 0) {
+      try {
+        estimates = await buildEstimates(
+          env,
+          env.DB,
+          models.map((model) => model.id),
+          draftModelFor(env, principal.policyIdentity, tier, access),
+          Date.now(),
+        );
+      } catch (error) {
+        console.error('build estimates unavailable', error);
+      }
+    }
     return json({
       generation: configured ? 'model' : 'fake',
-      models: pickerEntries(env, models),
+      models: pickerEntries(env, models).map((entry) => ({
+        ...entry,
+        buildEstimate: estimates.get(entry.id) ?? null,
+      })),
       defaultModel: decided.ok ? decided.model : null,
       // Said where the picker would be, when the plan is what keeps the
       // other models out of it; null otherwise, including for a Free

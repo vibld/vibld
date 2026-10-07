@@ -10,6 +10,7 @@ import type { PlanMode } from '../generation/plan-builder.ts';
 import { KnowledgePanel } from './KnowledgePanel.tsx';
 import { MediaLibrary } from './MediaLibrary.tsx';
 import { ModelPicker } from './ModelPicker.tsx';
+import { buildEstimateText } from '../generation/build-estimate.ts';
 import { StyleDnaPanel } from './StyleDnaPanel.tsx';
 import { ScreenPicker } from './ScreenPicker.tsx';
 import { StyleGalleryPicker } from './StyleGalleryPicker.tsx';
@@ -197,6 +198,17 @@ export function PromptPanel({
   // its panel is closed, so the panel can open and then show why.
   const [revealReference, setRevealReference] = useState(false);
   const promptId = useId();
+  // What a build on the chosen model is expected to cost (Chris,
+  // 2026-10-05), only where a model answers: the fake costs nothing.
+  const chosenModel =
+    state.models.find((model) => model.id === state.model) ?? state.models[0];
+  const estimate =
+    state.generation === 'model'
+      ? buildEstimateText(
+          chosenModel?.buildEstimate,
+          state.acceptedSnapshot === null,
+        )
+      : null;
   const failId = useId();
   const referenceId = useId();
   const panelId = useId();
@@ -643,6 +655,11 @@ export function PromptPanel({
               >
                 Cancel
               </button>
+            ) : null}
+            {estimate ? (
+              <span className="prompt__estimate" title={estimate.title}>
+                {estimate.text}
+              </span>
             ) : null}
             <button
               type="submit"

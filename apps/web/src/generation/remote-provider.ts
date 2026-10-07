@@ -417,6 +417,37 @@ export interface ModelOption {
   label: string;
   note: string;
   provider: string;
+  /**
+   * What a build on this model is expected to cost, in micro-USD, and what
+   * the figure was read from (`apps/web/worker/build-estimate.ts`): recent
+   * builds, inflated so it errs high, or, with too few of them, the most a
+   * build can cost. Null when the deployment could not say.
+   */
+  buildEstimate?: BuildEstimate | null;
+}
+
+export interface BuildEstimate {
+  microUsd: number;
+  basis: 'history' | 'ceiling';
+  /** The most a first build's draft can add, in micro-USD. */
+  draftMicroUsd: number;
+}
+
+function isAmount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+/**
+ * The estimate as `/api/config` sent it, or null for anything else. Null
+ * too when the draft's share is missing: a figure without it would be
+ * lower than what a first build can cost.
+ */
+export function readBuildEstimate(value: unknown): BuildEstimate | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { microUsd, basis, draftMicroUsd } = value as Record<string, unknown>;
+  if (!isAmount(microUsd) || !isAmount(draftMicroUsd)) return null;
+  if (basis !== 'history' && basis !== 'ceiling') return null;
+  return { microUsd, basis, draftMicroUsd };
 }
 
 export interface DeploymentConfig {
@@ -508,13 +539,18 @@ export function detectDeploymentConfig(
       // shape that drifted would otherwise put `undefined` in a <select> and
       // send it as the model id.
       const models = Array.isArray(body.models)
-        ? body.models.filter(
-            (model): model is ModelOption =>
-              typeof model === 'object' &&
-              model !== null &&
-              typeof (model as ModelOption).id === 'string' &&
-              typeof (model as ModelOption).label === 'string',
-          )
+        ? body.models
+            .filter(
+              (model): model is ModelOption =>
+                typeof model === 'object' &&
+                model !== null &&
+                typeof (model as ModelOption).id === 'string' &&
+                typeof (model as ModelOption).label === 'string',
+            )
+            .map((model) => ({
+              ...model,
+              buildEstimate: readBuildEstimate(model.buildEstimate),
+            }))
         : [];
       return {
         generation: body.generation === 'model' ? 'model' : 'fake',

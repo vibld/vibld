@@ -576,3 +576,60 @@ describe('sending from the keyboard', () => {
     view.unmount();
   });
 });
+
+describe('what a build is expected to cost (Chris, 2026-10-05)', () => {
+  const models = [
+    {
+      id: 'luna',
+      label: 'Luna',
+      note: '',
+      provider: 'openai',
+      buildEstimate: {
+        microUsd: 120_000,
+        basis: 'history' as const,
+        draftMicroUsd: 10_000,
+      },
+    },
+    {
+      id: 'sol',
+      label: 'Sol',
+      note: '',
+      provider: 'openai',
+      buildEstimate: {
+        microUsd: 2_000_000,
+        basis: 'ceiling' as const,
+        draftMicroUsd: 50_000,
+      },
+    },
+  ];
+
+  it("says the chosen model's figure beside Send, with the first build's draft", async () => {
+    const view = await mount(builder({ models, model: 'sol' }));
+    assert.match(view.text(), /Up to \$2\.05 a build/);
+    await view.render(builder({ models, model: 'luna' }));
+    assert.match(view.text(), /About \$0\.13 a build/);
+    view.unmount();
+  });
+
+  it('leaves the draft out once the project exists', async () => {
+    const view = await mount(
+      builder({
+        models,
+        model: 'luna',
+        acceptedSnapshot: {} as BuilderState['acceptedSnapshot'],
+        transcript: TURN,
+      }),
+    );
+    assert.match(view.text(), /About \$0\.12 a build/);
+    view.unmount();
+  });
+
+  it('says nothing without an estimate, or where no model answers', async () => {
+    const bare = models.map(({ buildEstimate: _, ...model }) => model);
+    const view = await mount(builder({ models: bare, model: 'luna' }));
+    assert.doesNotMatch(view.text(), /a build/);
+    await view.render(builder({ models, model: 'luna', generation: 'fake' }));
+    assert.doesNotMatch(view.text(), /a build/);
+    view.unmount();
+  });
+});

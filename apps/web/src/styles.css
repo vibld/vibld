@@ -1972,6 +1972,13 @@ body {
   margin-left: auto;
 }
 
+/* What a build is expected to cost, beside the send button. */
+.prompt__estimate {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
 .models {
   display: block;
 }
