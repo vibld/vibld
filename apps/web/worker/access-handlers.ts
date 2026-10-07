@@ -262,5 +262,32 @@ export async function handleInviteRevoke(
     email,
   );
 
-  return json({ email, revoked, billing });
+  // Auto-reload off as well (D166), so the builder shows it off, unless
+  // the account is still let in (another invite it redeemed, or an open
+  // deployment). Nothing is charged either way: the claim refuses an account
+  // whose invite was withdrawn (`autoReloadBarred`), so a failure here costs
+  // the display and not a charge. Reported, like the subscription, so an
+  // operator can see it.
+  let autoReload: 'off' | 'kept' | 'failed' = 'off';
+  try {
+    const invite = await access.redeemedUserId(email);
+    if (invite.userId) {
+      const off = await new BillingStore(env.DB).turnOffAutoReloadIfBarred(
+        invite.userId,
+        {
+          inviteGated: parseAccessMode(env.VIBLD_ACCESS_MODE) === 'invite',
+          admins: platformAdminsFor(env),
+        },
+      );
+      const settings = off
+        ? null
+        : await new BillingStore(env.DB).autoReloadSettings(invite.userId);
+      if (settings?.enabled) autoReload = 'kept';
+    }
+  } catch (error) {
+    console.error('could not turn off auto-reload on revoke', error);
+    autoReload = 'failed';
+  }
+
+  return json({ email, revoked, billing, autoReload });
 }

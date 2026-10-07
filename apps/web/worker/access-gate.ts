@@ -121,6 +121,9 @@ export const GATED_PATHS: readonly string[] = [
   // also creates a Stripe customer, which is what `/api/billing/portal`
   // below relies on an uninvited account never having.
   '/api/billing/card',
+  // Turns on charging a saved card without the person there (D166), which
+  // is taking money as checkout is.
+  '/api/billing/auto-reload',
 
   // Issues a referral code, which is a share link into a closed product.
   '/api/referral/status',

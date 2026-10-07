@@ -25,8 +25,12 @@ export default function Refunds() {
       <p>
         Usage stops at your plan&apos;s monthly allowance and any credit you
         hold; nothing is billed for going past it. More spend means buying a
-        top-up yourself. Saving a card for the Free plan&apos;s monthly
-        allowance charges nothing, so there is nothing to refund.
+        top-up yourself, or turning on auto-reload in the builder. Auto-reload
+        is off unless you turn it on: it then charges your saved card for a $10
+        top-up when less than $1 is left to spend, never more in a month than
+        the limit you choose ($10 to $100), and you can turn it off at any time.
+        Saving a card for the Free plan&apos;s monthly allowance charges
+        nothing, so there is nothing to refund.
       </p>
 
       <h2>Canceling a subscription</h2>

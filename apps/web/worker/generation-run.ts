@@ -585,9 +585,18 @@ export interface GenerationWorkflowEnv {
   USER_BUDGET: DurableObjectNamespace<
     Pick<
       UserBudget,
-      'reserve' | 'settle' | 'touch' | 'leavePool' | 'inFlightFor'
+      'reserve' | 'settle' | 'touch' | 'leavePool' | 'inFlightFor' | 'usageFor'
     >
   >;
+  /**
+   * Read by the auto-reload check a build ends with (D166,
+   * `auto-reload-run.ts`). Absent, as in a deployment that sells nothing,
+   * and that check does nothing.
+   */
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  VIBLD_FREE_MONTHLY_MICRO_USD?: string;
+  VIBLD_FREE_TRIAL_MICRO_USD?: string;
   /** Read by `reserveBudget` when the repair holds its own reservation. */
   VIBLD_ACCOUNT_DAILY_MICRO_USD?: string;
   VIBLD_MAX_IN_FLIGHT?: string;

@@ -78,6 +78,11 @@ export interface ChatDeps {
   waitUntil: (promise: Promise<unknown>) => void;
   /** Defaults to `spendableFor`, which reads D1. */
   spendable?: (principal: Principal) => Promise<Spendable>;
+  /**
+   * Asked once the chat's spend is settled: charge an auto-reload top-up if
+   * one is due (D166). Absent, as in tests, and nothing is asked.
+   */
+  autoReload?: (userId: string) => Promise<unknown>;
   /** Defaults to `tierOf`, which reads D1. */
   tier?: (principal: Principal) => Promise<Tier | null>;
   /** Defaults to `modelGrantSource`, the panel's model access in D1. */
@@ -362,6 +367,9 @@ export async function handleChat(
         // worst case, which over-charges rather than under-charges.
         console.error('chat settlement failed', error);
       }
+      await deps.autoReload?.(principal.userId).catch((error: unknown) => {
+        console.error('auto-reload after chat failed', error);
+      });
     }
   })();
 

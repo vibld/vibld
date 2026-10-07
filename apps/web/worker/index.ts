@@ -122,6 +122,7 @@ import {
   NOTHING_TO_BILL,
   cancelledUsage,
   microUsdOf,
+  monthKey,
   worstCaseMicroUsd,
 } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
@@ -179,6 +180,7 @@ import {
   billingConfigured,
   clawbackDepsFor,
   clawbackViewOf,
+  handleBillingAutoReload,
   handleBillingCard,
   handleLiftSuspension,
   handleBillingCheckout,
@@ -240,6 +242,8 @@ import type {
   NightWithDeletion,
 } from './billing-replay.ts';
 import { createStripeClient } from './stripe-client.ts';
+import { AUTO_RELOAD_DEFAULT_CAP_USD_CENTS } from './auto-reload.ts';
+import { autoReloadFor } from './auto-reload-run.ts';
 import { isGated, routeKeyFor } from './access-gate.ts';
 import {
   QUERIES_TO_FIND_DELETIONS,
@@ -738,6 +742,22 @@ async function handleBillingStatus(
     // The check is inside `signupCreditStatus` rather than here, so that no
     // caller can be the one that forgets it.
     const signupCredit = await signupCreditStatus(billing, principal, env);
+    // Auto-reload is checked here as well as after each run settles, before
+    // the balance below is read. An account left under what a run reserves
+    // starts no run, so no settlement would come along to reload it, or to
+    // ask Stripe again about a charge it never answered; opening the builder
+    // is a path that account can still take. Nothing is charged unless a
+    // reload is due (`maybeAutoReload`). This read is open to an account
+    // the gate now refuses (above), so it reloads only one the gate admits,
+    // asked the way every gated route asks: credit it cannot spend is never
+    // bought for it, however it lost its way in (a withdrawn invite, an
+    // address that changed, a deployment closed again).
+    if (
+      (await billing.autoReloadSettings(principal.userId))?.enabled &&
+      (await decideAccessFor(env, principal)).allowed
+    ) {
+      await autoReloadFor(env, principal.userId);
+    }
     // The tier the account has, with a gifted plan counted where it is the
     // higher (D73), and an admin's spend cap in place of the tier's
     // allowance where one is set: the same readings `spendableFor` makes,
@@ -778,6 +798,7 @@ async function handleBillingStatus(
       await billing.findCustomerId(principal.userId),
     );
     const suspended = await billing.isSuspended(principal.userId);
+    const autoReload = await billing.autoReloadSettings(principal.userId);
 
     return json({
       tier,
@@ -808,6 +829,19 @@ async function handleBillingStatus(
           }
         : {}),
       suspended,
+      // Opt-in auto-reload (D166), from D1 alone: what it charges, up to
+      // what, and why it turned itself off if it did.
+      autoReload: {
+        enabled: autoReload?.enabled ?? false,
+        monthlyCapUsdCents:
+          autoReload?.monthlyCapUsdCents ?? AUTO_RELOAD_DEFAULT_CAP_USD_CENTS,
+        card: autoReload?.card ?? null,
+        disabledReason: autoReload?.disabledReason ?? null,
+        reloadsThisMonth: await billing.autoReloadsIn(
+          principal.userId,
+          monthKey(now),
+        ),
+      },
       // The paid plan on its own, so the panel offers "Cancel plan" only
       // where there is a subscription to cancel, which a gift is not.
       planTier: tierFor(subscription),
@@ -2501,6 +2535,8 @@ async function handleMockups(
             elapsedMs: Date.now() - waitingSince,
           }),
         );
+        // Auto-reload (D166), now that this draw is settled.
+        await autoReloadFor(env, principal.userId);
       } catch (error) {
         // The reservation is not lost: `budget.ts`'s abandoned-reservation
         // reclaim closes it at its worst case, which over-charges rather
@@ -3101,6 +3137,8 @@ function stopDeps(env: Env) {
               userId,
               runId,
             );
+            // A stopped build never reaches the workflow's own check.
+            await autoReloadFor(env, userId);
           },
         }
       : {}),
@@ -3816,6 +3854,7 @@ async function route(
       resolvePrincipal: (req) => resolvePrincipal(req, env),
       createClient: (model) => createPlanClient(env, model),
       waitUntil: (promise) => ctx.waitUntil(promise),
+      autoReload: (userId) => autoReloadFor(env, userId),
     });
   }
 
@@ -3995,6 +4034,12 @@ async function route(
   // not (docs/decisions.md, 2026-09-28).
   if (pathname === '/api/billing/cancel') {
     return handleBillingCancel(request, env, new URL(request.url).origin);
+  }
+
+  if (pathname === '/api/billing/auto-reload') {
+    return handleBillingAutoReload(request, env, (userId) =>
+      autoReloadFor(env, userId).then((outcome) => outcome ?? 'off'),
+    );
   }
 
   if (pathname === '/api/billing/card') {

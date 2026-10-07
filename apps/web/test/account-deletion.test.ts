@@ -358,6 +358,27 @@ async function seed(w: World, { siteLive = false } = {}) {
     USER,
     at,
   );
+  // Auto-reload on, and one charge it made (D166): the setting goes with
+  // the account, and the charge is a money record like the rest.
+  await exec(
+    db,
+    `INSERT INTO billing_auto_reload
+       (user_id, enabled, monthly_cap_usd_cents, payment_method_id,
+        card_brand, card_last4, updated_at)
+     VALUES (?1, 1, 3000, 'pm_leaver', 'visa', '4242', ?2)`,
+    USER,
+    at,
+  );
+  await exec(
+    db,
+    `INSERT INTO billing_auto_reload_attempts
+       (id, user_id, period, seq, state, payment_method_id, amount_usd_cents,
+        settings_version, payment_intent_id, created_at, updated_at)
+     VALUES ('ar_leaver', ?1, '2026-09', 1, 'succeeded', 'pm_leaver', 1000,
+             1, 'pi_leaver', ?2, ?2)`,
+    USER,
+    at,
+  );
   // USER was referred by OTHER and it paid out: both grants are ledger.
   await exec(
     db,
@@ -1323,6 +1344,8 @@ describe('the purge', () => {
       'plan_gifts.user_id',
       'user_overrides.user_id',
       'user_models.user_id',
+      // D166: deleted in `deleteAccountRows`; its charges are kept above.
+      'billing_auto_reload.user_id',
       'user_bans.user_id',
       'admin_audit_log.target_user_id',
     ]);

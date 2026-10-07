@@ -367,6 +367,26 @@ describe('what an ungated route is allowed to do', () => {
     assert.ok(call < write, 'the grant is written before access is decided');
     assert.ok(call < offer, 'the offer is opened before access is decided');
   });
+
+  /**
+   * The balance read is the one ungated route that can charge a card: it
+   * runs the auto-reload check (D166). Credit bought there for an account
+   * the gate refuses is credit it cannot spend, so that check is reached
+   * only past the same access question every gated route asks. Read from
+   * the source for the reason the admin rule below gives.
+   */
+  it('reloads from the balance read only for an account the gate admits', async () => {
+    const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
+    const start = source.indexOf('Auto-reload is checked here as well');
+    assert.ok(start > 0, 'no auto-reload check in the balance read');
+    const reload = source.indexOf(
+      'autoReloadFor(env, principal.userId)',
+      start,
+    );
+    const asked = source.indexOf('decideAccessFor(env, principal)', start);
+    assert.ok(reload > 0 && asked > 0, 'expected both calls');
+    assert.ok(asked < reload, 'the reload runs before access is decided');
+  });
 });
 
 describe('what an admin route requires', () => {

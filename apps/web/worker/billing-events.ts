@@ -1,10 +1,13 @@
 import type Stripe from 'stripe';
 import type {
+  AutoReloadDisabledReason,
   BillingStore,
   ClawbackCause,
   SubscriptionRecord,
 } from './billing-store.ts';
 import {
+  AUTO_RELOAD_ATTEMPT_METADATA_KEY,
+  AUTO_RELOAD_PURPOSE,
   PURPOSE_METADATA_KEY,
   SIGNUP_CARD_PURPOSE,
   TOPUP_CREDIT_USD_CENTS,
@@ -12,6 +15,7 @@ import {
   tierForLookupKey,
 } from './stripe-client.ts';
 import { grantSignupCreditForCard } from './signup-grant.ts';
+import { monthKey } from './spend.ts';
 
 /**
  * Turn a verified Stripe event into a `BillingStore` write (docs/decisions.md
@@ -304,6 +308,114 @@ async function applyCheckoutSessionCompleted(
   );
 
   await announceIfPaid(onPurchaseCleared, userId, amountUsdCents, settledBy);
+  return 'applied';
+}
+
+/** Whether a PaymentIntent is one auto-reload made (D166). */
+function isAutoReload(metadata: Stripe.Metadata | null | undefined): boolean {
+  return metadata?.[PURPOSE_METADATA_KEY] === AUTO_RELOAD_PURPOSE;
+}
+
+/**
+ * An automatic top-up's charge went through, so credit it as a Checkout
+ * top-up is credited (D166).
+ *
+ * Keyed on the PaymentIntent, for the top-up and the payment alike, and with
+ * the charge as an alias. That is what makes a refund or a lost dispute of
+ * this charge take the credit back with no new code: the charge a refund
+ * names carries this PaymentIntent, `findReversedPayment` matches it, and the
+ * top-up joined on the same key says it was credit that was bought.
+ *
+ * Called twice for one charge in the ordinary case, by the request that made
+ * it and by this webhook, and every write is keyed so the second is nothing.
+ */
+export async function applyAutoReloadSucceeded(
+  store: BillingStore,
+  intent: Stripe.PaymentIntent,
+  onPurchaseCleared?: OnPurchaseCleared,
+): Promise<EventOutcome> {
+  const userId = metadataUserId(intent.metadata);
+  const stripeCustomerId = customerId(intent.customer);
+  if (!userId || !stripeCustomerId) {
+    console.error(
+      'stripe auto-reload charge with no resolvable user',
+      intent.id,
+    );
+    return 'unresolved';
+  }
+  await store.linkCustomer(userId, stripeCustomerId);
+  const raw = Number(intent.metadata?.[CREDIT_USD_CENTS_METADATA_KEY]);
+  await store.recordTopup(
+    intent.id,
+    userId,
+    stripeCustomerId,
+    Number.isFinite(raw) && raw > 0 ? raw : TOPUP_CREDIT_USD_CENTS,
+  );
+  const settledBy = idsOf(intent.id, intent.latest_charge);
+  const amountUsdCents = intent.amount_received ?? 0;
+  await store.recordPayment(
+    intent.id,
+    userId,
+    amountUsdCents,
+    new Date().toISOString(),
+    settledBy,
+  );
+  const attempt = intent.metadata?.[AUTO_RELOAD_ATTEMPT_METADATA_KEY];
+  if (attempt) {
+    // Counted in the month Stripe made the charge, which a charge asked
+    // about again after midnight on the last of the month is not the month
+    // it was claimed in.
+    await store.settleAutoReloadAttempt(
+      attempt,
+      'succeeded',
+      intent.id,
+      null,
+      monthKey(
+        Number.isFinite(intent.created) ? intent.created * 1000 : Date.now(),
+      ),
+    );
+  }
+  await announceIfPaid(onPurchaseCleared, userId, amountUsdCents, settledBy);
+  return 'applied';
+}
+
+/** Why a failed automatic charge turns auto-reload off. */
+export function autoReloadFailureReason(
+  code: string | null | undefined,
+): AutoReloadDisabledReason {
+  return code === 'authentication_required'
+    ? 'authentication_required'
+    : 'declined';
+}
+
+/**
+ * An automatic top-up's charge failed: nothing was credited, so nothing is
+ * undone. Auto-reload turns itself off, and the builder says why and offers
+ * the one-click top-up again (D166), rather than trying the card again.
+ */
+export async function applyAutoReloadFailed(
+  store: BillingStore,
+  intent: Stripe.PaymentIntent,
+): Promise<EventOutcome> {
+  const userId = metadataUserId(intent.metadata);
+  if (!userId) return 'applied';
+  const code =
+    intent.last_payment_error?.decline_code ??
+    intent.last_payment_error?.code ??
+    null;
+  // Only an attempt still waiting on this answer turns auto-reload off. One
+  // the charge's own reply already ended was answered, and the account may
+  // have turned auto-reload back on since, with another card.
+  const attempt = intent.metadata?.[AUTO_RELOAD_ATTEMPT_METADATA_KEY];
+  if (attempt) {
+    await store.failAutoReloadAttempt(
+      userId,
+      attempt,
+      intent.id,
+      code,
+      autoReloadFailureReason(intent.last_payment_error?.code),
+    );
+  }
   return 'applied';
 }
 
@@ -754,6 +866,19 @@ export async function applyStripeEvent(
         resolveSetupIntent,
         signupCreditOpen,
       );
+    case 'payment_intent.succeeded':
+      // Every charge fires this, a Checkout top-up's and an invoice's too,
+      // so the mark is checked before anything is written: only the charges
+      // auto-reload made are credited here (D166).
+      if (!isAutoReload(event.data.object.metadata)) return 'applied';
+      return await applyAutoReloadSucceeded(
+        store,
+        event.data.object,
+        onPurchaseCleared,
+      );
+    case 'payment_intent.payment_failed':
+      if (!isAutoReload(event.data.object.metadata)) return 'applied';
+      return await applyAutoReloadFailed(store, event.data.object);
     case 'checkout.session.async_payment_failed':
       // Nothing to undo, which is the whole reason the grant is gated on
       // `payment_status` rather than on the session having completed.

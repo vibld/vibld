@@ -236,6 +236,78 @@ function parseAttempted(value: string | null): string[] {
   }
 }
 
+/**
+ * How this deployment admits accounts, as far as auto-reload's barrier
+ * needs to know: whether by invite, and which addresses are platform admins
+ * (let in without one, `decideAccessFor`).
+ */
+export interface AutoReloadAccess {
+  inviteGated: boolean;
+  /** Lowercased, as `platformAdminsFor` gives them. */
+  admins?: Iterable<string>;
+}
+
+const INVITE_GATED: AutoReloadAccess = { inviteGated: true };
+
+/** The two values `autoReloadBarredSql` binds, in its placeholders' order. */
+function accessParams(access: AutoReloadAccess): [number, string] {
+  return [
+    access.inviteGated ? 1 : 0,
+    JSON.stringify([...(access.admins ?? [])]),
+  ];
+}
+
+/**
+ * True for an account auto-reload must not charge, with the account's id as
+ * ?1, `gated` whether this deployment admits by invite and `admins` a JSON
+ * array of its admins' addresses: deletion requested and not canceled, a
+ * suspension or a ban not yet lifted, or, where invites decide who gets in,
+ * an account the gate would not admit now. Admission is read as the gate
+ * reads it (`decideAccessFor`), by the address the account last signed in
+ * with (`accounts`): an admin's, or one with an invite it redeemed and that
+ * still stands. An open deployment bars nothing here.
+ * A durable check rather than only the revoke turning the setting off, so a
+ * revoke whose update failed still charges nothing, and one that holds for
+ * a run settling in the background, which has no request to ask the gate.
+ */
+function autoReloadBarredSql(gated: string, admins: string): string {
+  return `EXISTS (SELECT 1 FROM account_deletions
+                WHERE user_id = ?1 AND cancelled_at IS NULL)
+             OR EXISTS (SELECT 1 FROM billing_clawbacks
+                WHERE user_id = ?1 AND suspends = 1 AND lifted_at IS NULL)
+             OR EXISTS (SELECT 1 FROM user_bans
+                WHERE user_id = ?1 AND lifted_at IS NULL)
+             OR (${gated} = 1
+                 AND NOT EXISTS (SELECT 1 FROM accounts a
+                    WHERE a.user_id = ?1
+                      AND (lower(a.email) IN (SELECT value FROM json_each(${admins}))
+                           OR EXISTS (SELECT 1 FROM access_invites i
+                              WHERE i.redeemed_by_user_id = ?1
+                                AND i.revoked_at IS NULL
+                                AND i.email = lower(a.email)))))`;
+}
+
+/** Why auto-reload turned itself off (D166). */
+export type AutoReloadDisabledReason =
+  'declined' | 'authentication_required' | 'no_card';
+
+export interface AutoReloadSettings {
+  enabled: boolean;
+  monthlyCapUsdCents: number;
+  paymentMethodId: string | null;
+  card: { brand: string; last4: string } | null;
+  disabledReason: AutoReloadDisabledReason | null;
+}
+
+interface AutoReloadRow {
+  enabled: number;
+  monthly_cap_usd_cents: number;
+  payment_method_id: string | null;
+  card_brand: string | null;
+  card_last4: string | null;
+  disabled_reason: string | null;
+}
+
 export class BillingStore {
   #db: D1Database;
 
@@ -1212,6 +1284,24 @@ export class BillingStore {
    * Whether a lost dispute has this account suspended and no operator has
    * lifted it yet. Read by `spendableFor`, which every paid request asks.
    */
+  /**
+   * Whether nothing may be charged automatically for the account: it has
+   * asked to be deleted and not taken it back, it is suspended or banned, or (where
+   * invites decide) the invite that let it in was withdrawn, none other
+   * stands and it is no admin. Either way it cannot spend what a charge would buy.
+   * `claimAutoReload` asks the same inside its statement.
+   */
+  async autoReloadBarred(
+    userId: string,
+    access: AutoReloadAccess = INVITE_GATED,
+  ): Promise<boolean> {
+    const row = await this.#db
+      .prepare(`SELECT 1 AS found WHERE ${autoReloadBarredSql('?2', '?3')}`)
+      .bind(userId, ...accessParams(access))
+      .first();
+    return row !== null;
+  }
+
   async isSuspended(userId: string): Promise<boolean> {
     const row = await this.#db
       .prepare(
@@ -1724,5 +1814,369 @@ export class BillingStore {
       )
       .bind(stripeEventId, type, new Date().toISOString())
       .run();
+  }
+
+  /** This account's auto-reload settings (D166), or undefined if never set. */
+  async autoReloadSettings(
+    userId: string,
+  ): Promise<AutoReloadSettings | undefined> {
+    const row = await this.#db
+      .prepare(
+        `SELECT enabled, monthly_cap_usd_cents, payment_method_id, card_brand,
+                card_last4, disabled_reason
+           FROM billing_auto_reload WHERE user_id = ?1`,
+      )
+      .bind(userId)
+      .first<AutoReloadRow>();
+    if (!row) return undefined;
+    return {
+      enabled: row.enabled === 1,
+      monthlyCapUsdCents: row.monthly_cap_usd_cents,
+      paymentMethodId: row.payment_method_id,
+      card:
+        row.card_brand && row.card_last4
+          ? { brand: row.card_brand, last4: row.card_last4 }
+          : null,
+      disabledReason: row.disabled_reason as AutoReloadDisabledReason | null,
+    };
+  }
+
+  /**
+   * Turn auto-reload on, with the card it will charge, or off. Either clears
+   * a reason it turned itself off for: the account has now decided.
+   */
+  async saveAutoReloadSettings(
+    userId: string,
+    settings: {
+      enabled: boolean;
+      monthlyCapUsdCents: number;
+      card?: { paymentMethodId: string; brand: string; last4: string };
+    },
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_auto_reload
+           (user_id, enabled, monthly_cap_usd_cents, payment_method_id,
+            card_brand, card_last4, disabled_reason, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7)
+         ON CONFLICT(user_id) DO UPDATE SET
+           enabled = excluded.enabled,
+           monthly_cap_usd_cents = excluded.monthly_cap_usd_cents,
+           payment_method_id = COALESCE(excluded.payment_method_id,
+                                        billing_auto_reload.payment_method_id),
+           card_brand = COALESCE(excluded.card_brand, billing_auto_reload.card_brand),
+           card_last4 = COALESCE(excluded.card_last4, billing_auto_reload.card_last4),
+           disabled_reason = NULL,
+           version = billing_auto_reload.version + 1,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        userId,
+        settings.enabled ? 1 : 0,
+        settings.monthlyCapUsdCents,
+        settings.card?.paymentMethodId ?? null,
+        settings.card?.brand ?? null,
+        settings.card?.last4 ?? null,
+        new Date().toISOString(),
+      )
+      .run();
+  }
+
+  /**
+   * Auto-reload turned itself off, and why, for the builder to say.
+   *
+   * Given the attempt whose answer this is, only while the setting is still
+   * the one that attempt's claim read its card from: an answer about a charge the
+   * account made before turning auto-reload off and on again, perhaps with
+   * another card, is not about the setting it has now.
+   */
+  async disableAutoReload(
+    userId: string,
+    reason: AutoReloadDisabledReason,
+    attemptId?: string,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE billing_auto_reload
+            SET enabled = 0, disabled_reason = ?2, updated_at = ?3
+          WHERE user_id = ?1
+            AND (?4 IS NULL OR version = (
+                  SELECT settings_version FROM billing_auto_reload_attempts
+                   WHERE id = ?4))`,
+      )
+      .bind(userId, reason, new Date().toISOString(), attemptId ?? null)
+      .run();
+  }
+
+  /**
+   * Off, as the account turning it off would leave it, for an account whose
+   * access was withdrawn: it can no longer spend what a reload would buy.
+   * Only while it is in fact barred (`autoReloadBarred`): an account another
+   * invite still lets in, or an open deployment, keeps it. True when it was
+   * turned off.
+   */
+  async turnOffAutoReloadIfBarred(
+    userId: string,
+    access: AutoReloadAccess = INVITE_GATED,
+  ): Promise<boolean> {
+    const result = await this.#db
+      .prepare(
+        `UPDATE billing_auto_reload
+            SET enabled = 0, disabled_reason = NULL, updated_at = ?2
+          WHERE user_id = ?1 AND enabled = 1
+            AND (${autoReloadBarredSql('?3', '?4')})`,
+      )
+      .bind(userId, new Date().toISOString(), ...accessParams(access))
+      .run();
+    return result.meta.changes > 0;
+  }
+
+  /**
+   * Claim the right to start one automatic charge, or learn there is none
+   * to start. The one statement every charge passes through, so two runs
+   * settling at once cannot both charge: D1 runs it alone, and the pending
+   * index and the (user, period, seq) key turn a lost race into nothing.
+   *
+   * Refused while auto-reload is off or has no card, while another charge
+   * for the account is in flight, once the month holds as many charges as
+   * the cap buys (counted in the month each was made, `charged_period`),
+   * and once the account has asked to be deleted (docs/decisions.md L32)
+   * or lost its invite (`autoReloadBarred`): a run that settles after
+   * either would otherwise charge a card nobody can use the credit from. A failed charge
+   * does not count against the cap; it has turned auto-reload off.
+   */
+  async claimAutoReload(
+    userId: string,
+    period: string,
+    priceUsdCents: number,
+    now: string = new Date().toISOString(),
+    access: AutoReloadAccess = INVITE_GATED,
+  ): Promise<string | undefined> {
+    const row = await this.#db
+      .prepare(
+        `INSERT INTO billing_auto_reload_attempts
+           (id, user_id, period, seq, state, payment_method_id,
+            amount_usd_cents, settings_version, created_at, updated_at)
+         SELECT ?5, ?1, ?2, n.seq, 'pending', s.payment_method_id, ?4,
+                s.version, ?3, ?3
+           FROM billing_auto_reload s,
+                (SELECT COALESCE(MAX(seq), 0) + 1 AS seq
+                   FROM billing_auto_reload_attempts
+                  WHERE user_id = ?1 AND period = ?2) n
+          WHERE s.user_id = ?1
+            AND s.enabled = 1
+            AND s.payment_method_id IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM billing_auto_reload_attempts
+                             WHERE user_id = ?1 AND state = 'pending')
+            AND NOT (${autoReloadBarredSql('?6', '?7')})
+            AND (SELECT COUNT(*) FROM billing_auto_reload_attempts
+                  WHERE user_id = ?1 AND charged_period = ?2
+                    AND state = 'succeeded')
+                < s.monthly_cap_usd_cents / ?4
+         ON CONFLICT DO NOTHING
+         RETURNING id`,
+      )
+      .bind(
+        userId,
+        period,
+        now,
+        priceUsdCents,
+        crypto.randomUUID(),
+        ...accessParams(access),
+      )
+      .first<{ id: string }>();
+    return row?.id;
+  }
+
+  /**
+   * Whether a claimed attempt may still be charged, asked in one statement
+   * just before its request goes to Stripe: still pending, auto-reload still
+   * on with the very setting the claim read (`settings_version`: a cap
+   * lowered or a card changed since is a save, and the save is what decides),
+   * the month's charges still under that cap, and the account not barred.
+   * True also records the dispatch (`dispatched_at`), which keeps the
+   * attempt from being given up while its request may be in flight
+   * (`giveUpAutoReloadAttempt`).
+   */
+  async autoReloadAttemptCurrent(
+    userId: string,
+    attemptId: string,
+    period: string,
+    access: AutoReloadAccess = INVITE_GATED,
+    now: string = new Date().toISOString(),
+  ): Promise<boolean> {
+    const result = await this.#db
+      .prepare(
+        `UPDATE billing_auto_reload_attempts
+            SET dispatched_at = ?6
+          WHERE id = ?2 AND user_id = ?1 AND state = 'pending'
+            AND EXISTS (
+                  SELECT 1 FROM billing_auto_reload s
+                   WHERE s.user_id = ?1
+                     AND s.enabled = 1
+                     AND s.version = billing_auto_reload_attempts.settings_version
+                     AND (SELECT COUNT(*) FROM billing_auto_reload_attempts c
+                           WHERE c.user_id = ?1 AND c.charged_period = ?3
+                             AND c.state = 'succeeded')
+                         < s.monthly_cap_usd_cents
+                           / billing_auto_reload_attempts.amount_usd_cents)
+            AND NOT (${autoReloadBarredSql('?4', '?5')})`,
+      )
+      .bind(userId, attemptId, period, ...accessParams(access), now)
+      .run();
+    return result.meta.changes > 0;
+  }
+
+  /**
+   * Ends a pending attempt that never became a charge (`not_due`,
+   * `superseded`), but only once no request under its key can still be in
+   * flight: never dispatched, or last dispatched before `dispatchedBefore`.
+   * False, and the attempt left pending, otherwise: a check sending the same
+   * request may yet make the charge, and freeing the claim now would let
+   * the next one charge again beside it.
+   */
+  async giveUpAutoReloadAttempt(
+    attemptId: string,
+    failureCode: string,
+    dispatchedBefore: string,
+  ): Promise<boolean> {
+    const result = await this.#db
+      .prepare(
+        `UPDATE billing_auto_reload_attempts
+            SET state = 'failed', failure_code = ?2, updated_at = ?3
+          WHERE id = ?1 AND state = 'pending'
+            AND (dispatched_at IS NULL OR dispatched_at < ?4)`,
+      )
+      .bind(attemptId, failureCode, new Date().toISOString(), dispatchedBefore)
+      .run();
+    return result.meta.changes > 0;
+  }
+  /**
+   * The charge a claimed attempt became, and how it ended. False when the
+   * attempt had already ended, so that a late answer about it changes
+   * nothing the account has done since. The one exception is a success for
+   * an attempt given up on without a charge to show for it (`not_due`,
+   * `superseded`, `abandoned`): Stripe made the charge after all, and the
+   * cap must count it.
+   */
+  async settleAutoReloadAttempt(
+    attemptId: string,
+    state: 'succeeded' | 'failed',
+    paymentIntentId: string | null,
+    failureCode: string | null = null,
+    chargedPeriod: string | null = null,
+  ): Promise<boolean> {
+    const result = await this.#db
+      .prepare(
+        `UPDATE billing_auto_reload_attempts
+            SET state = ?2,
+                payment_intent_id = COALESCE(?3, payment_intent_id),
+                failure_code = ?4,
+                updated_at = ?5,
+                charged_period = ?6
+          WHERE id = ?1
+            AND (state = 'pending'
+                 OR (?2 = 'succeeded' AND state = 'failed'
+                     AND payment_intent_id IS NULL))`,
+      )
+      .bind(
+        attemptId,
+        state,
+        paymentIntentId,
+        failureCode,
+        new Date().toISOString(),
+        chargedPeriod,
+      )
+      .run();
+    return result.meta.changes > 0;
+  }
+
+  /**
+   * A pending attempt's charge failed, and auto-reload turns itself off for
+   * `reason`: both in one batch, so a failure between the two can never
+   * leave the attempt ended with the setting still on, where a retry of the
+   * same answer would find nothing pending and change nothing. The setting
+   * turns off only while it is still the save the claim read its card from
+   * (`disableAutoReload`). False, and nothing written, when the attempt had
+   * already ended.
+   */
+  async failAutoReloadAttempt(
+    userId: string,
+    attemptId: string,
+    paymentIntentId: string | null,
+    failureCode: string | null,
+    reason: AutoReloadDisabledReason,
+  ): Promise<boolean> {
+    const now = new Date().toISOString();
+    const [, settled] = await this.#db.batch([
+      // First, while the attempt still reads pending.
+      this.#db
+        .prepare(
+          `UPDATE billing_auto_reload
+              SET enabled = 0, disabled_reason = ?2, updated_at = ?3
+            WHERE user_id = ?1
+              AND version = (
+                    SELECT settings_version FROM billing_auto_reload_attempts
+                     WHERE id = ?4 AND user_id = ?1 AND state = 'pending')`,
+        )
+        .bind(userId, reason, now, attemptId),
+      this.#db
+        .prepare(
+          `UPDATE billing_auto_reload_attempts
+              SET state = 'failed',
+                  payment_intent_id = COALESCE(?2, payment_intent_id),
+                  failure_code = ?3,
+                  updated_at = ?4
+            WHERE id = ?1 AND state = 'pending'`,
+        )
+        .bind(attemptId, paymentIntentId, failureCode, now),
+    ]);
+    return (settled?.meta.changes ?? 0) > 0;
+  }
+
+  /** This account's charge still in flight, if any, and when it was claimed. */
+  async pendingAutoReload(userId: string): Promise<
+    | {
+        id: string;
+        createdAt: string;
+        paymentMethodId: string;
+        amountUsdCents: number;
+      }
+    | undefined
+  > {
+    const row = await this.#db
+      .prepare(
+        `SELECT id, created_at, payment_method_id, amount_usd_cents
+           FROM billing_auto_reload_attempts
+          WHERE user_id = ?1 AND state = 'pending'`,
+      )
+      .bind(userId)
+      .first<{
+        id: string;
+        created_at: string;
+        payment_method_id: string;
+        amount_usd_cents: number;
+      }>();
+    return row
+      ? {
+          id: row.id,
+          createdAt: row.created_at,
+          paymentMethodId: row.payment_method_id,
+          amountUsdCents: row.amount_usd_cents,
+        }
+      : undefined;
+  }
+
+  /** How many automatic top-ups the month holds, for the builder to say. */
+  async autoReloadsIn(userId: string, period: string): Promise<number> {
+    const row = await this.#db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM billing_auto_reload_attempts
+          WHERE user_id = ?1 AND charged_period = ?2
+            AND state = 'succeeded'`,
+      )
+      .bind(userId, period)
+      .first<{ n: number }>();
+    return row?.n ?? 0;
   }
 }

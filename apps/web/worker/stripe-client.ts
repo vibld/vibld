@@ -179,3 +179,10 @@ export const TOPUP_CREDIT_USD_CENTS = 800;
  */
 export const PURPOSE_METADATA_KEY = 'vibld_purpose';
 export const SIGNUP_CARD_PURPOSE = 'signup_credit';
+
+/**
+ * Stamped on a PaymentIntent auto-reload makes (D166), beside the attempt it
+ * settles, so the webhook credits that charge and no other.
+ */
+export const AUTO_RELOAD_PURPOSE = 'auto_reload';
+export const AUTO_RELOAD_ATTEMPT_METADATA_KEY = 'vibld_auto_reload_attempt';

@@ -296,6 +296,8 @@ export const REQUIRED_WEBHOOK_EVENTS = [
   'charge.refunded',
   'charge.dispute.closed',
   'setup_intent.succeeded',
+  'payment_intent.succeeded',
+  'payment_intent.payment_failed',
 ];
 
 /**

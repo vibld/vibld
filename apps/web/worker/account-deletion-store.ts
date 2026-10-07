@@ -540,7 +540,8 @@ export class AccountDeletionStore {
    * person's as the ones copied out of it.
    *
    * And what an admin set for the account (docs/decisions.md D73): a gifted
-   * plan, overrides of its limits, extra models (D136), and a ban. None of them is money, and
+   * plan, overrides of its limits, extra models (D136), and a ban. And its
+   * auto-reload setting (D166), which names a card. None of them is money, and
    * none means anything once the account is gone; what was done, and by
    * whom, stays in the audit log, re-keyed with the credit records below.
    */
@@ -556,13 +557,16 @@ export class AccountDeletionStore {
       `DELETE FROM plan_gifts WHERE user_id = ?1`,
       `DELETE FROM user_overrides WHERE user_id = ?1`,
       `DELETE FROM user_models WHERE user_id = ?1`,
+      // The account's auto-reload setting and the card it named (D166):
+      // nothing is charged for an account that is gone.
+      `DELETE FROM billing_auto_reload WHERE user_id = ?1`,
       `DELETE FROM user_bans WHERE user_id = ?1`,
     ]) {
       await this.#db.prepare(sql).bind(userId).run();
     }
   }
 
-  static readonly ACCOUNT_ROW_QUERIES = 11;
+  static readonly ACCOUNT_ROW_QUERIES = 12;
 
   /**
    * The published site's catalogue, for a site that is already down.
@@ -636,7 +640,7 @@ export class AccountDeletionStore {
   }
 
   /** One per kept billing table; `account-deletion.test.ts` holds the two equal. */
-  static readonly BILLING_ROW_QUERIES = 9;
+  static readonly BILLING_ROW_QUERIES = 10;
 
   /**
    * The rest of what is kept: credit grants (including referral payouts,
@@ -796,4 +800,7 @@ export const KEPT_BILLING_TABLES = [
   // lifted it). A record of money going back out, kept like the payment it
   // reverses.
   'billing_clawbacks',
+  // Every automatic top-up charge started (D166): money, kept like the
+  // payment it became.
+  'billing_auto_reload_attempts',
 ] as const;

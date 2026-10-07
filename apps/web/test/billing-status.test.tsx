@@ -335,3 +335,130 @@ describe('the billing readout, as it is actually wired', () => {
     view.unmount();
   });
 });
+
+describe('auto-reload in the billing readout (D166)', () => {
+  const AUTO = {
+    enabled: false,
+    monthlyCapUsdCents: 3000,
+    card: null,
+    disabledReason: null,
+    reloadsThisMonth: 0,
+  } as const;
+
+  function checkbox(container: HTMLElement): HTMLInputElement {
+    const box = container.querySelector<HTMLInputElement>(
+      '.billing__auto-reload input[type="checkbox"]',
+    );
+    assert.ok(box, 'no auto-reload switch');
+    return box;
+  }
+
+  it('is offered off, with the $30 cap, and turning it on posts both', async () => {
+    const calls = serving({
+      '/api/billing/status': () => reply(billing({ autoReload: { ...AUTO } })),
+      '/api/billing/auto-reload': () =>
+        reply({ enabled: true, monthlyCapUsdCents: 3000 }),
+    });
+    const view = await mount();
+    assert.match(view.text(), /Auto-reload \$10 when under \$1/);
+    assert.match(view.text(), /up to \$30 a month/);
+    const box = checkbox(view.container);
+    assert.equal(box.checked, false);
+    await act(async () => {
+      box.click();
+    });
+    const posted = calls.find((call) => call.url.includes('/auto-reload'));
+    assert.deepEqual(posted?.body, { enabled: true, monthlyCapUsdCents: 3000 });
+    view.unmount();
+  });
+
+  it('offers to add a card when there is none to charge', async () => {
+    serving({
+      '/api/billing/status': () => reply(billing({ autoReload: { ...AUTO } })),
+      '/api/billing/auto-reload': () =>
+        reply({ error: 'Add a card first.', needsCard: true }, 409),
+    });
+    const view = await mount();
+    await act(async () => {
+      checkbox(view.container).click();
+    });
+    assert.match(view.text(), /Add a card first/);
+    assert.ok(view.button(/Add a card/));
+    view.unmount();
+  });
+
+  it('says why it turned itself off, and keeps the one-click top-up', async () => {
+    serving({
+      '/api/billing/status': () =>
+        reply(billing({ autoReload: { ...AUTO, disabledReason: 'declined' } })),
+    });
+    const view = await mount();
+    assert.match(view.text(), /Auto-reload is off: your card was declined/);
+    assert.ok(view.button(/Buy top-up/));
+    view.unmount();
+  });
+
+  it('names the card it charges while on', async () => {
+    serving({
+      '/api/billing/status': () =>
+        reply(
+          billing({
+            autoReload: {
+              ...AUTO,
+              enabled: true,
+              card: { brand: 'visa', last4: '4242' },
+              reloadsThisMonth: 2,
+            },
+          }),
+        ),
+    });
+    const view = await mount();
+    assert.match(view.text(), /Charges visa ending 4242/);
+    assert.match(view.text(), /\$20 reloaded this month/);
+    view.unmount();
+  });
+
+  it('lets a suspended account turn it off, and offers nothing else', async () => {
+    const calls = serving({
+      '/api/billing/status': () =>
+        reply(
+          billing({
+            suspended: true,
+            autoReload: {
+              ...AUTO,
+              enabled: true,
+              card: { brand: 'visa', last4: '4242' },
+            },
+          }),
+        ),
+      '/api/billing/auto-reload': () =>
+        reply({ enabled: false, monthlyCapUsdCents: 3000 }),
+    });
+    const view = await mount();
+    const cap = view.container.querySelector<HTMLSelectElement>(
+      '.billing__auto-reload select',
+    );
+    assert.equal(cap?.disabled, true);
+    const box = checkbox(view.container);
+    assert.equal(box.disabled, false);
+    await act(async () => {
+      box.click();
+    });
+    const posted = calls.find((call) => call.url.includes('/auto-reload'));
+    assert.deepEqual(posted?.body, {
+      enabled: false,
+      monthlyCapUsdCents: 3000,
+    });
+    view.unmount();
+  });
+
+  it('is not offered to a suspended account that has it off', async () => {
+    serving({
+      '/api/billing/status': () =>
+        reply(billing({ suspended: true, autoReload: { ...AUTO } })),
+    });
+    const view = await mount();
+    assert.equal(view.container.querySelector('.billing__auto-reload'), null);
+    view.unmount();
+  });
+});

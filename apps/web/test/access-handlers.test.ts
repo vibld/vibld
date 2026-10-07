@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { AccessStore } from '../worker/access-store.ts';
 import { AccountsStore } from '../worker/accounts-store.ts';
+import { BillingStore } from '../worker/billing-store.ts';
 import {
   decideAccessFor,
   handleAccessStatus,
@@ -371,6 +372,67 @@ describe('stopping the billing from the revoke route', () => {
       scheduled: false,
       reason: 'unconfigured',
     });
+  });
+
+  it('turns auto-reload off, so nothing is charged for credit they cannot spend', async () => {
+    const env = newEnv();
+    await new AccessStore(env.DB).invite(INVITED.email, 'admin@vibld.com');
+    await decideAccessFor(env, INVITED);
+    const billing = new BillingStore(env.DB as unknown as D1Database);
+    await billing.saveAutoReloadSettings(INVITED.userId, {
+      enabled: true,
+      monthlyCapUsdCents: 3000,
+      card: { paymentMethodId: 'pm_card', brand: 'visa', last4: '4242' },
+    });
+
+    const body = (await (
+      await handleInviteRevoke(post({ email: INVITED.email }), env)
+    ).json()) as Record<string, unknown>;
+
+    assert.equal(body.autoReload, 'off');
+    assert.equal(await billing.autoReloadBarred(INVITED.userId), true);
+    const settings = await billing.autoReloadSettings(INVITED.userId);
+    assert.equal(settings?.enabled, false);
+    assert.equal(settings?.disabledReason, null);
+  });
+
+  it('keeps auto-reload for an account another invite still lets in', async () => {
+    const env = newEnv();
+    const access = new AccessStore(env.DB);
+    await access.invite(INVITED.email, 'admin@vibld.com');
+    await decideAccessFor(env, INVITED);
+    // The same account, signed in again under a new address and invited there.
+    const moved = {
+      ...INVITED,
+      email: 'chris@new.example',
+      policyIdentity: 'chris@new.example',
+    };
+    await access.invite(moved.email, 'admin@vibld.com');
+    await decideAccessFor(env, moved);
+    // Recorded as the access status route records it, under the new address.
+    await env.DB.prepare(
+      `INSERT INTO accounts (user_id, email, first_seen_at, last_seen_at)
+       VALUES (?1, ?2, 'now', 'now')`,
+    )
+      .bind(moved.userId, moved.email)
+      .run();
+    const billing = new BillingStore(env.DB as unknown as D1Database);
+    await billing.saveAutoReloadSettings(INVITED.userId, {
+      enabled: true,
+      monthlyCapUsdCents: 3000,
+      card: { paymentMethodId: 'pm_card', brand: 'visa', last4: '4242' },
+    });
+
+    const body = (await (
+      await handleInviteRevoke(post({ email: INVITED.email }), env)
+    ).json()) as Record<string, unknown>;
+
+    assert.equal(body.autoReload, 'kept');
+    assert.equal(await billing.autoReloadBarred(INVITED.userId), false);
+    assert.equal(
+      (await billing.autoReloadSettings(INVITED.userId))?.enabled,
+      true,
+    );
   });
 
   it('asks again for an address that was already withdrawn', async () => {

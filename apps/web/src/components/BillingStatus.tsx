@@ -12,6 +12,7 @@ import type { BillingStatus, Tier } from '../billing/billing-client.ts';
 import { SignedIn } from '../auth/clerk.tsx';
 import { signInConfigured } from '../auth/mode.ts';
 import { SignupCreditOffer } from './SignupCreditOffer.tsx';
+import { AutoReload } from './AutoReload.tsx';
 
 /**
  * The header's billing affordance: this caller's tier and usage, a picker to
@@ -45,6 +46,8 @@ export function BillingStatusPanel() {
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
+  // Bumped to read the status again, after auto-reload is changed.
+  const [reads, setReads] = useState(0);
   useEffect(() => {
     let cancelled = false;
     void fetchBillingStatus().then((result) => {
@@ -53,7 +56,7 @@ export function BillingStatusPanel() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reads]);
 
   // Nothing to show yet, nothing this deployment can answer, or a session
   // this widget's own fetch found already expired -- all the same "render
@@ -168,6 +171,20 @@ export function BillingStatusPanel() {
       >
         Buy top-up
       </button>
+
+      {/*
+       * A suspended account is not offered auto-reload, but one that has it
+       * on keeps the switch to turn it off: lifted later, the suspension
+       * would otherwise charge the card before it had any way to opt out.
+       */}
+      {status.autoReload && (!status.suspended || status.autoReload.enabled) ? (
+        <AutoReload
+          status={status.autoReload}
+          offOnly={status.suspended}
+          onChanged={() => setReads((n) => n + 1)}
+          setAction={(action) => void redirect(action)}
+        />
+      ) : null}
 
       {status.hasStripeCustomer ? (
         <button

@@ -167,6 +167,10 @@ export const REPLAYED_EVENT_TYPES = [
   // reports it as well, and either one pays; this is the one that names the
   // SetupIntent directly.
   'setup_intent.succeeded',
+  // The charge an automatic top-up makes (D166). Every other PaymentIntent is
+  // acknowledged without a write, so replaying them costs one read each.
+  'payment_intent.succeeded',
+  'payment_intent.payment_failed',
 ];
 
 export interface ReplayResult {

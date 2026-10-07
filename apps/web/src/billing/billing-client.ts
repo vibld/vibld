@@ -66,6 +66,39 @@ export interface BillingStatus {
     endsAt: string | null;
     inUse: boolean;
   } | null;
+  /**
+   * Opt-in auto-reload (D166). Optional for the same reason `signupCredit`
+   * is: absent, the panel offers none.
+   */
+  autoReload?: AutoReloadStatus;
+}
+
+/** Why auto-reload turned itself off. */
+export type AutoReloadDisabledReason =
+  'declined' | 'authentication_required' | 'no_card';
+
+export interface AutoReloadStatus {
+  enabled: boolean;
+  monthlyCapUsdCents: number;
+  card: { brand: string; last4: string } | null;
+  disabledReason: AutoReloadDisabledReason | null;
+  reloadsThisMonth: number;
+}
+
+/** The sentence the panel says when auto-reload turned itself off. */
+export function autoReloadOffReason(
+  reason: AutoReloadDisabledReason | null,
+): string | null {
+  switch (reason) {
+    case 'declined':
+      return 'Auto-reload is off: your card was declined.';
+    case 'authentication_required':
+      return 'Auto-reload is off: your bank asked to confirm the charge, which cannot happen while you are away.';
+    case 'no_card':
+      return 'Auto-reload is off: the card it charged is no longer saved.';
+    default:
+      return null;
+  }
 }
 
 /**
@@ -237,6 +270,60 @@ export function startCardSetup(
   getToken: () => Promise<string | null> = getClerkToken,
 ): Promise<string> {
   return postForRedirect('/api/billing/card', undefined, fetchImpl, getToken);
+}
+
+/**
+ * Open the Stripe-hosted page that saves a card for auto-reload (D166):
+ * the same page as above, asked for by an account that may already count
+ * as having a card but has none Stripe can charge again.
+ */
+export function startAutoReloadCardSetup(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<string> {
+  return postForRedirect(
+    '/api/billing/card',
+    { purpose: 'auto-reload' },
+    fetchImpl,
+    getToken,
+  );
+}
+
+/** What turning auto-reload on or off answered. */
+export type AutoReloadResult =
+  { ok: true } | { ok: false; error: string; needsCard: boolean };
+
+/**
+ * Turn auto-reload on or off, with the monthly cap (D166). A refusal comes
+ * back as a value rather than a throw, because one of them (`needsCard`)
+ * is a step the panel offers next rather than a failure.
+ */
+export async function setAutoReload(
+  settings: { enabled: boolean; monthlyCapUsdCents: number },
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<AutoReloadResult> {
+  const response = await fetchImpl('/api/billing/auto-reload', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(await authHeaders(getToken)),
+    },
+    body: JSON.stringify(settings),
+  });
+  if (response.ok) return { ok: true };
+  const problem = (await response.json().catch(() => null)) as {
+    error?: unknown;
+    needsCard?: unknown;
+  } | null;
+  return {
+    ok: false,
+    error:
+      typeof problem?.error === 'string'
+        ? problem.error
+        : 'Could not change auto-reload. Try again shortly.',
+    needsCard: problem?.needsCard === true,
+  };
 }
 
 /** Where Stripe sends the browser back to once a card is saved. */

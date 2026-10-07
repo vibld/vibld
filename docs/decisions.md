@@ -83,7 +83,7 @@ Accepted 2026-09-09 (internal PR 70). L1 and L24 amend D30 -- D23 is untouched b
 | L34  | a              | Hosted model access runs on one shared platform key per provider, gated by our own credit ledger.                                                                                                                                                                                                                                                                                                                                            |
 | L35  | a              | One credit = 1¢ of model spend; the user sees a plain "generations remaining" for the model they chose.                                                                                                                                                                                                                                                                                                                                      |
 | L36  | --             | Free $0/$1 spend, Build $19/$14, Ship $49/$40, top-up $10/$8 expiring 12 months (D155, 2026-10-04; was Build $29/$10, Ship $99/$40, top-up $20/$8). Recorded in full below.                                                                                                                                                                                                                                                                  |
-| L37  | a              | Hard stop at the allowance, with one-click top-up. No auto-charged overage.                                                                                                                                                                                                                                                                                                                                                                  |
+| L37  | a              | Hard stop at the allowance, with one-click top-up. No auto-charged overage, except the top-up an account opts into (D166, 2026-10-07).                                                                                                                                                                                                                                                                                                       |
 | L38  | a              | Annual billing at two months free -- Build $190, Ship $490 (D156, 2026-10-04; was $290 and $990).                                                                                                                                                                                                                                                                                                                                            |
 | L39  | a              | Opus is available inside a paid tier, drawn from the same allowance. _(Extended under "Resolved 2026-09-09": more providers are to be added as they ship, and hosted BYOK stays off per L45.)_                                                                                                                                                                                                                                               |
 | L40  | **b**          | Vibld deploys into the user's own Cloudflare account to auto-publish exported sites, reversing the recommendation against holding deploy credentials. Resolved: a scoped API Token the user pastes in (not OAuth), stored in Cloudflare Secrets Store, Cloudflare only for now, and the primary path is a Vibld-provided subdomain auto-configured on the user's behalf -- not merely a fallback. See "Resolved" below for the exact scheme. |
@@ -325,6 +325,19 @@ paying accounts until midnight UTC.
   0 on the deploy environment (the Worker secret persists until replaced).
   Accounts already granted it keep it until it expires. vibld.com states the
   grant only while it is above zero.
+- **D166. Opt-in auto-reload of the top-up (Chris, 2026-10-07: decision
+  card D166, recommended "Cap $30/mo"; amends L37).** Off unless an account
+  turns it on in the builder. With it on, when the most the next run could
+  draw (the allowance left or the credit left, whichever is larger) drops
+  below $1 after a run settles, the card the account chose is charged off
+  session for the $10 top-up ($8 of credit, expiring like any top-up). At most
+  the monthly cap the account picks, $10 to $100 in whole top-ups and $30
+  until it picks, counted per UTC month. One charge in flight at a time
+  (`billing_auto_reload_attempts`). A declined charge, one the bank wants
+  confirmed, or a card no longer saved turns it off, and the builder says why
+  above the one-click top-up, which stays. A refund or a lost dispute of the
+  charge takes the credit back as for a Checkout top-up. The refund policy and
+  the Terms say so.
 
 ### Checkpoint history, 2026-10-03
 

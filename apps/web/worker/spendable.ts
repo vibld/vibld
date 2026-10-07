@@ -6,6 +6,7 @@ import {
   DEFAULT_FREE_TRIAL_MICRO_USD,
   TRIAL_PERIOD_KEY,
   activeProjectLimitFor,
+  allowancePeriodKey,
   effectiveTier,
   monthlyAllowanceFor,
 } from './entitlement.ts';
@@ -18,6 +19,8 @@ import type {
 import { billingConfigured } from './billing-handlers.ts';
 import { planLimitsFor, savedPlanLimits } from './plan-limits.ts';
 import type { Principal } from './principal.ts';
+import { topupKeyFor } from './reserve.ts';
+import type { UserBudget } from './budget.ts';
 
 /** Only what deciding an allowance needs, so a test need not build a router. */
 export interface SpendableEnv {
@@ -203,6 +206,41 @@ export async function spendableFor(
       ? { freePool: true as const }
       : {}),
   };
+}
+
+/**
+ * The most the next run could reserve: what is left of the allowance or of
+ * the credit, whichever is larger, since a reservation draws on one of them
+ * and never both (`largestReservable`). Zero for a suspended account.
+ *
+ * Null while either ledger holds a run in flight: its reservation counts at
+ * its worst case until it settles, which would read as less left than there
+ * will be. That run asks again when it settles.
+ */
+export async function largestSpendableMicroUsd(
+  env: SpendableEnv & {
+    USER_BUDGET: DurableObjectNamespace<Pick<UserBudget, 'usageFor'>>;
+  },
+  userId: string,
+  now: number = Date.now(),
+): Promise<number | null> {
+  const spendable = await spendableFor(env, {
+    userId,
+    policyIdentity: 'unknown',
+  });
+  if (spendable.suspended) return 0;
+  const [allowanceUsage, topupUsage] = await Promise.all([
+    env.USER_BUDGET.getByName(userId).usageFor(
+      spendable.allowancePeriod ?? allowancePeriodKey(now),
+    ),
+    env.USER_BUDGET.getByName(topupKeyFor(userId)).usageFor('lifetime'),
+  ]);
+  if (allowanceUsage.inFlight > 0 || topupUsage.inFlight > 0) return null;
+  return Math.max(
+    0,
+    spendable.monthlyAllowance - allowanceUsage.spentMicroUsd,
+    spendable.topupCeiling - topupUsage.spentMicroUsd,
+  );
 }
 
 /**

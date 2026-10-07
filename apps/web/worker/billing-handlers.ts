@@ -28,6 +28,13 @@ import type {
   ResolveSetupIntent,
 } from './billing-events.ts';
 import type { ClawbackRecord } from './billing-store.ts';
+import {
+  AUTO_RELOAD_DEFAULT_CAP_USD_CENTS,
+  resolveReusableCard,
+  validAutoReloadCap,
+} from './auto-reload.ts';
+import type { AutoReloadOutcome } from './auto-reload.ts';
+import { SUSPENDED_MESSAGE } from './spendable.ts';
 import { topupKeyFor } from './reserve.ts';
 import type { UserBudget } from './budget.ts';
 
@@ -247,8 +254,16 @@ export async function handleBillingCard(
   const { principal } = resolved;
 
   const store = new BillingStore(env.DB!);
+  // A card for auto-reload (D166) is asked for by an account that may
+  // already count as having one: a top-up bought through Checkout counts
+  // (`freeCardOf`) and saves nothing Stripe can charge again. Saving another
+  // card grants nothing a second time, since every grant is once per card.
+  const forAutoReload =
+    ((await request.json().catch(() => null)) as { purpose?: unknown } | null)
+      ?.purpose === 'auto-reload';
   const offer = await signupCreditStatus(store, principal, env, fetchImpl);
   if (
+    !forAutoReload &&
     offer.state !== 'needs-card' &&
     (await store.freeCardOf(principal.userId)).onFile
   ) {
@@ -281,6 +296,104 @@ export async function handleBillingCard(
       502,
     );
   }
+}
+
+/**
+ * POST { enabled, monthlyCapUsdCents? } -> the account's auto-reload
+ * settings (D166).
+ *
+ * Turning it on finds the card it will charge, and refuses with `needsCard`
+ * when Stripe holds none that can be charged without the person there. When
+ * the account is already below the threshold, the first reload is asked for
+ * at once (`reloadNow`): turning it on while out of credit is asking for it.
+ */
+export async function handleBillingAutoReload(
+  request: Request,
+  env: BillingEnv,
+  reloadNow?: (userId: string) => Promise<AutoReloadOutcome>,
+  client?: Pick<Stripe, 'customers'>,
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!billingConfigured(env)) {
+    return json(
+      { error: 'Billing is not configured for this deployment.' },
+      503,
+    );
+  }
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { userId } = resolved.principal;
+
+  const body = (await request.json().catch(() => null)) as {
+    enabled?: unknown;
+    monthlyCapUsdCents?: unknown;
+  } | null;
+  if (typeof body?.enabled !== 'boolean') {
+    return json({ error: 'enabled must be true or false.' }, 400);
+  }
+  const cap = body.monthlyCapUsdCents ?? AUTO_RELOAD_DEFAULT_CAP_USD_CENTS;
+  if (!validAutoReloadCap(cap)) {
+    return json(
+      {
+        error:
+          'monthlyCapUsdCents must be a whole number of $10 top-ups, from $10 to $100.',
+      },
+      400,
+    );
+  }
+
+  const store = new BillingStore(env.DB!);
+  if (!body.enabled) {
+    await store.saveAutoReloadSettings(userId, {
+      enabled: false,
+      monthlyCapUsdCents: cap,
+    });
+    return json({ enabled: false, monthlyCapUsdCents: cap });
+  }
+  if (await store.isSuspended(userId)) {
+    return json({ error: SUSPENDED_MESSAGE }, 403);
+  }
+  const customer = await store.findCustomerId(userId);
+  let card: Awaited<ReturnType<typeof resolveReusableCard>>;
+  try {
+    card = customer
+      ? await resolveReusableCard(client ?? createStripeClient(env), customer)
+      : undefined;
+  } catch (error) {
+    console.error('could not read saved cards for auto-reload', error);
+    return json(
+      { error: 'Could not read your saved card. Try again shortly.' },
+      502,
+    );
+  }
+  if (!card) {
+    return json(
+      {
+        error:
+          'Add a card first: auto-reload charges a card saved to this account.',
+        needsCard: true,
+      },
+      409,
+    );
+  }
+  await store.saveAutoReloadSettings(userId, {
+    enabled: true,
+    monthlyCapUsdCents: cap,
+    card,
+  });
+  let reload: AutoReloadOutcome | undefined;
+  if (reloadNow) {
+    reload = await reloadNow(userId).catch((error: unknown) => {
+      console.error('auto-reload on enable failed', error);
+      return undefined;
+    });
+  }
+  return json({
+    enabled: (await store.autoReloadSettings(userId))?.enabled ?? false,
+    monthlyCapUsdCents: cap,
+    card: { brand: card.brand, last4: card.last4 },
+    ...(reload ? { reload } : {}),
+  });
 }
 
 /** POST -> { url } for the Stripe-hosted Billing Portal (L12). */

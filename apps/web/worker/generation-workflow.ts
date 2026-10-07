@@ -43,6 +43,7 @@ import type {
 
 import type { RunPhase } from '../src/generation/run-phase.ts';
 import type { CheckVerdict } from '../src/generation/build-check.ts';
+import { autoReloadFor } from './auto-reload-run.ts';
 
 export type { WorkflowParams } from './generation-run.ts';
 
@@ -613,6 +614,22 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         if (repair.trace) await store.saveTrace(repair.trace);
       },
     );
+
+    // Auto-reload (D166), once the run's spend and its repair's are both
+    // settled, so the balance it reads is the one the next run will see. Its
+    // own step, so a Workflow resumed after it does not ask twice; and never
+    // a failure of the run, which is over: `autoReloadFor` does not throw.
+    await step
+      .do(
+        'auto-reload',
+        { retries: { limit: 0, delay: '5 seconds' }, timeout: '1 minute' },
+        async () => {
+          await autoReloadFor(this.env, params.userId);
+        },
+      )
+      .catch((error: unknown) => {
+        console.error('auto-reload step failed', error);
+      });
 
     // The repaired project where there is one. The repair promoted its own
     // accepted revision, so returning the first attempt here would show the

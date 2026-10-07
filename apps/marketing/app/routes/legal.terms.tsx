@@ -114,10 +114,13 @@ export default function Terms() {
         anniversary of your subscription, so a first month can be shorter than a
         full month. Unused allowance does not carry over. Credit (top-ups, the
         welcome credit and referral rewards) is used only once the month&apos;s
-        allowance is spent. Nothing is charged automatically past your
-        allowance: when it and your credit are spent, runs stop until the month
-        resets or you buy a top-up. We may also refuse runs for a time when a
-        limit across all accounts is reached.
+        allowance is spent. Nothing is charged automatically past your allowance
+        unless you turn on auto-reload, which charges your saved card for a $10
+        top-up when less than $1 is left to spend, up to the monthly limit you
+        set; a declined charge turns it off. Otherwise, when your allowance and
+        credit are spent, runs stop until the month resets or you buy a top-up.
+        We may also refuse runs for a time when a limit across all accounts is
+        reached.
       </p>
       <p>
         Payments are taken by Stripe on pages it hosts; card details never reach
