@@ -36,7 +36,8 @@ describe('template categories (D161)', () => {
   it('leaves no subcategory empty, and names each catalog category once per group', () => {
     for (const s of TEMPLATE_SUBCATEGORIES) {
       assert.ok(
-        listed.some((t) => templateSubcategories(t).includes(s)),
+        listed.some((t) => templateSubcategories(t).includes(s)) ||
+          STYLE_GALLERY_INDEX.some((e) => styleSubcategory(e.group) === s),
         `${s.group}/${s.slug} is empty`,
       );
     }
@@ -98,6 +99,7 @@ describe('subcategories in a sentence (D161)', () => {
     assert.equal(phrase('websites', 'saas'), 'SaaS');
     assert.equal(phrase('websites', 'ai-products'), 'AI products');
     assert.equal(phrase('websites', 'shopify'), 'Shopify');
+    assert.equal(phrase('websites', 'web3'), 'Web3');
   });
 });
 
@@ -137,6 +139,41 @@ describe('the style gallery under the template categories (D162)', () => {
         build_prompt: '\n### Goal\nA store.\n',
       }),
       'Rules.\n\n## Amberbrae\n\n### Goal\nA store.\n',
+    );
+  });
+});
+
+describe('the SaaS industries split out (D164)', () => {
+  it('gives each SaaS industry its own website subcategory', () => {
+    const slug = (group: string) => styleSubcategory(group)?.slug;
+    assert.equal(slug('saas'), 'saas');
+    assert.equal(slug('design-tools'), 'design-tools');
+    assert.equal(slug('devtools'), 'developer-tools');
+    assert.equal(slug('fintech'), 'fintech');
+    assert.equal(slug('productivity'), 'productivity');
+    assert.equal(slug('web3'), 'web3');
+  });
+
+  it('moves the matching catalog designs with them', () => {
+    for (const category of ['fintech', 'productivity', 'developer-tools']) {
+      const t = listedDesignTemplates().find(
+        (d) => templateGroup(d) === 'websites' && d.category === category,
+      )!;
+      assert.deepEqual(
+        templateSubcategories(t).map((s) => s.slug),
+        [category],
+      );
+    }
+  });
+
+  it('names the kind where apps share the label', () => {
+    assert.equal(
+      subcategoryTitle(findSubcategory('websites', 'developer-tools')!),
+      'Developer tools website templates',
+    );
+    assert.equal(
+      subcategoryTitle(findSubcategory('websites', 'fintech')!),
+      'Fintech templates',
     );
   });
 });

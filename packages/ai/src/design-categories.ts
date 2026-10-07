@@ -11,7 +11,8 @@
  *
  * The style gallery's entries are listed here too (D162). Every one is a
  * website, and `styleGroups` names the gallery industries a website
- * subcategory takes.
+ * subcategory takes. Its SaaS industries each have their own (D164), so
+ * design tools and Web3 hold only styles.
  *
  * Small on purpose: the builder and every vibld.com page read it, and it
  * never imports the catalog.
@@ -80,24 +81,50 @@ export const TEMPLATE_SUBCATEGORIES: readonly TemplateSubcategory[] = [
     slug: 'saas',
     label: 'SaaS',
     group: 'websites',
-    styleGroups: [
-      'saas',
-      'design-tools',
-      'devtools',
-      'fintech',
-      'productivity',
-      'web3',
-    ],
+    styleGroups: ['saas'],
     categories: [
       'crm-sales',
       'analytics',
-      'fintech',
       'hr-people',
       'marketing-tools',
-      'productivity',
       'collaboration',
-      'developer-tools',
     ],
+  },
+  {
+    slug: 'design-tools',
+    label: 'Design tools',
+    group: 'websites',
+    styleGroups: ['design-tools'],
+    categories: [],
+  },
+  {
+    slug: 'developer-tools',
+    label: 'Developer tools',
+    group: 'websites',
+    styleGroups: ['devtools'],
+    categories: ['developer-tools'],
+  },
+  {
+    slug: 'fintech',
+    label: 'Fintech',
+    group: 'websites',
+    styleGroups: ['fintech'],
+    categories: ['fintech'],
+  },
+  {
+    slug: 'productivity',
+    label: 'Productivity',
+    group: 'websites',
+    styleGroups: ['productivity'],
+    categories: ['productivity'],
+  },
+  {
+    slug: 'web3',
+    label: 'Web3',
+    group: 'websites',
+    proper: true,
+    styleGroups: ['web3'],
+    categories: [],
   },
   {
     slug: 'ai-products',

@@ -243,6 +243,15 @@ cases, while each design's own catalog category,
   adds its build prompt to the message as a design's brief is. The
   gallery's Source filter lists them as "Style gallery". `/styles/gallery`
   is unchanged.
+- **D164. The SaaS industries get their own website subcategories (Chris,
+  2026-10-07: "Split out").** D162 put six gallery industries under SaaS, 600+
+  entries. Design tools, Developer tools, Fintech, Productivity and Web3
+  are now website subcategories of their own, after SaaS, which keeps the
+  gallery's SaaS industry. The website designs whose catalog category is
+  fintech, productivity or developer tools move with them; SaaS keeps CRM
+  and sales, analytics, HR, marketing tools and collaboration. Design tools
+  and Web3 hold only styles, so a subcategory counts as filled by a style
+  as well as a design.
 
 ### Pricing, 2026-10-04
 
