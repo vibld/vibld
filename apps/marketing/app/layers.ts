@@ -63,9 +63,3 @@ export const LAYERS: readonly Layer[] = [
     stack: 'One HTML file: CSS sticky positioning and springs',
   }),
 ];
-
-export function layerBySlug(slug: string): Layer {
-  const found = LAYERS.find((candidate) => candidate.slug === slug);
-  if (!found) throw new Error(`No layer ${slug}`);
-  return found;
-}

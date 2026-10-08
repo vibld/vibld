@@ -3,7 +3,6 @@ import { Link } from 'react-router';
 import { FLOW } from '../flow.ts';
 import { FREE_PLAN, PLANS } from '../plan-sources.ts';
 import { dollars, priceLabel } from '../plans.ts';
-import { SITE } from '../site';
 
 /**
  * Pieces of the Live Build design that more than one page shows: the home
@@ -436,13 +435,5 @@ export function OpenFacts() {
         </div>
       ))}
     </dl>
-  );
-}
-
-export function GitHubLink({ children }: { children: React.ReactNode }) {
-  return (
-    <a href={SITE.repoUrl} className="button button--secondary">
-      {children}
-    </a>
   );
 }

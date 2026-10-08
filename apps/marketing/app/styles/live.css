@@ -3566,6 +3566,14 @@
 .lb-tpl-list li + li {
   margin-top: 6px;
 }
+/*
+ * A data model quoted from a template's spec is one long run of `a|b|c`
+ * with nowhere to break, and on a phone it widened 53 template pages
+ * (/templates/pathbloom to 1,150px at 390).
+ */
+.lb-tpl-list li {
+  overflow-wrap: anywhere;
+}
 .lb-tpl-palette {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));

@@ -4,6 +4,7 @@ import { PROJECT_NAME_MAX_CHARS } from '@vibld/core';
 
 import { startCheckout } from '../billing/billing-client.ts';
 import { formatEdited } from '../projects/project-state.ts';
+import { projectPath } from '../projects/project-route.ts';
 import type { ProjectSummary } from '../projects/projects-client.ts';
 import type { ProjectsController } from '../projects/use-projects.ts';
 
@@ -257,7 +258,7 @@ function ProjectRow({
           ) : (
             <a
               className="projectlist__name"
-              href={`/p/${encodeURIComponent(project.id)}`}
+              href={projectPath(project.id)}
               onClick={(event) => {
                 if (
                   event.defaultPrevented ||

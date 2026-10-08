@@ -2,7 +2,6 @@ import { DurableObject } from 'cloudflare:workers';
 import {
   ACCOUNT_MAX_IN_FLIGHT,
   BUILD_MAX_IN_FLIGHT,
-  FLEET_NAME,
   PAID_PREVIEW_RESERVED,
 } from './capacity.ts';
 import {
@@ -505,10 +504,3 @@ function kindOf(kind: FleetKind): FleetKind {
   }
   return kind;
 }
-
-/** The one instance, which counts previews and builds alike (internal issue 197). */
-export function fleetName(): string {
-  return FLEET_NAME;
-}
-
-export { HARD_LIFETIME_MS };

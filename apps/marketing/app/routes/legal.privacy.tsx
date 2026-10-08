@@ -340,7 +340,7 @@ export default function Privacy() {
         (access, correction and deletion) in the same way, by emailing{' '}
         <a href={`mailto:${SITE.emails.privacy}`}>{SITE.emails.privacy}</a>. We
         do not sell personal information, and we do not share it for
-        cross-context behavioural advertising.
+        cross-context behavioral advertising.
       </p>
 
       <h2>Changes to this policy</h2>

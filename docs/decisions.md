@@ -1628,7 +1628,7 @@ GPT-6 Sol (the code change that makes it the default is pending). Chris
 then decided: Google Analytics 4 stays, loaded only with consent, and he
 turns off Google Signals, Google Ads links and GA data sharing in the GA
 admin himself, so the Privacy Policy says vibld does not sell personal
-information or share it for cross-context behavioural advertising;
+information or share it for cross-context behavioral advertising;
 DeepSeek stays, disclosed as it is with no opt-out (data stored in China,
 de-identified inputs and outputs usable to improve its services, no
 published API retention period); annual refunds are requested by email to

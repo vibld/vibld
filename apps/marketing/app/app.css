@@ -291,6 +291,18 @@ body {
   font-family: var(--font-mono);
   font-size: 0.9em;
 }
+/*
+ * A phone is narrower than a long URL in a font's copyright line or a line of
+ * a config example. Without these, either one widened the whole page and it
+ * scrolled sideways (/legal/licenses, /docs/deploying at 390px).
+ */
+.prose-legal p,
+.prose-legal li {
+  overflow-wrap: break-word;
+}
+.prose-legal pre {
+  overflow-x: auto;
+}
 .prose-legal table {
   margin-top: 1.5rem;
   width: 100%;

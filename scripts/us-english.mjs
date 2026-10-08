@@ -265,6 +265,8 @@ function inflect(uk, us) {
       'hoods',
       'ly',
       'y',
+      'al',
+      'ally',
     ]) {
       e(uk + s, us + s);
     }

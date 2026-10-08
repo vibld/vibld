@@ -13,6 +13,10 @@ describe('US English in what people read (D120)', () => {
       toUsEnglish('a colour-coded catalogue, cancelled whilst travelling'),
       'a color-coded catalog, canceled while traveling',
     );
+    assert.equal(
+      toUsEnglish('behavioural advertising, behaviourally'),
+      'behavioral advertising, behaviorally',
+    );
   });
 
   it('leaves words that are right in both alone', () => {

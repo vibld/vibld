@@ -363,12 +363,6 @@ export function guidesIn(track: DocTrack): DocGuide[] {
   return DOC_GUIDES.filter((guide) => guide.track === track);
 }
 
-export function trackFor(guide: DocGuide): DocTrackInfo {
-  const track = DOC_TRACKS.find((candidate) => candidate.id === guide.track);
-  if (!track) throw new Error(`No track declared for ${guide.slug}`);
-  return track;
-}
-
 export const ROUTES: SiteRoute[] = [
   {
     path: '/',

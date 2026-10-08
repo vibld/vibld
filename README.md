@@ -11,7 +11,7 @@
   <a href="https://github.com/vibld/vibld/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/vibld/vibld/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/vibld/vibld/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/vibld/vibld/actions/workflows/codeql.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/vibld/vibld/releases"><img alt="Release" src="https://img.shields.io/github/v/release/vibld/vibld?color=ff4a1c&label=release"></a>
-  <a href="LICENSE"><img alt="Licence: Apache-2.0" src="https://img.shields.io/badge/licence-Apache--2.0-121418"></a>
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-121418"></a>
   <img alt="Node 24 LTS" src="https://img.shields.io/badge/node-24_LTS-121418">
   <a href="https://github.com/vibld/vibld/discussions"><img alt="Discussions" src="https://img.shields.io/github/discussions/vibld/vibld?color=121418"></a>
 </p>

@@ -159,7 +159,7 @@ export default function Template() {
                 : 'Website'}{' '}
           ·{' '}
           {useCase ? (
-            <Link to={`/templates#${useCase.slug}`}>{useCase.label}</Link>
+            <Link to={`/use-cases/${useCase.slug}`}>{useCase.label}</Link>
           ) : null}{' '}
           · {t.complexity}
         </p>
