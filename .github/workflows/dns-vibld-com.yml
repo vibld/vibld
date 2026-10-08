@@ -1,0 +1,157 @@
+name: vibld.com DNS records
+
+# Keeps the vibld.com records no deploy creates. The routes in
+# apps/marketing/wrangler.jsonc make the site's own records; Cloudflare Email
+# Routing makes MX and SPF. This adds what is left:
+#
+# - `_dmarc.vibld.com`, monitor only (D171): it tells receivers the domain
+#   has a policy and asks them to deliver as before, so no mail changes. L19
+#   wants aggregate reports too; the `rua` input adds the address they go to
+#   (`mailto:...`) once one is chosen, and a run without it keeps the one the
+#   record has.
+#
+# Dispatch only, and idempotent: a record already holding the value is left
+# alone, one holding another value is updated in place, and a missing one is
+# created. Uses the marketing environment's Cloudflare token, which already
+# needs "DNS: Edit" on the vibld.com zone (deploy-marketing.yml). Finding the
+# zone by name (`GET /zones`) is documented as needing "Zone: Read"; a token
+# without it can be given the zone id instead, through the `zone_id` input.
+
+on:
+  workflow_dispatch:
+    inputs:
+      zone_id:
+        description: 'vibld.com''s zone id, from the zone''s Overview page. Empty looks it up, which needs "Zone: Read" on the token.'
+        required: false
+        default: ''
+      rua:
+        description: 'Where receivers send aggregate reports, as "mailto:dmarc@example.com". Empty publishes the policy without reports.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dns-vibld-com
+  cancel-in-progress: false
+
+jobs:
+  records:
+    name: Set the vibld.com records
+    # The public copy (vibld/vibld) has no secrets or environments.
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: marketing
+    steps:
+      - name: Set _dmarc.vibld.com
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ZONE: vibld.com
+          NAME: _dmarc.vibld.com
+          CONTENT: v=DMARC1; p=none
+          ZONE_ID: ${{ inputs.zone_id }}
+          RUA: ${{ inputs.rua }}
+        run: |
+          set -euo pipefail
+          if [ -n "$RUA" ]; then
+            if ! [[ "$RUA" =~ ^mailto:[A-Za-z0-9_+-]+(\.[A-Za-z0-9_+-]+)*@([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]; then
+              echo "::error::rua must look like mailto:dmarc@example.com."
+              exit 1
+            fi
+            # A receiver only sends reports to another domain that agrees to
+            # take them (RFC 7489, section 7.1).
+            rua_domain="${RUA##*@}"
+            rua_domain="${rua_domain,,}"
+            case "$rua_domain" in
+              "$ZONE" | *."$ZONE") ;;
+              *)
+                auth=$(dig +short TXT "$ZONE._report._dmarc.$rua_domain" @1.1.1.1 | sed -e 's/" "//g' -e 's/"//g' || true)
+                # Any one record whose first tag is v=DMARC1 authorizes it;
+                # the tag name is case-insensitive and may have spaces
+                # around "=" (RFC 7489, sections 6.4 and 7.1).
+                if ! grep -qE '^[vV][[:space:]]*=[[:space:]]*DMARC1[[:space:]]*(;|$)' <<< "$auth"; then
+                  echo "::error::$rua_domain does not publish $ZONE._report._dmarc.$rua_domain starting v=DMARC1, so receivers would not send it reports."
+                  exit 1
+                fi
+                ;;
+            esac
+          fi
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not set on the marketing environment."
+            exit 1
+          fi
+          api() {
+            curl -sS --fail-with-body -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H 'Content-Type: application/json' "$@"
+          }
+          base=https://api.cloudflare.com/client/v4
+          zone_id="$ZONE_ID"
+          if [ -z "$zone_id" ]; then
+            zone_id=$(api "$base/zones?name=$ZONE" | jq -r '.result[0].id // empty' || true)
+          fi
+          if [ -z "$zone_id" ]; then
+            echo "::error::The token cannot list the $ZONE zone. Give it \"Zone: Read\" on $ZONE, or run this again with the zone_id input."
+            exit 1
+          fi
+          # Other TXT records may share the name; receivers ignore any not
+          # starting with the DMARC version tag (in any case, with spaces
+          # allowed around "="), and so does this.
+          records=$(api "$base/zones/$zone_id/dns_records?type=TXT&name=$NAME" |
+            jq '.result |= map(select(.content | gsub("\" \""; "") | gsub("\""; "") | test("^[vV]\\s*=\\s*DMARC1\\s*(;|$)")))')
+          count=$(jq '.result | length' <<< "$records")
+          current=$(jq -r '.result[0].content // empty' <<< "$records" | sed -e 's/" "//g' -e 's/"//g')
+          # An empty rua input keeps the report address the record already
+          # has, so a rerun never drops reporting it was not asked to drop.
+          if [ -z "$RUA" ]; then
+            # Tag names are case-insensitive and may have spaces around "="
+            # (RFC 7489, section 6.4).
+            RUA=$(grep -oiE '(^|;)[[:space:]]*rua[[:space:]]*=[^;]+' <<< "$current" | head -n 1 | sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]+$//' || true)
+          fi
+          if [ -n "$RUA" ]; then
+            CONTENT="$CONTENT; rua=$RUA"
+          fi
+          echo "EXPECTED=$CONTENT" >> "$GITHUB_ENV"
+          body=$(jq -n --arg name "$NAME" --arg content "\"$CONTENT\"" \
+            '{type: "TXT", name: $name, content: $content, ttl: 1, comment: "D171, dns-vibld-com.yml"}')
+          if [ "$count" -gt 1 ]; then
+            echo "::error::$NAME has $count DMARC records; a domain has one. Remove the extras by hand."
+            exit 1
+          elif [ "$count" -eq 1 ]; then
+            if [ "$current" = "$CONTENT" ]; then
+              echo "$NAME already holds $CONTENT." | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            id=$(jq -r '.result[0].id' <<< "$records")
+            api -X PUT "$base/zones/$zone_id/dns_records/$id" --data "$body" > /dev/null
+            echo "Updated $NAME from $current to $CONTENT." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            api -X POST "$base/zones/$zone_id/dns_records" --data "$body" > /dev/null
+            echo "Created $NAME: $CONTENT." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Check it resolves
+        # Asks vibld.com's own nameserver, not a resolver that may still cache
+        # the old value, and compares the whole record, so an update is only
+        # reported once the new value is served. A record over 255 bytes comes
+        # back as several quoted strings, joined here as receivers join them,
+        # and other TXT records at the name are left out of the comparison.
+        run: |
+          ns=$(dig +short NS vibld.com @1.1.1.1 | head -n 1)
+          if [ -z "$ns" ]; then
+            echo "::error::Could not find vibld.com's nameservers."
+            exit 1
+          fi
+          for i in $(seq 1 12); do
+            answer=$(dig +short TXT _dmarc.vibld.com "@$ns" | sed -e 's/" "//g' -e 's/"//g' |
+              grep -E '^[vV][[:space:]]*=[[:space:]]*DMARC1[[:space:]]*(;|$)' || true)
+            if [ "$answer" = "$EXPECTED" ]; then
+              echo "_dmarc.vibld.com answers $answer (from $ns)" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$ns answers \"$answer\" for _dmarc.vibld.com, not \"$EXPECTED\"."
+          exit 1

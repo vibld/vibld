@@ -361,12 +361,25 @@ paying accounts until midnight UTC.
   beside an auto-reload charge: each claim refuses while the other's is held.
   An account on a plan that has it on keeps the switch, to turn it off. The
   refund policy and the Terms say so.
-- **D168. vibld.com's waitlist endpoint is retired (decision card D168,
-  2026-10-08, recommended "Retire").** No page has rendered the waitlist form
+- **D168. vibld.com's waitlist endpoint is retired (Chris, 2026-10-08:
+  decision card D168, "Retire").** No page has rendered the waitlist form
   since the open beta, so `POST /api/waitlist` is gone and answers the 404 any
   unknown `/api/` path does. The contacts already in the Resend `vibld-waitlist`
   segment are kept for the launch email (docs/launch-email.md). The Turnstile
   check the roadmap vote shares moved to `worker/turnstile.ts`.
+- **D169. Dependabot's source-map-js and sharp patches ship before launch
+  (Chris, 2026-10-08: decision card D169, "Merge").** Internal PR 378 takes
+  source-map-js to 1.2.2 in both templates (CVE-2026-93749) and sharp to
+  0.35.5 in vibld.com's build, merged once CI passed on current main.
+- **D170. v0.5.0 is released before launch (Chris, 2026-10-08: decision card
+  D170, "Cut v0.5.0").** Notes in `docs/releases/v0.5.0.md`, published by the
+  Public release workflow after the export of the commit that adds them.
+- **D171. vibld.com publishes a monitor-only DMARC record (Chris, 2026-10-08:
+  decision card D171, "Add p=none").** `_dmarc.vibld.com` is
+  `v=DMARC1; p=none`, set by `.github/workflows/dns-vibld-com.yml`. Mail
+  delivery is unchanged; a stricter policy is a later decision. L19 also asks
+  for reporting: the record gains `rua=` once a report address is chosen,
+  through the workflow's `rua` input.
 
 ### Checkpoint history, 2026-10-03
 

@@ -13,6 +13,7 @@ allowBuilds:
 # sharp is a dev dependency of apps/marketing (scripts/brand-assets.ts
 # renders the brand PNGs with it), not something the deployed Worker ever
 # runs -- but <0.35.4 carries a high-severity libheif vulnerability
-# (GHSA-rgj7-g3m4-5g8c), so the floor holds wherever it is resolved.
+# (GHSA-rgj7-g3m4-5g8c), and 0.35.5 is D169's patch release, so the floor holds
+# wherever it is resolved.
 overrides:
-  sharp: '>=0.35.4'
+  sharp: '>=0.35.5'
