@@ -2,8 +2,9 @@
   "name": "vibld-marketing",
   "compatibility_date": "2026-09-10",
 
-  // The Worker handles /api/* only -- today, just the waitlist submission.
-  // Every other request is served straight from the prerendered build.
+  // The Worker answers every request (`run_worker_first`, below): its own
+  // /api/* routes, the page-view beacon and the roadmap's votes, and every
+  // other path from the prerendered build through the ASSETS binding.
   "main": "./worker/index.ts",
   "assets": {
     "directory": "./build/client",
@@ -52,12 +53,6 @@
     { "pattern": "www.vibld.com", "custom_domain": true },
   ],
 
-  // Public identifier, not a secret -- the "vibld-waitlist" segment in
-  // Resend that /api/waitlist adds a signup to.
-  "vars": {
-    "VIBLD_WAITLIST_SEGMENT_ID": "6a463d34-31bc-4f24-ba0b-f30bfb5c7660",
-  },
-
   // First-party, cookieless analytics. Cloudflare Web Analytics cannot be
   // used here: its automatic mode injects a beacon by rewriting HTML at the
   // edge, which does not happen for a Worker serving its own assets, and an
@@ -88,7 +83,7 @@
     "crons": ["*/10 * * * *"],
   },
 
-  // RESEND_API_KEY is a Worker secret, set out of band by the deploy
-  // workflow and never committed. Without it, /api/waitlist answers 503
-  // rather than silently discarding a signup -- see worker/index.ts.
+  // TURNSTILE_SECRET_KEY is a Worker secret, set out of band by the deploy
+  // workflow and never committed. Without it, /api/roadmap/vote refuses a
+  // browser's first vote with a 503 -- see worker/roadmap.ts.
 }

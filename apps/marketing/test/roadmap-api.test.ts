@@ -452,7 +452,7 @@ describe('who needs a Turnstile check', () => {
       status: 403,
       error: 'check-required',
     });
-    // Unlike the waitlist, a missing secret is not a pass.
+    // A missing secret is not a pass.
     assert.deepEqual(checkRefusal({ token: 't', secretConfigured: false }), {
       status: 503,
       error: 'check-unavailable',
@@ -599,7 +599,7 @@ describe('POST /api/roadmap/vote', () => {
   it('refuses a token Turnstile did not pass, or issued for something else', async () => {
     for (const verdict of [
       { success: false },
-      { action: 'waitlist' },
+      { action: 'another-widget' },
       { hostname: 'evil.example' },
     ]) {
       mock.restoreAll();

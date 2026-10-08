@@ -361,6 +361,12 @@ paying accounts until midnight UTC.
   beside an auto-reload charge: each claim refuses while the other's is held.
   An account on a plan that has it on keeps the switch, to turn it off. The
   refund policy and the Terms say so.
+- **D168. vibld.com's waitlist endpoint is retired (decision card D168,
+  2026-10-08, recommended "Retire").** No page has rendered the waitlist form
+  since the open beta, so `POST /api/waitlist` is gone and answers the 404 any
+  unknown `/api/` path does. The contacts already in the Resend `vibld-waitlist`
+  segment are kept for the launch email (docs/launch-email.md). The Turnstile
+  check the roadmap vote shares moved to `worker/turnstile.ts`.
 
 ### Checkpoint history, 2026-10-03
 

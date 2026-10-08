@@ -27,9 +27,9 @@ import { SectionHead } from './Sections';
 
 /**
  * The part of Turnstile's global API this file calls. Read through a cast
- * rather than declared on `Window`, because WaitlistForm.tsx already declares
- * `window.turnstile` with the one method it uses, and a second declaration of
- * the same property with a different type does not compile.
+ * rather than declared on `Window`, so the type stays local to the one file
+ * that calls it instead of becoming a global every other file has to agree
+ * with.
  */
 interface TurnstileApi {
   render(

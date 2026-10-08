@@ -3,7 +3,7 @@
  *
  * Request parsing, the cookie, the hashing and every decision the two
  * endpoints make are pure functions here, testable without deploying
- * anything: the same split worker/waitlist.ts makes. The reads and writes
+ * anything: the same split worker/turnstile.ts makes. The reads and writes
  * are in roadmap-store.ts, and worker/index.ts only puts the two together.
  */
 
@@ -248,9 +248,8 @@ export function rateRefusal(
  * counts: a Turnstile token, a secret to check it with, and a check that
  * passed. `verified` is only consulted once the first two exist.
  *
- * Required, not skipped when the secret is missing, unlike the waitlist's
- * check: a waitlist signup still has the honeypot behind it, and a vote has
- * nothing else, so a deploy without the secret takes no first votes rather
+ * Required, not skipped when the secret is missing: a vote has nothing else
+ * behind it, so a deploy without the secret takes no first votes rather
  * than taking them from anybody.
  */
 export function checkRefusal(input: {

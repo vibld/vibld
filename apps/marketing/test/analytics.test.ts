@@ -111,10 +111,7 @@ describe('dataPointFor', () => {
     campaign: 'launch',
   };
 
-  it('indexes by event kind, so signups are never sampled away behind pageviews', () => {
-    assert.deepEqual(dataPointFor('signup', attribution, '/', 'US').indexes, [
-      'signup',
-    ]);
+  it('indexes by event kind', () => {
     assert.deepEqual(dataPointFor('pageview', attribution, '/', 'US').indexes, [
       'pageview',
     ]);
@@ -161,8 +158,8 @@ describe('record', () => {
     assert.doesNotThrow(() =>
       record(
         broken,
-        'signup',
-        new Request('https://vibld.com/api/waitlist'),
+        'pageview',
+        new Request('https://vibld.com/api/hit'),
         {
           referrer: 'direct',
           source: '',

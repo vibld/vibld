@@ -6,10 +6,9 @@
  * not happen for a Worker serving its own static assets, and the manual
  * snippet's token is not exposed for an automatically-configured site.
  *
- * Writing our own has turned out better for the question that actually
- * matters -- which channel produced a waitlist signup -- because the pageview
- * and the signup land in the same dataset and can be joined. Nothing here
- * identifies a person: no cookie, no client ID, no IP address, no full URL
+ * Writing our own also answers the question that actually matters -- which
+ * channel brings visitors to which page -- from one dataset this site owns.
+ * Nothing here identifies a person: no cookie, no client ID, no IP address, no full URL
  * with its query string. Only the fields below are stored.
  */
 
@@ -22,7 +21,11 @@ export interface AnalyticsDataset {
   }): void;
 }
 
-export type EventKind = 'pageview' | 'signup';
+/**
+ * One kind today. `'signup'` was the waitlist's (worker/index.ts until D168
+ * retired the endpoint); rows of it already written stay in the dataset.
+ */
+export type EventKind = 'pageview';
 
 /** Cap on any single stored value. Analytics Engine limits total blob bytes; this keeps one long field from evicting the rest. */
 const MAX_FIELD = 96;
@@ -93,13 +96,13 @@ export function attributionFrom(
 
 /**
  * Builds the datapoint. Returned rather than written so the shape is testable
- * without a Workers runtime -- the same reasoning as `resendContactRequest`
- * in waitlist.ts.
+ * without a Workers runtime -- the same reasoning as `turnstileVerifyRequest`
+ * in turnstile.ts.
  *
  * `indexes` takes the event kind because Analytics Engine allows exactly one
- * index and sampling is applied per index: keeping pageviews and signups in
- * separate buckets means a burst of pageviews can never cause signups -- the
- * rarer and far more valuable event -- to be sampled away.
+ * index and sampling is applied per index: an event kind added later lands in
+ * its own bucket, so a burst of pageviews can never cause it to be sampled
+ * away.
  */
 export function dataPointFor(
   kind: EventKind,
@@ -125,7 +128,7 @@ export function dataPointFor(
 /**
  * Records an event, never letting analytics break the request it rode in on:
  * a missing binding or a throwing write is logged and swallowed. Losing a
- * datapoint is acceptable; losing a waitlist signup is not.
+ * datapoint is acceptable; failing the request it measured is not.
  */
 export function record(
   dataset: AnalyticsDataset | undefined,

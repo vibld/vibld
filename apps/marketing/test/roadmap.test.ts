@@ -30,10 +30,7 @@ import {
   metaFor,
   routeFor,
 } from '../app/site.ts';
-import {
-  isTurnstileVerified,
-  WAITLIST_TURNSTILE_ACTION,
-} from '../worker/waitlist.ts';
+import { isTurnstileVerified } from '../worker/turnstile.ts';
 import { approxCount } from '../app/counts.ts';
 
 /**
@@ -278,18 +275,18 @@ describe('what a failed vote says', () => {
 });
 
 describe('the Turnstile action', () => {
-  it('keeps a vote token and a waitlist token apart', () => {
-    // One site key serves both widgets, so the action is what stops a token
-    // solved for one being spent on the other.
+  it("keeps a vote token and another widget's token apart", () => {
+    // One site key serves every widget on the site, so the action is what
+    // stops a token solved for one being spent on another.
     const vote = {
       success: true,
       action: ROADMAP_TURNSTILE_ACTION,
       hostname: 'vibld.com',
     };
     assert.equal(isTurnstileVerified(vote, ROADMAP_TURNSTILE_ACTION), true);
-    assert.equal(isTurnstileVerified(vote), false);
-    const signup = { ...vote, action: WAITLIST_TURNSTILE_ACTION };
-    assert.equal(isTurnstileVerified(signup), true);
-    assert.equal(isTurnstileVerified(signup, ROADMAP_TURNSTILE_ACTION), false);
+    assert.equal(isTurnstileVerified(vote, 'another-widget'), false);
+    const other = { ...vote, action: 'another-widget' };
+    assert.equal(isTurnstileVerified(other, 'another-widget'), true);
+    assert.equal(isTurnstileVerified(other, ROADMAP_TURNSTILE_ACTION), false);
   });
 });

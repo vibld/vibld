@@ -43,7 +43,7 @@ import {
   toggleVote,
   todaysSalt,
 } from './roadmap-store.ts';
-import { isTurnstileVerified, turnstileVerifyRequest } from './waitlist.ts';
+import { isTurnstileVerified, turnstileVerifyRequest } from './turnstile.ts';
 
 export interface RoadmapEnv {
   /**
@@ -52,7 +52,7 @@ export interface RoadmapEnv {
    * answer 503 and the page shows its items without counts.
    */
   ROADMAP_DB?: RoadmapD1Database;
-  /** The waitlist's Turnstile secret, shared: one site key, one secret. */
+  /** The site's Turnstile secret (worker/turnstile.ts): one site key, one secret. */
   TURNSTILE_SECRET_KEY?: string;
 }
 

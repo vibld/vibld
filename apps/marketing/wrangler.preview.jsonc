@@ -33,7 +33,6 @@
   "workers_dev": true,
 
   "vars": {
-    "VIBLD_WAITLIST_SEGMENT_ID": "6a463d34-31bc-4f24-ba0b-f30bfb5c7660",
     // A preview is a byte-for-byte copy of the live site on a public
     // hostname. Indexed, it competes with vibld.com for a name that already
     // returns other things when searched, so a copy that can outrank the
@@ -47,9 +46,4 @@
   // separate preview database would show counts nobody real cast, which is
   // worse than none. Without the database there is nothing for a cron to
   // sweep either, so there is no "triggers" block.
-  //
-  // RESEND_API_KEY is deliberately not synced to this Worker. Without it
-  // /api/waitlist answers 503 rather than writing to the real waitlist
-  // segment, which is what a preview should do: a signup from a review pass
-  // is not a signup.
 }

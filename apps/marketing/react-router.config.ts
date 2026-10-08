@@ -8,9 +8,8 @@ import { STYLE_CARD_PATHS } from './app/style-cards';
  *
  * `ssr: false` means there is no server for the site itself: the build emits
  * plain files a static host (here, a Worker's `assets` binding) can serve.
- * What this site does need a server for -- the page-view counter, and the
- * waitlist submission it still accepts though no page renders the form since
- * the open beta -- is separate `/api/*` routes handled by the Worker in
+ * What this site does need a server for -- the page-view counter and the
+ * roadmap's votes -- is separate `/api/*` routes handled by the Worker in
  * `worker/`, not by this app.
  */
 export default {

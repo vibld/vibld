@@ -72,7 +72,7 @@ export const SITE = {
   /**
    * Cloudflare Turnstile's site key -- public by design, meant to sit in
    * every page's HTML (docs/decisions.md L29). The matching secret key
-   * verifies tokens server-side in worker/waitlist.ts and is never
+   * verifies tokens server-side in worker/turnstile.ts and is never
    * committed; it lives on the `marketing` GitHub environment.
    */
   turnstileSiteKey: '0x4AAAAAAEvZ-7lTZ_uSHPoH',

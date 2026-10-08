@@ -18,7 +18,7 @@ import worker from '../worker/index.ts';
  * `true` here, so every byte this site serves comes out of this handler.
  */
 
-const ENV = { RESEND_API_KEY: 're_test_key' };
+const ENV = {};
 
 function assertSecured(response: Response, what: string) {
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
@@ -75,18 +75,13 @@ describe('what vibld.com sends with every response', () => {
 
   it('secures an API answer', async () => {
     const response = await worker.fetch(
-      new Request('https://vibld.com/api/waitlist', {
+      new Request('https://vibld.com/api/roadmap/votes', {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          accept: 'application/json',
-        },
-        body: JSON.stringify({ email: 'not-an-email' }),
       }),
       ENV,
     );
-    assert.equal(response.status, 400);
-    assertSecured(response, 'a rejected signup');
+    assert.equal(response.status, 405);
+    assertSecured(response, 'a refused API call');
   });
 
   it('secures a preview’s noindex response too', async () => {

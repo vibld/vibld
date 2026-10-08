@@ -316,8 +316,7 @@ jobs:
 
       # L44's nightly provider-balance check. Optional, same rule as every
       # secret above: unset means the check still runs and logs, it just
-      # cannot send. A separate copy from apps/marketing's own
-      # RESEND_API_KEY -- Cloudflare Secrets are per-Worker, not shared.
+      # cannot send. Cloudflare Secrets are per-Worker, not shared.
       - name: Sync the Resend key to the Worker
         shell: bash
         working-directory: apps/web
