@@ -235,12 +235,20 @@ const AI_CRAWLERS = [
   'CCBot',
 ] as const;
 
+/**
+ * What the site allows its content to be used for, per Content Signals
+ * (https://contentsignals.org/). D179: every use, to be found and cited as
+ * widely as possible. app.vibld.com/robots.txt carries the same line.
+ */
+const CONTENT_SIGNAL = 'ai-train=yes, search=yes, ai-input=yes';
+
 function robots(): string {
   return `# https://vibld.com
 # Every crawler is welcome, including the ones that feed AI assistants and AI
 # search; there is nothing here that should not be indexed or read.
 User-agent: *
 ${AI_CRAWLERS.map((agent) => `User-agent: ${agent}`).join('\n')}
+Content-Signal: ${CONTENT_SIGNAL}
 Allow: /
 
 # The API is not a page.

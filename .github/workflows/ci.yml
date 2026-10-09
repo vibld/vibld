@@ -111,8 +111,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Pull the build image
-        run: docker pull node:24-bookworm-slim
+      # Docker Hub refuses unauthenticated pulls past a limit that runners
+      # share by address, which failed this job before any of it ran
+      # (D187). Each Docker Hub image this job uses is pulled from
+      # mirror.gcr.io and tagged with its Docker Hub name, so the build and
+      # `docker run` find it locally and never ask Docker Hub. Setting the
+      # daemon's `registry-mirrors` was tried first, and the pull still
+      # went to Docker Hub.
+      - name: Pull Docker Hub images through mirror.gcr.io
+        run: |
+          for image in node:24-bookworm-slim; do
+            docker pull --quiet "mirror.gcr.io/library/$image"
+            docker tag "mirror.gcr.io/library/$image" "docker.io/library/$image"
+          done
 
       - name: Write one case out and build it
         run: |
@@ -139,6 +150,21 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 24
+
+      # Docker Hub refuses unauthenticated pulls past a limit that runners
+      # share by address, which failed this job before any of it ran
+      # (D187). Each Docker Hub image the Dockerfile and the VPS compose
+      # file name is pulled from mirror.gcr.io and tagged with its Docker
+      # Hub name, so the build and compose find it locally and never ask
+      # Docker Hub. Setting the
+      # daemon's `registry-mirrors` was tried first, and the pull still
+      # went to Docker Hub.
+      - name: Pull Docker Hub images through mirror.gcr.io
+        run: |
+          for image in docker:28-cli node:24-bookworm-slim traefik:v3; do
+            docker pull --quiet "mirror.gcr.io/library/$image"
+            docker tag "mirror.gcr.io/library/$image" "docker.io/library/$image"
+          done
 
       - name: Start it
         env:

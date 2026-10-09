@@ -12,7 +12,12 @@
 # it is what removes the listing.
 #
 # The public product lives on the marketing site, which carries the sitemap.
+#
+# Content-Signal says what the content may be used for
+# (https://contentsignals.org/). The same line as vibld.com (D179); noindex
+# above still keeps these pages out of search.
 User-agent: *
+Content-Signal: ai-train=yes, search=yes, ai-input=yes
 Allow: /
 
 Sitemap: https://vibld.com/sitemap.xml

@@ -1228,6 +1228,23 @@ describe('what AI crawlers are told', () => {
     assert.doesNotMatch(body, /^Disallow: \/$/m);
   });
 
+  it('declares a Content Signal for every use, the same as the builder host', () => {
+    // D179. Inside the one group, so every crawler named there reads it.
+    const signal = (file: string) =>
+      readFileSync(file, 'utf8').match(/^Content-Signal: (.+)$/gm);
+    const site = signal(join(CLIENT, 'robots.txt'));
+    assert.deepEqual(site, [
+      'Content-Signal: ai-train=yes, search=yes, ai-input=yes',
+    ]);
+    assert.deepEqual(
+      signal(
+        join(import.meta.dirname, '..', '..', 'web', 'public', 'robots.txt'),
+      ),
+      site,
+      'app.vibld.com says something different from vibld.com',
+    );
+  });
+
   it('publishes llms-full.txt with every product page, doc and policy', () => {
     const body = readFileSync(join(CLIENT, 'llms-full.txt'), 'utf8');
     const paths = [

@@ -414,6 +414,17 @@ paying accounts until midnight UTC.
 - **D178. The paid default stays, and is compared again later (Chris,
   2026-10-09: "Sol, retest later").** GPT-6 Sol remains the paid default; the
   comparison with Opus 5.5 is rerun after the prompt, catalog and photo fixes.
+- **D179. Content Signals allow every use (Chris, 2026-10-09: "Allow all").**
+  robots.txt on vibld.com and app.vibld.com says
+  `Content-Signal: ai-train=yes, search=yes, ai-input=yes`
+  (https://contentsignals.org/). The value is `CONTENT_SIGNAL` in
+  `apps/marketing/scripts/postbuild.ts` and one line in
+  `apps/web/public/robots.txt`.
+- **D187. CI pulls Docker Hub images through a mirror (Chris, 2026-10-09:
+  "Add mirror").** The Docker and eval-build jobs pull each Docker Hub image
+  they use from mirror.gcr.io and tag it with its Docker Hub name, after
+  Docker Hub's unauthenticated pull limit failed both before they ran
+  (internal PR 399).
 
 ### Checkpoint history, 2026-10-03
 
