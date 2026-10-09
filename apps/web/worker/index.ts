@@ -54,6 +54,7 @@ import { handleMedia, handleMediaFile } from './media-handlers.ts';
 import { handleStyleGallery, readGalleryStyle } from './style-gallery.ts';
 import type { StyleGalleryEnv } from './style-gallery.ts';
 import { handleTemplateBrief } from './template-briefs.ts';
+import { readCatalogInspiration } from './catalog-inspiration.ts';
 import { handleChat } from './chat-handler.ts';
 import {
   DEFAULT_PUBLISH_HOSTNAME,
@@ -1286,6 +1287,27 @@ async function handlePlan(
     return refuse('request-invalid', chosenMockup.error, chosenMockup.status);
   }
 
+  // The template catalog's closest designs as art directions to choose from
+  // (2026-10-09 design-quality review), on a first build that has no
+  // direction of its own: no style, gallery style, standing preferences,
+  // chosen mockup or reference page.
+  const inspiration =
+    !parsed.value.baseRevision &&
+    !style.value &&
+    !galleryStyle.value &&
+    Object.keys(styleDna.value).length === 0 &&
+    !chosenMockup.value &&
+    !referenceContext
+      ? await readCatalogInspiration(
+          env,
+          new URL(request.url).origin,
+          parsed.value.prompt,
+        ).catch((error: unknown) => {
+          console.error('could not read catalog inspiration', error);
+          return null;
+        })
+      : null;
+
   const chosenModel = parseModel(body, configuredProviders(env));
   if (!chosenModel.ok) {
     return refuse('request-invalid', chosenModel.error, chosenModel.status);
@@ -1655,6 +1677,7 @@ async function handlePlan(
         ...(gallery?.ok
           ? { styleTokens: gallery.tokens, galleryGuidance: gallery.guidance }
           : {}),
+        ...(inspiration ? { inspiration } : {}),
         ...(knowledge.value ? { knowledge: knowledge.value } : {}),
         ...(chosenMockup.value ? { chosenMockup: chosenMockup.value } : {}),
         ...(referenceContext ? { referenceContext } : {}),

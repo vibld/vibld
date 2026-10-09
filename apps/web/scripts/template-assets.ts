@@ -5,7 +5,10 @@
  * gallery entry gets one too, since the Templates option lists them beside
  * the designs (D162); no style shares an id with a design.
  *
- *   _templates/briefs/<id>.json   { "brief": "..." }
+ *   _templates/briefs/<id>.json       { "brief": "..." }
+ *   _templates/inspiration/<id>.json  a design's `CatalogInspiration`, what
+ *                                     a typed request is offered (internal issue 4 of the
+ *                                     2026-10-09 design-quality review)
  *
  * The Worker answers every request for `/_templates/*` itself and refuses
  * it, so a brief reaches the builder only through `/api/templates/brief`.
@@ -16,7 +19,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
-import { designBrief } from '@vibld/ai/design-templates';
+import { inspirationOf } from '@vibld/ai/catalog-inspiration';
+import { designBrief, findDesignTemplate } from '@vibld/ai/design-templates';
 import { parseStyleGallery, styleGalleryBrief } from '@vibld/ai/style-gallery';
 
 import { STYLE_GALLERY_DATA } from './style-gallery-assets.ts';
@@ -30,12 +34,21 @@ export function writeTemplateAssets(
 ): number {
   const root = join(outDir, TEMPLATES_DIR, 'briefs');
   mkdirSync(root, { recursive: true });
+  const inspirationRoot = join(outDir, TEMPLATES_DIR, 'inspiration');
+  mkdirSync(inspirationRoot, { recursive: true });
   let count = 0;
   for (const template of DESIGN_TEMPLATE_INDEX) {
     const brief = designBrief(template.id);
     if (brief === undefined) continue;
     writeFileSync(join(root, `${template.id}.json`), JSON.stringify({ brief }));
     count += 1;
+    const design = findDesignTemplate(template.id);
+    if (design && design.format === 'design' && !design.mergedInto) {
+      writeFileSync(
+        join(inspirationRoot, `${template.id}.json`),
+        JSON.stringify(inspirationOf(design)),
+      );
+    }
   }
   // A copy built without the gallery's data lists no styles.
   if (existsSync(styleData)) {

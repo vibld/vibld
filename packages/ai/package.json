@@ -19,6 +19,7 @@
     "./model-families": "./src/model-families.ts",
     "./select-client": "./src/select-client.ts",
     "./stack": "./src/stack.ts",
+    "./catalog-inspiration": "./src/catalog-inspiration.ts",
     "./design-templates": "./src/design-templates.ts",
     "./design-template-index": "./src/design-template-index.ts",
     "./design-categories": "./src/design-categories.ts",

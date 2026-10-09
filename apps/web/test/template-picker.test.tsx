@@ -287,6 +287,27 @@ describe('the template picker', () => {
 });
 
 describe('the template briefs the build writes', () => {
+  it('writes each whole design its directions, for a typed request', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'templates-'));
+    try {
+      writeTemplateAssets(dir);
+      const files = readdirSync(join(dir, '_templates', 'inspiration'));
+      const designs = listed.filter((t) => t.format === 'design');
+      assert.equal(files.length, designs.length);
+      const fernhollow = JSON.parse(
+        readFileSync(
+          join(dir, '_templates', 'inspiration', 'fernhollow.json'),
+          'utf8',
+        ),
+      );
+      assert.equal(fernhollow.id, 'fernhollow');
+      assert.equal(fernhollow.name, 'Fernhollow');
+      assert.ok(fernhollow.palette.length > 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('writes one file per template and per style, each its brief', () => {
     const dir = mkdtempSync(join(tmpdir(), 'templates-'));
     try {

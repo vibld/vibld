@@ -810,6 +810,12 @@ export type BoundedBuilderOptions = Pick<
    */
   galleryGuidance?: string;
   /**
+   * Catalog designs matched to the request, as `catalogInspirationGuidance`
+   * writes them: art directions to choose from on a first build with no
+   * style chosen.
+   */
+  inspiration?: string;
+  /**
    * Told about an error that is not this package's own, before it is
    * replaced by a generic sentence. The Worker logs it; nothing else sees
    * it, because an upstream message can quote the request back.
@@ -859,6 +865,7 @@ export class BoundedBuilder {
       o.chosenMockup,
       o.media,
       o.galleryGuidance,
+      o.inspiration,
     );
   }
 

@@ -742,6 +742,10 @@ export function buildUserPrompt(
   // system, so it stands in for the color, standing preference and preset
   // guidance below, and comes last.
   gallery?: string | null,
+  // Catalog designs matched to this request (`catalogInspirationGuidance`):
+  // directions to choose from, which carry their own palette and type, so
+  // they stand in for the product-type default below.
+  inspiration?: string | null,
 ): string {
   const base = request.base;
   const parts = [request.prompt];
@@ -895,6 +899,11 @@ Preserve anything the request does not ask you to change.`,
       parts.push(referencePaletteGuidance(palette));
       const feel = productFeelGuidance(request.prompt);
       if (feel) parts.push(feel);
+    } else if (inspiration?.trim()) {
+      // A design from the catalog is a considered art direction for this
+      // subject; a keyword's product-type palette is a guess. One colour
+      // system, so the guess gives way.
+      parts.push(inspiration.trim());
     } else {
       const fromProductType = paletteGuidance(request.prompt);
       if (fromProductType) parts.push(fromProductType);

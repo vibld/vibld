@@ -107,6 +107,11 @@ export interface WorkflowParams {
   styleTokens?: string;
   /** What the model is told about the gallery style (D146). */
   galleryGuidance?: string;
+  /**
+   * The template catalog's closest designs as art directions to choose from
+   * (`readCatalogInspiration`), on a first build with no direction chosen.
+   */
+  inspiration?: string;
   knowledge?: string;
   /**
    * Already-fetched, already-truncated text from a reference URL (L52-style
@@ -1250,6 +1255,7 @@ export async function buildInSteps(
     ...(params.galleryGuidance
       ? { galleryGuidance: params.galleryGuidance }
       : {}),
+    ...(params.inspiration ? { inspiration: params.inspiration } : {}),
     ...(params.styleDna && Object.keys(params.styleDna).length > 0
       ? { styleDna: params.styleDna }
       : {}),

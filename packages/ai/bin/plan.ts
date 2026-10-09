@@ -29,6 +29,13 @@ import { checkDesign } from '../src/design-checks.ts';
 import { keepingRecordOf, repairPromptFor } from '../src/repair.ts';
 import { buildEnvironment, parsePlanArgs } from '../src/cli-args.ts';
 import { isStylePresetId } from '../src/style-presets.ts';
+import {
+  catalogInspirationGuidance,
+  inspirationOf,
+  matchCatalogDesigns,
+} from '../src/catalog-inspiration.ts';
+import { DESIGN_TEMPLATE_INDEX } from '../src/design-template-index.ts';
+import { findDesignTemplate } from '../src/design-templates.ts';
 import { diffProjects, readProject } from '../src/read-project.ts';
 import type { PlanUsage } from '../src/client.ts';
 import type { ProjectFile, RunStepTrace } from '@vibld/core';
@@ -111,9 +118,26 @@ const model = resolveModel(process.env);
 const startedAt = Date.now();
 let steps = 0;
 const client = createPlanClient(process.env, model);
+// The catalog's closest designs, as the Worker offers them: on a first
+// build with no style chosen.
+const inspiration =
+  style === undefined && base === undefined
+    ? catalogInspirationGuidance(
+        matchCatalogDesigns(prompt, DESIGN_TEMPLATE_INDEX).flatMap((id) => {
+          const template = findDesignTemplate(id);
+          return template ? [inspirationOf(template)] : [];
+        }),
+      )
+    : null;
+if (inspiration) {
+  console.log(
+    `catalog directions: ${matchCatalogDesigns(prompt, DESIGN_TEMPLATE_INDEX).join(', ')}`,
+  );
+}
 const provider = new BoundedPlanProvider(client, {
   model,
   ...(style !== undefined && isStylePresetId(style) ? { style } : {}),
+  ...(inspiration ? { inspiration } : {}),
   onUsage: (reported) => {
     usage = reported;
   },
