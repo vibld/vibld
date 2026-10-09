@@ -47,6 +47,13 @@ export const PASSED = {
     'VIBLD_LOCAL_BASE_URL',
     'VIBLD_LOCAL_MODEL',
     'VIBLD_LOCAL_API_KEY',
+    // Your own GitHub App, for pushing projects to GitHub (README.md,
+    // "Pushing to GitHub").
+    'VIBLD_GITHUB_APP_ID',
+    'VIBLD_GITHUB_PRIVATE_KEY',
+    'VIBLD_GITHUB_CLIENT_ID',
+    'VIBLD_GITHUB_CLIENT_SECRET',
+    'VIBLD_GITHUB_WEBHOOK_SECRET',
   ],
   preview: [],
   publish: [],

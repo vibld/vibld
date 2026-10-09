@@ -1956,6 +1956,14 @@ repository.
 
 ### Setup
 
+These are the steps for vibld's own App and app.vibld.com. A self-hosted
+copy makes an App of its own with its own address in place of
+app.vibld.com: the repository README's "Pushing to GitHub" has those steps.
+The builder's "Install" button goes to the installation page of whichever
+App the five values belong to, looked up from GitHub with the App's JWT
+(`githubAppSlug` in `worker/github-app.ts`), so nothing names the App's
+slug.
+
 1. Create the App at https://github.com/settings/apps/new. Repository
    permissions: **Contents: Read and write** and **Pull requests: Read and
    write**, and, only if "Create a new repository" should work,

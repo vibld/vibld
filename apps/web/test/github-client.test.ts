@@ -893,6 +893,7 @@ describe('sending somebody to install the app', () => {
         json({
           url: 'https://github.com/login/oauth/authorize?x=1',
           state: 'the-state',
+          installUrl: 'https://github.com/apps/my-copy/installations/new',
         })) as unknown as typeof fetch,
       TOKEN,
       store,
@@ -902,7 +903,8 @@ describe('sending somebody to install the app', () => {
       const url = new URL(result.url);
       assert.equal(
         url.origin + url.pathname,
-        'https://github.com/apps/vibld/installations/new',
+        'https://github.com/apps/my-copy/installations/new',
+        'not the App this deployment named',
       );
       assert.equal(url.searchParams.get('state'), 'the-state');
     }
@@ -921,6 +923,7 @@ describe('sending somebody to install the app', () => {
         json({
           url: 'https://github.com/x',
           state: 'brand-new',
+          installUrl: 'https://github.com/apps/vibld/installations/new',
         })) as unknown as typeof fetch,
       TOKEN,
       store,
@@ -930,6 +933,23 @@ describe('sending somebody to install the app', () => {
       assert.equal(new URL(result.url).searchParams.get('state'), 'brand-new');
     }
     assert.equal(takeRememberedState(store), 'brand-new');
+  });
+
+  it('refuses rather than guessing which App to install', async () => {
+    // A self-hosted copy has its own App. Falling back to vibld's would
+    // install that one, and its callback lands on app.vibld.com.
+    const result = await beginInstall(
+      (async () =>
+        json({
+          url: 'https://github.com/x',
+          state: 'a-state',
+          installUrl: null,
+        })) as unknown as typeof fetch,
+      TOKEN,
+      storage(),
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /GitHub App/);
   });
 
   it('reports a deployment that cannot start one', async () => {

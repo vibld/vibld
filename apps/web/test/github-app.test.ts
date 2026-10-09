@@ -5,6 +5,8 @@ import { describe, it } from 'node:test';
 import {
   githubAppCredentials,
   mintInstallationToken,
+  githubAppSlug,
+  installationUrl,
   signAppJwt,
 } from '../worker/github-app.ts';
 
@@ -76,6 +78,17 @@ describe('reading the App credentials', () => {
     });
     assert.ok(found);
     assert.equal(found.appId, '123');
+  });
+});
+
+describe('reading a key written on one line', () => {
+  it('signs with a key whose line breaks are written as \\n', async () => {
+    const credentials = githubAppCredentials({
+      VIBLD_GITHUB_APP_ID: '123',
+      VIBLD_GITHUB_PRIVATE_KEY: PKCS1_PEM.trim().split('\n').join('\\n'),
+    });
+    assert.ok(credentials);
+    assert.ok(await signAppJwt(credentials!));
   });
 });
 
@@ -252,5 +265,68 @@ describe('minting an installation token', () => {
     );
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /could not be reached/);
+  });
+});
+
+describe('naming the App to install', () => {
+  function answering(body: unknown, status = 200, seen: string[] = []) {
+    return (async (url: string, init?: RequestInit) => {
+      seen.push(
+        `${url} ${new Headers(init?.headers).get('authorization')?.slice(0, 7)}`,
+      );
+      return new Response(JSON.stringify(body), { status });
+    }) as unknown as typeof fetch;
+  }
+
+  it('asks GitHub, as the App, and builds its installation page', async () => {
+    // A self-hosted copy has its own App: the page has to be that App's,
+    // or the installation comes back to app.vibld.com.
+    const seen: string[] = [];
+    const slug = await githubAppSlug(
+      { appId: '9001', privateKey: PKCS8_PEM },
+      answering({ slug: 'acme-builder' }, 200, seen),
+    );
+    assert.equal(slug, 'acme-builder');
+    assert.deepEqual(seen, ['https://api.github.com/app Bearer ']);
+    assert.equal(
+      installationUrl('acme-builder'),
+      'https://github.com/apps/acme-builder/installations/new',
+    );
+  });
+
+  it('asks once per App', async () => {
+    const seen: string[] = [];
+    const credentials = { appId: '9002', privateKey: PKCS8_PEM };
+    await githubAppSlug(credentials, answering({ slug: 'once' }, 200, seen));
+    const again = await githubAppSlug(
+      credentials,
+      answering({ slug: 'other' }, 200, seen),
+    );
+    assert.equal(again, 'once');
+    assert.equal(seen.length, 1);
+  });
+
+  it('is null when GitHub refuses or answers something unusable', async () => {
+    assert.equal(
+      await githubAppSlug(
+        { appId: '9003', privateKey: PKCS8_PEM },
+        answering({ message: 'Bad credentials' }, 401),
+      ),
+      null,
+    );
+    assert.equal(
+      await githubAppSlug(
+        { appId: '9004', privateKey: PKCS8_PEM },
+        answering({ slug: '../evil' }),
+      ),
+      null,
+    );
+    assert.equal(
+      await githubAppSlug(
+        { appId: '9005', privateKey: 'not a key' },
+        answering({ slug: 'never-asked' }),
+      ),
+      null,
+    );
   });
 });

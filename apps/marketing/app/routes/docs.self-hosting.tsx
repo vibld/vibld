@@ -172,8 +172,16 @@ export default function SelfHosting() {
           every month, with no trial and no card asked for.
         </li>
         <li>
-          <strong>A GitHub App</strong>, unless you want the push-to-repository
-          feature. Without it, those endpoints answer “not configured”.
+          <strong>A GitHub App</strong> of your own, unless you want each
+          project in a GitHub repository. It takes five values and works on
+          Cloudflare, under Docker and on Render alike:{' '}
+          <a
+            href={`${SITE.repoUrl}#pushing-to-github`}
+            rel="noopener noreferrer"
+          >
+            Pushing to GitHub
+          </a>{' '}
+          has the steps. Without it, those endpoints answer “not configured”.
         </li>
         <li>
           <strong>Resend</strong>, only for the nightly email that warns when

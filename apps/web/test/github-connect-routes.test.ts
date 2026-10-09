@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
 import { describe, it } from 'node:test';
 
 import {
@@ -112,6 +113,43 @@ describe('starting a connection', () => {
       url.searchParams.get('redirect_uri'),
       'https://app.vibld.com/api/github/callback',
     );
+  });
+
+  it("names this deployment's own App to install", async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    const { privateKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    const response = await handleGitHubConnect(
+      new Request('https://copy.example.com/api/github/connect'),
+      {
+        ...env(db),
+        VIBLD_GITHUB_APP_ID: '777',
+        VIBLD_GITHUB_PRIVATE_KEY: privateKey,
+      },
+      PRINCIPAL,
+      NOW,
+      (async () => json({ slug: 'acme-copy' })) as unknown as typeof fetch,
+    );
+    const body = (await response.json()) as { installUrl: string | null };
+    assert.equal(
+      body.installUrl,
+      'https://github.com/apps/acme-copy/installations/new',
+    );
+  });
+
+  it('names no App when only the OAuth half is set', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    const response = await handleGitHubConnect(
+      new Request('https://app.vibld.com/api/github/connect'),
+      env(db),
+      PRINCIPAL,
+      NOW,
+    );
+    const body = (await response.json()) as { installUrl: string | null };
+    assert.equal(body.installUrl, null);
   });
 
   it('says so when this deployment cannot connect anything', async () => {

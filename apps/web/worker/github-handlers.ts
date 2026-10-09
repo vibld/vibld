@@ -19,6 +19,8 @@ import { mediaPathsToKeep, planMediaExport } from './media-export.ts';
 import { isProjectId, parsePreviewRequest } from './request-guard.ts';
 import {
   githubAppCredentials,
+  githubAppSlug,
+  installationUrl,
   mintInstallationToken,
   type GitHubAppEnv,
   type GitHubFailure,
@@ -806,6 +808,7 @@ export async function handleGitHubConnect(
   env: GitHubHandlerEnv,
   principal: Principal,
   now: Date = new Date(),
+  doFetch: typeof fetch = fetch,
 ): Promise<Response> {
   if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
   if (!githubConnectConfigured(env)) {
@@ -820,9 +823,15 @@ export async function handleGitHubConnect(
   // keeps it and compares it on the way back, which is what stops somebody
   // pairing their own `code` with a link they send to a signed-in user: a
   // state the browser did not issue does not match the one it stored.
+  // This deployment's own App, not vibld's: on a self-hosted copy the
+  // installation has to come back to that copy. Null when the App
+  // half is unset or GitHub cannot name it, and the builder says so.
+  const app = githubAppCredentials(env);
+  const slug = app ? await githubAppSlug(app, doFetch, now.getTime()) : null;
   return json({
     url: authorizeUrl(credentials, state, callbackUrl(request)),
     state,
+    installUrl: slug ? installationUrl(slug) : null,
   });
 }
 

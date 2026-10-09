@@ -44,7 +44,9 @@ export function githubAppCredentials(
   env: GitHubAppEnv,
 ): GitHubAppCredentials | null {
   const appId = env.VIBLD_GITHUB_APP_ID?.trim();
-  const privateKey = env.VIBLD_GITHUB_PRIVATE_KEY?.trim();
+  // A key written on one line with `\n` for its line breaks (as `.env`
+  // asks under Docker) reads the same as the file GitHub downloaded.
+  const privateKey = env.VIBLD_GITHUB_PRIVATE_KEY?.replace(/\\n/g, '\n').trim();
   if (!appId || !privateKey) return null;
   if (!/^\d+$/.test(appId)) return null;
   return { appId, privateKey };
@@ -457,4 +459,63 @@ export async function mintInstallationToken(
     expiresAt:
       typeof record.expires_at === 'string' ? record.expires_at : 'unknown',
   };
+}
+
+/** Each App's slug by App id, for the life of this isolate. */
+const appSlugs = new Map<string, string>();
+
+/**
+ * The slug of the App this deployment is configured with, from GitHub.
+ *
+ * The installation page is `github.com/apps/<slug>/installations/new`, and
+ * the slug is the one thing about the App the five settings do not carry.
+ * Asked for rather than configured: a self-hosted copy has its own App, and
+ * a sixth setting nobody remembers to change would send its users to
+ * install vibld's App instead, whose callback lands on app.vibld.com. The
+ * App id and key are already here, and `GET /app` with the App's JWT names
+ * the App they belong to.
+ *
+ * Null when the key will not sign or GitHub does not answer. Kept per App id
+ * once known, since a slug does not change under a running Worker.
+ */
+export async function githubAppSlug(
+  credentials: GitHubAppCredentials,
+  doFetch: typeof fetch = fetch,
+  now: number = Date.now(),
+): Promise<string | null> {
+  const known = appSlugs.get(credentials.appId);
+  if (known) return known;
+  const jwt = await signAppJwt(credentials, now);
+  if (!jwt) return null;
+  let response: Response;
+  try {
+    response = await doFetch(`${GITHUB_API}/app`, {
+      headers: {
+        authorization: `Bearer ${jwt}`,
+        accept: 'application/vnd.github+json',
+        'x-github-api-version': '2022-11-28',
+        'user-agent': GITHUB_USER_AGENT,
+      },
+    });
+  } catch {
+    return null;
+  }
+  if (!response.ok) return null;
+  let slug: unknown;
+  try {
+    slug = ((await response.json()) as { slug?: unknown } | null)?.slug;
+  } catch {
+    return null;
+  }
+  // It goes into a URL path, so only the characters GitHub allows in one.
+  if (typeof slug !== 'string' || !/^[a-z0-9][a-z0-9-]*$/i.test(slug)) {
+    return null;
+  }
+  appSlugs.set(credentials.appId, slug);
+  return slug;
+}
+
+/** Where somebody installs that App. */
+export function installationUrl(slug: string): string {
+  return `https://github.com/apps/${encodeURIComponent(slug)}/installations/new`;
 }

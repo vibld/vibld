@@ -416,7 +416,8 @@ async function issueState(
   storage: Storage | null,
   intent: ConnectIntent,
 ): Promise<
-  { ok: true; url: string; state: string } | { ok: false; error: string }
+  | { ok: true; url: string; state: string; installUrl: string | null }
+  | { ok: false; error: string }
 > {
   let response: Response;
   try {
@@ -428,13 +429,22 @@ async function issueState(
   }
   if (!response.ok) return { ok: false, error: await problemFrom(response) };
 
-  const body = (await response.json()) as { url?: unknown; state?: unknown };
+  const body = (await response.json()) as {
+    url?: unknown;
+    state?: unknown;
+    installUrl?: unknown;
+  };
   if (typeof body.url !== 'string' || typeof body.state !== 'string') {
     return { ok: false, error: 'vibld could not start that connection.' };
   }
   rememberState(body.state, storage);
   rememberIntent(intent, storage);
-  return { ok: true, url: body.url, state: body.state };
+  return {
+    ok: true,
+    url: body.url,
+    state: body.state,
+    installUrl: typeof body.installUrl === 'string' ? body.installUrl : null,
+  };
 }
 
 /**
@@ -451,14 +461,6 @@ export async function beginConnect(
   const started = await issueState(fetchImpl, getToken, storage, intent);
   return started.ok ? { ok: true, url: started.url } : started;
 }
-
-/**
- * The App's installation page, which is where repository access is granted.
- *
- * The slug lives here rather than being configured, because it is the name
- * in a public URL rather than a deployment secret.
- */
-const INSTALL_URL = 'https://github.com/apps/vibld/installations/new';
 
 /**
  * Send somebody to install the App, with a `state` that comes back.
@@ -490,7 +492,16 @@ export async function beginInstall(
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   const started = await issueState(fetchImpl, getToken, storage, intent);
   if (!started.ok) return started;
-  const url = new URL(INSTALL_URL);
+  // The deployment names its own App's page: a self-hosted copy's
+  // installation has to come back to that copy, not to app.vibld.com.
+  if (!started.installUrl) {
+    return {
+      ok: false,
+      error:
+        "vibld could not find this deployment's GitHub App. Check its App ID and private key.",
+    };
+  }
+  const url = new URL(started.installUrl);
   url.searchParams.set('state', started.state);
   return { ok: true, url: url.toString() };
 }

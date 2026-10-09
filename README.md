@@ -323,7 +323,7 @@ Self-hosting is possible, and still needs validation outside the project: a work
 - **A way to sign in**, one of three: an owner password (`VIBLD_AUTH=owner`, one person), Cloudflare Access in front of the builder (`VIBLD_AUTH=access`, free for up to 50 users), or Clerk (for sign-ups from the public, as app.vibld.com uses). There is no mode without sign-in, because the endpoints spend money.
 - **An open door.** A deployment is invite-only until `VIBLD_ACCESS_MODE` is `open`: before that, only the verified emails in `VIBLD_PLATFORM_ADMINS` and the people they invite get in, so list your own. The owner of an owner-password copy is always let in. Under Clerk, its session token has to carry `email` and `email_verified` for that match to work.
 - **Your own names.** The Worker names, database, bucket, Workflow, routes and Clerk domain in the `wrangler.jsonc` files are vibld's. `node scripts/self-host.mjs <settings.json>` writes a `wrangler.self-host.jsonc` beside each with all of them derived from a prefix of yours, and refuses to write one that still names vibld's ([Deploying](https://vibld.com/docs/deploying)).
-- **Stripe** only if you intend to charge anybody, **a GitHub App** only if you want push-to-repository, and **Resend** only for email. Each optional piece left unset reports itself unavailable rather than running without its check.
+- **Stripe** only if you intend to charge anybody, **a GitHub App** of your own only if you want each project in a GitHub repository ([Pushing to GitHub](#pushing-to-github)), and **Resend** only for email. Each optional piece left unset reports itself unavailable rather than running without its check.
 
 ### Run it with Docker
 
@@ -341,7 +341,8 @@ Then open http://localhost:8787 and sign in with that password. Previews open at
 - **Host networking.** The vibld container uses the host's network, so the sandboxes it starts can reach it and it can reach them. On Docker Desktop (macOS, Windows), turn on host networking first: Settings, Resources, Network, "Enable host networking".
 - **Sign-in** is the owner's password (`VIBLD_AUTH=owner`); Clerk and Cloudflare Access are services outside the box.
 - **Keys** can be set in `.env` or later on the admin page under Provider keys. A [local model](#local-models) is set in `.env`.
-- **Not under Docker:** the nightly jobs (scheduled cleanups and the billing pass), which `wrangler dev` does not run on a schedule; and Stripe, GitHub push and email, whose keys the Docker setup does not pass on.
+- **GitHub** works with [a GitHub App of your own](#pushing-to-github), its five values set in `.env`.
+- **Not under Docker:** the nightly jobs (scheduled cleanups and the billing pass), which `wrangler dev` does not run on a schedule; and Stripe and email, whose keys the Docker setup does not pass on.
 
 ### Local models
 
@@ -384,6 +385,32 @@ Then open `https://<builder domain>` and sign in with the password you set. The 
 - **Only 22, 80 and 443 are open.** The Workers listen on 127.0.0.1 behind the proxy, and [`firewall.sh`](infrastructure/vps/firewall.sh) keeps the internet out of the preview containers and keeps them away from the cloud's metadata service, which holds the user data and the keys in it.
 - **Updating:** `cd /opt/vibld && git pull && docker compose -f docker-compose.yml -f infrastructure/vps/compose.yml up --build --detach`.
 - **Checked so far:** CI starts it behind the proxy with made-up domains, signs in through the proxy and checks the Workers' ports are closed. Nobody has run `cloud-init.yaml` on a real server yet.
+
+### Pushing to GitHub
+
+A copy creates and pushes to a GitHub repository for each project through a GitHub App of its own, the way app.vibld.com does through vibld's: each checkpoint becomes a branch `vibld/<revision>` and a pull request. It works the same on Cloudflare, under Docker, on Render and on a server. `<address>` below is where your copy's builder is, such as `http://localhost:8787` under Docker.
+
+1. **Create the App** at https://github.com/settings/apps/new:
+   - **Homepage URL:** `<address>`.
+   - **Callback URL:** `<address>/api/github/callback`, and tick **Request user authorization (OAuth) during installation**.
+   - **Webhook:** **Active**, **Webhook URL** `<address>/api/github/webhook`, **Secret** a long random value. Untick **Active** when GitHub cannot reach your copy, as under Docker on your own machine; a merged pull request is then not reported back to the builder.
+   - **Repository permissions:** **Contents** and **Pull requests**, both **Read and write**. Add **Administration: Read and write** for "Create a new repository"; without it, only existing repositories can be picked.
+   - **Subscribe to events:** **Pull request**.
+   - **Where can this GitHub App be installed:** **Only on this account**, or **Any account** when other people sign in to your copy.
+2. **On the App's page**, copy the **App ID** and **Client ID**, then **Generate a new client secret** and **Generate a private key** (a `.pem` file that downloads once).
+3. **Give your copy the five values:**
+
+| Setting                       | Value                                              |
+| ----------------------------- | -------------------------------------------------- |
+| `VIBLD_GITHUB_APP_ID`         | App ID                                             |
+| `VIBLD_GITHUB_PRIVATE_KEY`    | The whole `.pem`, `BEGIN` and `END` lines included |
+| `VIBLD_GITHUB_CLIENT_ID`      | Client ID                                          |
+| `VIBLD_GITHUB_CLIENT_SECRET`  | The client secret                                  |
+| `VIBLD_GITHUB_WEBHOOK_SECRET` | The webhook secret, if the webhook is on           |
+
+On Cloudflare, each is a Worker secret: `npx wrangler secret put <setting> -c wrangler.self-host.jsonc` in `apps/web`. Under Docker or on a server, they go in `.env`, the key on one line in double quotes with `\n` for each line break (`awk 'NF {printf "%s\\n", $0}' key.pem` prints it that way). On Render, they are on the service's **Environment** page.
+
+Then, in the builder, open **Ship**; under **Push to GitHub**, pick "Create a new repository" or "Use an existing repository". When the App is not installed where the repository is, the builder offers your App's own installation page, which it looks up from the App ID and key.
 
 Read next: [what self-hosting involves](https://vibld.com/docs/self-hosting), [every setting and secret](https://vibld.com/docs/configuration), [deploying your own copy](https://vibld.com/docs/deploying) and [hosted or self-hosted](https://vibld.com/docs/hosted-vs-self-hosted). The exact commands are in [`apps/web/README.md`](apps/web/README.md), [`apps/preview/README.md`](apps/preview/README.md) and [`apps/publish/README.md`](apps/publish/README.md), beside the code they deploy. The workflows that deploy vibld's own hosted service run only in the maintainers' working repository, since a copy has none of their secrets.
 

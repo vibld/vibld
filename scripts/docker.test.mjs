@@ -158,6 +158,29 @@ describe('starting vibld in its container', () => {
     assert.deepEqual(Object.keys(PASSED).sort(), [...APPS].sort());
   });
 
+  it('hands the builder a GitHub App key on one line', () => {
+    // A .pem is several lines. `.dev.vars` is one setting a line, and
+    // wrangler turns \n back into a line break inside double quotes.
+    const web = devVars(
+      'web',
+      {
+        VIBLD_GITHUB_APP_ID: '123',
+        VIBLD_GITHUB_PRIVATE_KEY:
+          '-----BEGIN RSA PRIVATE KEY-----\nAAAA\nBBBB\n-----END RSA PRIVATE KEY-----\n',
+        VIBLD_GITHUB_CLIENT_ID: 'Iv1.x',
+        VIBLD_GITHUB_CLIENT_SECRET: 'c',
+      },
+      {},
+    );
+    assert.match(web, /^VIBLD_GITHUB_APP_ID="123"$/m);
+    assert.match(
+      web,
+      /^VIBLD_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\\nAAAA\\nBBBB\\n-----END RSA PRIVATE KEY-----\\n"$/m,
+    );
+    assert.match(web, /^VIBLD_GITHUB_CLIENT_ID="Iv1.x"$/m);
+    assert.match(web, /^VIBLD_GITHUB_CLIENT_SECRET="c"$/m);
+  });
+
   it('refuses to start without a password, and says when there is no key', () => {
     assert.equal(settingsProblems({}).length, 2);
     assert.match(settingsProblems({})[0], /VIBLD_OWNER_PASSWORD/);

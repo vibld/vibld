@@ -100,7 +100,9 @@ export default function Configuration() {
         webhook secret, pushing still works but <code>/api/github/webhook</code>{' '}
         answers 503, so a merged pull request goes on being shown as open. The
         private key is a PEM file that downloads once; it belongs in a secret
-        store and nowhere else.
+        store and nowhere else. They come from a GitHub App of your own, and the
+        builder looks up that App’s installation page from the App ID and key;
+        the repository’s README, under “Pushing to GitHub”, has the steps.
       </p>
 
       <h2>Sign-in</h2>
