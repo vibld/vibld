@@ -45,6 +45,18 @@ export interface PlanOutput {
    * way to enforce a schema.
    */
   instruction: string;
+  /**
+   * False where Anthropic cannot constrain the reply to `schema`.
+   *
+   * Anthropic compiles a strict schema into a grammar and refuses one past
+   * its size limit with a 400, "The compiled grammar is too large". The two
+   * shapes that carry a design spec are past it: try-generation run
+   * 37950953797 failed its outline in half a second, so every Claude build
+   * failed at its first step. For these the client asks for JSON in the
+   * system prompt with `instruction` instead, as DeepSeek's JSON mode does,
+   * and the caller's read schema checks the reply as it always did.
+   */
+  strict?: boolean;
 }
 
 /**
@@ -239,6 +251,7 @@ export const PLAN_OUTPUT: PlanOutput = {
   name: 'generation_plan',
   schema: GenerationPlanSchema,
   instruction: PLAN_JSON_INSTRUCTION,
+  strict: false,
 };
 
 /**
@@ -249,6 +262,7 @@ export const OUTLINE_OUTPUT: PlanOutput = {
   name: 'build_outline',
   schema: BuildOutlineSchema,
   instruction: OUTLINE_JSON_INSTRUCTION,
+  strict: false,
 };
 
 /**

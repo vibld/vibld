@@ -26,12 +26,54 @@ export function readStructuredOutput(
   try {
     return JSON.parse(text);
   } catch {
+    // A reply asked for JSON in the prompt rather than held to a schema
+    // (`PlanOutput.strict`) can arrive in a code fence. The object inside is
+    // still the object; truncated JSON never closes its first brace, so this
+    // cannot turn a cut-off reply into a plan.
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start !== -1 && end > start && (start > 0 || end < text.length - 1)) {
+      try {
+        return JSON.parse(text.slice(start, end + 1));
+      } catch {
+        // Fall through.
+      }
+    }
     // Unparseable JSON with a max_tokens stop is truncation, which the caller
     // names precisely. Unparseable JSON without one is a shape failure, which
     // it also names -- both from a null plan.
     void stopReason;
     return null;
   }
+}
+
+/**
+ * Why a reply with text in it was not read as JSON: the parser's own error
+ * and the text around where it stopped, so one failed run says what to fix.
+ */
+export function unparsedReason(
+  text: string,
+  stopReason: string | null,
+): string {
+  let error = 'unknown';
+  let at = -1;
+  try {
+    JSON.parse(text);
+  } catch (caught) {
+    error = caught instanceof Error ? caught.message : String(caught);
+    const match = /position (\d+)/.exec(error);
+    if (match) at = Number(match[1]);
+  }
+  const near =
+    at >= 0
+      ? `, near ${JSON.stringify(text.slice(Math.max(0, at - 80), at + 80))}`
+      : '';
+  return (
+    `the reply was not a JSON object (${text.length} characters, ` +
+    `stop reason ${stopReason ?? 'none'}, starting ` +
+    `${JSON.stringify(text.trim().slice(0, 60))}, ending ` +
+    `${JSON.stringify(text.trim().slice(-60))}: ${error}${near})`
+  );
 }
 
 /**
@@ -151,10 +193,18 @@ export function createAnthropicPlanClient(
         : request.maxTokens;
 
       // The schema travels in `output_config` rather than in the prompt, so
-      // what goes as prompt is exactly these (internal PR 189 review).
+      // what goes as prompt is exactly these (internal PR 189 review). A shape too large
+      // for Anthropic's grammar travels as an instruction after the system
+      // prompt instead, and is counted with it.
+      const output = outputFor(request);
+      const strict = output.strict !== false;
+      const instruction = strict ? '' : output.instruction;
       const prefix = request.cachePrefix ?? '';
       request.onPromptChars?.(
-        request.system.length + prefix.length + request.prompt.length,
+        request.system.length +
+          instruction.length +
+          prefix.length +
+          request.prompt.length,
       );
 
       const stream = client.messages.stream(
@@ -185,21 +235,37 @@ export function createAnthropicPlanClient(
           // an unchanged bill rather than an error, which is why
           // `anthropic-client.test.ts` asserts the shape rather than trusting
           // it.
-          system: [
-            {
-              type: 'text',
-              text: request.system,
-              cache_control: { type: 'ephemeral' },
-            },
-          ],
-          output_config: {
-            ...(effort ? { effort } : {}),
-            // The schema the *caller* asked for, not this client's idea of
-            // one (internal PR 189 review). Hard-coding it here made a mockup run
-            // structurally impossible: the prompt asked for a set of
-            // directions and the API constrained the reply to a plan.
-            format: formatFor(outputFor(request).schema),
-          },
+          //
+          // The output instruction, when there is one, is the same for every
+          // run of its shape, so the marker goes after it and covers both.
+          system: strict
+            ? [
+                {
+                  type: 'text',
+                  text: request.system,
+                  cache_control: { type: 'ephemeral' },
+                },
+              ]
+            : [
+                { type: 'text', text: request.system },
+                {
+                  type: 'text',
+                  text: instruction,
+                  cache_control: { type: 'ephemeral' },
+                },
+              ],
+          ...(effort || strict
+            ? {
+                output_config: {
+                  ...(effort ? { effort } : {}),
+                  // The schema the *caller* asked for, not this client's idea of
+                  // one (internal PR 189 review). Hard-coding it here made a mockup run
+                  // structurally impossible: the prompt asked for a set of
+                  // directions and the API constrained the reply to a plan.
+                  ...(strict ? { format: formatFor(output.schema) } : {}),
+                },
+              }
+            : {}),
           // A second breakpoint, at the end of the part of the user message
           // that a bounded build repeats on every step (internal issue 166's reasoning,
           // one level down). Within one run the request, the spec and the
@@ -238,9 +304,25 @@ export function createAnthropicPlanClient(
       }
 
       const response = await stream.finalMessage();
+      const plan = readStructuredOutput(response.content, response.stop_reason);
+      const text =
+        response.content.find((block) => block.type === 'text')?.text ?? '';
 
       return {
-        plan: readStructuredOutput(response.content, response.stop_reason),
+        plan,
+        // A reply asked for JSON in the prompt can come back as something
+        // that is not, and "expected object, received null" says nothing
+        // about what did. A cut-off reply is named a layer up instead.
+        ...(plan === null &&
+        text.trim().length > 0 &&
+        response.stop_reason !== 'max_tokens'
+          ? {
+              failure: {
+                finished: true,
+                reason: unparsedReason(text, response.stop_reason),
+              },
+            }
+          : {}),
         stopReason: response.stop_reason,
         refusal:
           response.stop_reason === 'refusal'

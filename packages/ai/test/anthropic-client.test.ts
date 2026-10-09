@@ -3,9 +3,18 @@ import { describe, it } from 'node:test';
 import AnthropicSdk from '@anthropic-ai/sdk';
 import type Anthropic from '@anthropic-ai/sdk';
 
-import { createAnthropicPlanClient, usageOf } from '../src/anthropic-client.ts';
+import {
+  createAnthropicPlanClient,
+  unparsedReason,
+  usageOf,
+} from '../src/anthropic-client.ts';
 import { ProviderTruncationError } from '../src/errors.ts';
-import { MOCKUP_OUTPUT, PLAN_OUTPUT } from '../src/plan-output.ts';
+import {
+  FILE_GROUP_OUTPUT,
+  MOCKUP_OUTPUT,
+  OUTLINE_OUTPUT,
+  PLAN_OUTPUT,
+} from '../src/plan-output.ts';
 import { readCompletion } from '../src/plan-provider.ts';
 import type { PlanOutput } from '../src/plan-output.ts';
 
@@ -60,6 +69,7 @@ async function sendOne(): Promise<Captured> {
     prompt: 'Build a landing page',
     maxTokens: 1000,
     effort: 'high',
+    output: FILE_GROUP_OUTPUT,
   });
   return captured;
 }
@@ -112,6 +122,7 @@ describe('the cache breakpoint a bounded build asks for', () => {
       prompt: 'WRITE THESE',
       maxTokens: 1000,
       effort: 'high',
+      output: FILE_GROUP_OUTPUT,
       onPromptChars: (characters) => {
         reported = characters;
       },
@@ -228,12 +239,94 @@ describe('the shape a request asks for', () => {
     assert.doesNotMatch(format, /"files"/, 'it asked for a plan instead');
   });
 
-  it('still asks for a plan when nothing says otherwise', async () => {
-    const captured = await sendWith();
+  it('sends the file group schema when files were asked for', async () => {
+    const captured = await sendWith(FILE_GROUP_OUTPUT);
     const format = JSON.stringify(
       (captured.output_config as { format?: unknown })?.format,
     );
-    assert.match(format, /files/, 'the default stopped being a plan');
+    assert.match(format, /files/, 'the request did not ask for files');
+  });
+});
+
+/**
+ * The shapes carrying a design spec are asked for in the prompt.
+ *
+ * Anthropic compiles a strict schema into a grammar and rejects these two
+ * with "The compiled grammar is too large" (try-generation run
+ * 37950953797), which failed every Claude build at its outline.
+ */
+describe('a shape too large for a strict schema', () => {
+  async function sendWith(output?: PlanOutput): Promise<Captured> {
+    const captured: Captured = {};
+    await createAnthropicPlanClient({
+      client: fakeAnthropic(captured),
+    }).createPlan({
+      model: 'claude-opus-5-5',
+      system: 'SYSTEM PROMPT',
+      prompt: 'Build a landing page',
+      maxTokens: 1000,
+      effort: 'high',
+      ...(output ? { output } : {}),
+    });
+    return captured;
+  }
+
+  for (const [label, output] of [
+    ['the outline', OUTLINE_OUTPUT],
+    ['a plan', PLAN_OUTPUT],
+    ['the default', undefined],
+  ] as const) {
+    it(`sends no schema for ${label}, and the instruction instead`, async () => {
+      const captured = await sendWith(output);
+      const config = captured.output_config as
+        { format?: unknown; effort?: unknown } | undefined;
+      assert.equal(config?.format, undefined);
+      assert.equal(config?.effort, 'high');
+
+      const blocks = captured.system as {
+        text: string;
+        cache_control?: unknown;
+      }[];
+      assert.equal(blocks.length, 2);
+      assert.equal(blocks[0]?.text, 'SYSTEM PROMPT');
+      assert.equal(blocks[0]?.cache_control, undefined);
+      assert.equal(blocks[1]?.text, (output ?? PLAN_OUTPUT).instruction);
+      assert.deepEqual(blocks[1]?.cache_control, { type: 'ephemeral' });
+    });
+  }
+
+  it('reads a reply wrapped in a code fence', async () => {
+    const fenced: Anthropic = {
+      messages: {
+        stream() {
+          return {
+            on() {},
+            async finalMessage() {
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: '```json\n{"summary":"s","files":[]}\n```',
+                  },
+                ],
+                stop_reason: 'end_turn',
+                usage: { input_tokens: 1, output_tokens: 1 },
+              };
+            },
+          };
+        },
+      },
+    } as unknown as Anthropic;
+    const completion = await createAnthropicPlanClient({
+      client: fenced,
+    }).createPlan({
+      model: 'claude-haiku-4-5',
+      system: 'SYSTEM PROMPT',
+      prompt: 'Build a landing page',
+      maxTokens: 1000,
+      effort: 'high',
+    });
+    assert.deepEqual(completion.plan, { summary: 's', files: [] });
   });
 });
 
@@ -256,6 +349,7 @@ describe('what the Anthropic client reports sending', () => {
       prompt: 'Build a landing page',
       maxTokens: 1000,
       effort: 'high',
+      output: FILE_GROUP_OUTPUT,
       onPromptChars: (characters) => {
         reported = characters;
       },
@@ -376,5 +470,13 @@ describe('a reply cut off at the output ceiling', () => {
   it('still reads a reply that finished', async () => {
     const completion = await planFrom('{"summary":"s","files":[]}', 'end_turn');
     assert.deepEqual(completion.plan, { summary: 's', files: [] });
+  });
+});
+
+describe('a reply that is not JSON', () => {
+  it('says what the parser stopped on', () => {
+    const reason = unparsedReason('{"summary": "a\nb"}', 'end_turn');
+    assert.match(reason, /stop reason end_turn/);
+    assert.match(reason, /near /);
   });
 });

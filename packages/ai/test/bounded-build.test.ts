@@ -11,6 +11,7 @@ import {
   GROUP_MAX_TOKENS,
   MAX_PLANNED_FILES,
   OUTLINE_LABEL,
+  CLAUDE_OUTLINE_MAX_TOKENS,
   OUTLINE_MAX_TOKENS,
   OUTLINE_RETRY_MAX_TOKENS,
   applyBoundedPatch,
@@ -26,6 +27,7 @@ import {
   rankOf,
   runBoundedBuild,
   splitGroup,
+  outlineMaxTokensFor,
   thinkingTookRoom,
   uiApiLine,
 } from '../src/bounded-build.ts';
@@ -607,7 +609,7 @@ describe('a large request, as it failed on 2026-09-29', () => {
 
     // No call was allowed anything like the ceiling that failed.
     const [outline, ...groups] = client.requests;
-    assert.ok(outline!.maxTokens <= OUTLINE_MAX_TOKENS);
+    assert.ok(outline!.maxTokens <= outlineMaxTokensFor(MODEL));
     for (const request of groups) {
       assert.ok(request.maxTokens <= GROUP_MAX_TOKENS);
       assert.ok(requestedPaths(request.prompt).length > 0);
@@ -798,7 +800,7 @@ describe('the outline', () => {
     const { result, hooks, client } = await build(
       { summary: 'A site.', spec: SPEC, files: requiredFiles() },
       inProcess(),
-      { thinking: { high: OUTLINE_MAX_TOKENS, low: 2_000 } },
+      { thinking: { high: outlineMaxTokensFor(MODEL), low: 2_000 } },
     );
     assert.equal(result.ok, true, result.failure?.message ?? '');
     assert.deepEqual(hooks.names.slice(0, 2), ['outline', 'outline.again']);
@@ -814,15 +816,15 @@ describe('the outline', () => {
     // room its thinking takes.
     const script = { summary: 'A site.', spec: SPEC, files: requiredFiles() };
     const thinking = {
-      high: OUTLINE_MAX_TOKENS,
-      low: OUTLINE_MAX_TOKENS - 500,
+      high: outlineMaxTokensFor(MODEL),
+      low: outlineMaxTokensFor(MODEL) - 500,
     };
     const { result, hooks, client } = await build(script, inProcess(), {
       thinking,
     });
     assert.equal(result.ok, true, result.failure?.message ?? '');
     assert.deepEqual(hooks.names.slice(0, 2), ['outline', 'outline.again']);
-    assert.equal(client.requests[0]!.maxTokens, OUTLINE_MAX_TOKENS);
+    assert.equal(client.requests[0]!.maxTokens, outlineMaxTokensFor(MODEL));
     assert.equal(client.requests[1]!.maxTokens, OUTLINE_RETRY_MAX_TOKENS);
     assert.equal(client.requests[1]!.effort, 'low');
   });
@@ -835,13 +837,25 @@ describe('the outline', () => {
     const script = { summary: 'A site.', spec: SPEC, files: requiredFiles() };
     const { result, hooks, client } = await build(script, inProcess(), {
       malformOnce: 'build_outline',
-      thinking: { high: 2_000, low: OUTLINE_MAX_TOKENS - 1_000 },
+      thinking: { high: 2_000, low: outlineMaxTokensFor(MODEL) - 1_000 },
     });
     assert.equal(result.ok, true, result.failure?.message ?? '');
     assert.deepEqual(hooks.names.slice(0, 2), ['outline', 'outline.again']);
-    assert.equal(client.requests[0]!.maxTokens, OUTLINE_MAX_TOKENS);
+    assert.equal(client.requests[0]!.maxTokens, outlineMaxTokensFor(MODEL));
     assert.equal(client.requests[1]!.maxTokens, OUTLINE_RETRY_MAX_TOKENS);
     assert.equal(client.requests[1]!.effort, 'low');
+  });
+
+  it('gives Claude the larger outline ceiling, and nobody else', () => {
+    // Try-generation run 37958275470: Opus 5.5 was cut off at 16,000 just
+    // short of the end of its outline, with no grammar to hold its
+    // low-effort retry to JSON.
+    assert.equal(
+      outlineMaxTokensFor('claude-opus-5-5'),
+      CLAUDE_OUTLINE_MAX_TOKENS,
+    );
+    assert.equal(outlineMaxTokensFor('gpt-6-sol'), OUTLINE_MAX_TOKENS);
+    assert.equal(outlineMaxTokensFor('not-a-model'), OUTLINE_MAX_TOKENS);
   });
 
   it('counts thinking as taking room when it is a quarter of a reply or more', () => {

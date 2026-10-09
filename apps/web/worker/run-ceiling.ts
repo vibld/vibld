@@ -24,7 +24,7 @@
 
 import {
   GROUP_MAX_TOKENS,
-  OUTLINE_MAX_TOKENS,
+  outlineMaxTokensFor,
   buildOutputBudgetFor,
   cacheRatesFor,
   callCeilingFor,
@@ -299,7 +299,7 @@ export interface BuildSize {
 export function buildFloorSize(full: BuildSize, model: string): BuildSize {
   const maxTokens = Math.min(
     full.ceiling.maxTokens,
-    callCeilingFor(model, OUTLINE_MAX_TOKENS) +
+    callCeilingFor(model, outlineMaxTokensFor(model)) +
       callCeilingFor(model, GROUP_MAX_TOKENS),
   );
   const inputChars = Math.min(full.inputChars, 2 * BUILD_INPUT_CHARS);

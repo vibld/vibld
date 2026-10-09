@@ -120,6 +120,27 @@ import type { ExtraDependency, ScaffoldInput } from './scaffold.ts';
 export const OUTLINE_MAX_TOKENS = 16_000;
 
 /**
+ * The outline ceiling for Claude, whose outline carries no strict schema
+ * (`PlanOutput.strict`).
+ *
+ * Claude Opus 5.5 outlined a wedding site in about 9,000 tokens of JSON
+ * after 6,833 of thinking and was cut off just short of the end at 16,000
+ * (try-generation run 37958275470). Its low-effort retry did not think,
+ * fit, and slipped a stray `.replace(' ','')` into a color value: with no
+ * grammar holding the reply to JSON, the attempt that thinks is the one
+ * that has to fit. Other providers keep `OUTLINE_MAX_TOKENS`, so nothing
+ * they reserve changes.
+ */
+export const CLAUDE_OUTLINE_MAX_TOKENS = 24_000;
+
+/** The outline ceiling for this model, before `callCeilingFor`. */
+export function outlineMaxTokensFor(model: string): number {
+  return findModel(model)?.provider === 'anthropic'
+    ? CLAUDE_OUTLINE_MAX_TOKENS
+    : OUTLINE_MAX_TOKENS;
+}
+
+/**
  * The outline retry's ceiling when thinking took a real share of the first
  * reply (`thinkingTookRoom`), whether that reply was cut off or came back
  * in the wrong shape.
@@ -1655,7 +1676,10 @@ export async function runBoundedBuild(
 
   // 1. The outline, asked again once more briefly if it ran out of room or
   // came back in the wrong shape. Nothing else can be written without it.
-  const outlineCeiling = callCeilingFor(builder.model, OUTLINE_MAX_TOKENS);
+  const outlineCeiling = callCeilingFor(
+    builder.model,
+    outlineMaxTokensFor(builder.model),
+  );
   const ask = (effort?: PlanEffort) => (limits: CallLimits) =>
     builder.outline(
       {
