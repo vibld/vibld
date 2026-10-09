@@ -7,8 +7,11 @@ name: vibld.com DNS records
 # - `_dmarc.vibld.com`, monitor only (D171): it tells receivers the domain
 #   has a policy and asks them to deliver as before, so no mail changes. L19
 #   wants aggregate reports too; the `rua` input adds the address they go to
-#   (`mailto:...`) once one is chosen, and a run without it keeps the one the
-#   record has.
+#   (`mailto:...`), and a run without it keeps the one the record has (D172:
+#   the one Cloudflare DMARC Management added).
+# - `default._bimi.vibld.com` (D173): points mailbox providers at the logo in
+#   apps/marketing/public/bimi.svg. They show it only once DMARC is at
+#   quarantine or reject.
 #
 # Dispatch only, and idempotent: a record already holding the value is left
 # alone, one holding another value is updated in place, and a missing one is
@@ -25,7 +28,7 @@ on:
         required: false
         default: ''
       rua:
-        description: 'Where receivers send aggregate reports, as "mailto:dmarc@example.com". Empty publishes the policy without reports.'
+        description: 'Where receivers send aggregate reports, as "mailto:dmarc@example.com". Empty keeps the address the record already has.'
         required: false
         default: ''
 
@@ -96,6 +99,7 @@ jobs:
             echo "::error::The token cannot list the $ZONE zone. Give it \"Zone: Read\" on $ZONE, or run this again with the zone_id input."
             exit 1
           fi
+          echo "ZONE_ID=$zone_id" >> "$GITHUB_ENV"
           # Other TXT records may share the name; receivers ignore any not
           # starting with the DMARC version tag (in any case, with spaces
           # allowed around "="), and so does this.
@@ -120,7 +124,9 @@ jobs:
             echo "::error::$NAME has $count DMARC records; a domain has one. Remove the extras by hand."
             exit 1
           elif [ "$count" -eq 1 ]; then
-            if [ "$current" = "$CONTENT" ]; then
+            # A trailing ";" (as Cloudflare DMARC Management writes it) is
+            # the same record.
+            if [ "$(sed -E 's/[;[:space:]]+$//' <<< "$current")" = "$CONTENT" ]; then
               echo "$NAME already holds $CONTENT." | tee -a "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
@@ -146,7 +152,7 @@ jobs:
           fi
           for i in $(seq 1 12); do
             answer=$(dig +short TXT _dmarc.vibld.com "@$ns" | sed -e 's/" "//g' -e 's/"//g' |
-              grep -E '^[vV][[:space:]]*=[[:space:]]*DMARC1[[:space:]]*(;|$)' || true)
+              grep -E '^[vV][[:space:]]*=[[:space:]]*DMARC1[[:space:]]*(;|$)' | sed -E 's/[;[:space:]]+$//' || true)
             if [ "$answer" = "$EXPECTED" ]; then
               echo "_dmarc.vibld.com answers $answer (from $ns)" | tee -a "$GITHUB_STEP_SUMMARY"
               exit 0
@@ -154,4 +160,58 @@ jobs:
             sleep 10
           done
           echo "::error::$ns answers \"$answer\" for _dmarc.vibld.com, not \"$EXPECTED\"."
+          exit 1
+
+      - name: Set default._bimi.vibld.com
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          NAME: default._bimi.vibld.com
+          CONTENT: v=BIMI1; l=https://vibld.com/bimi.svg;
+          LOGO: https://vibld.com/bimi.svg
+        run: |
+          set -euo pipefail
+          # The logo must be live before receivers are pointed at it.
+          type=$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' "$LOGO")
+          if ! [[ "$type" =~ ^200\ image/svg\+xml ]]; then
+            echo "::error::$LOGO answers \"$type\", not 200 image/svg+xml. Deploy vibld.com first."
+            exit 1
+          fi
+          api() {
+            curl -sS --fail-with-body -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H 'Content-Type: application/json' "$@"
+          }
+          base=https://api.cloudflare.com/client/v4
+          # Only the BIMI record is touched, as with DMARC above.
+          records=$(api "$base/zones/$ZONE_ID/dns_records?type=TXT&name=$NAME" |
+            jq '.result |= map(select(.content | gsub("\" \""; "") | gsub("\""; "") | test("^[vV]\\s*=\\s*BIMI1\\s*(;|$)")))')
+          count=$(jq '.result | length' <<< "$records")
+          current=$(jq -r '.result[0].content // empty' <<< "$records" | sed -e 's/" "//g' -e 's/"//g')
+          body=$(jq -n --arg name "$NAME" --arg content "\"$CONTENT\"" \
+            '{type: "TXT", name: $name, content: $content, ttl: 1, comment: "D173, dns-vibld-com.yml"}')
+          if [ "$count" -gt 1 ]; then
+            echo "::error::$NAME has $count BIMI records; a selector has one. Remove the extras by hand."
+            exit 1
+          elif [ "$count" -eq 1 ]; then
+            if [ "$current" = "$CONTENT" ]; then
+              echo "$NAME already holds $CONTENT." | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            id=$(jq -r '.result[0].id' <<< "$records")
+            api -X PUT "$base/zones/$ZONE_ID/dns_records/$id" --data "$body" > /dev/null
+            echo "Updated $NAME from $current to $CONTENT." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            api -X POST "$base/zones/$ZONE_ID/dns_records" --data "$body" > /dev/null
+            echo "Created $NAME: $CONTENT." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          ns=$(dig +short NS vibld.com @1.1.1.1 | head -n 1)
+          for i in $(seq 1 12); do
+            answer=$(dig +short TXT "$NAME" "@$ns" | sed -e 's/" "//g' -e 's/"//g' |
+              grep -E '^[vV][[:space:]]*=[[:space:]]*BIMI1' || true)
+            if [ "$answer" = "$CONTENT" ]; then
+              echo "$NAME answers $answer (from $ns)" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$ns answers \"$answer\" for $NAME, not \"$CONTENT\"."
           exit 1

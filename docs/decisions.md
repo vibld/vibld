@@ -380,6 +380,17 @@ paying accounts until midnight UTC.
   delivery is unchanged; a stricter policy is a later decision. L19 also asks
   for reporting: the record gains `rua=` once a report address is chosen,
   through the workflow's `rua` input.
+- **D172. DMARC aggregate reports go to Cloudflare DMARC Management (Chris,
+  2026-10-09: decision card D172, "Cloudflare").** Chris enabled it on the
+  vibld.com zone, which added Cloudflare's report address as `rua=`. Runs of
+  `dns-vibld-com.yml` without a `rua` input keep it.
+- **D173. vibld.com publishes a BIMI record (Chris, 2026-10-09: "Add a BIMI
+  record too").** `default._bimi.vibld.com` is `v=BIMI1; l=https://vibld.com/bimi.svg;`,
+  set by the same workflow; the logo is `apps/marketing/public/bimi.svg`, the
+  favicon mark as SVG Tiny PS. Mailbox providers show a BIMI logo only under
+  `p=quarantine` or `p=reject` (L19's later steps), and Gmail and Apple Mail
+  also need a Verified Mark Certificate or Common Mark Certificate (`a=`),
+  which vibld.com does not have.
 
 ### Checkpoint history, 2026-10-03
 
