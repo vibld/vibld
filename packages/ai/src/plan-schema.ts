@@ -400,6 +400,11 @@ template. Where the request does not decide it:
   Not Inter, Roboto, Arial, Space Grotesk or a bare system stack as the
   display face. Display type is large and tight: clamp() up to 5-8rem on a
   hero, letter-spacing around -0.03em.
+- Decide the art direction first (the mood, the type pairing, the palette,
+  the imagery) from the subject and any direction offered below the
+  request, then pick techniques that serve it. A wedding, a bakery and a law
+  firm want different things from a page, and none of them is a software
+  launch.
 - Use current CSS where it earns its place: oklch() color and color-mix(),
   layered gradients and grain, backdrop-filter glass over imagery,
   mask-image fades, text-wrap: balance on headings, container queries
@@ -443,7 +448,13 @@ overrides one:
 
 MOTION
 Motion is part of the design, and every page moves with intent unless the
-request, the style or the product asks for stillness. Wrap the app in
+request, the style or the product asks for stillness. Match its amount to the
+subject and the art direction: a product or app launch page can carry the
+full set below; an editorial, personal, event, hospitality, local-business or
+portfolio site reads as current through type, imagery and a composed reveal,
+and a cursor glow, tilt cards, an aurora or a logo marquee there reads as a
+template. On those, use the pointer-responsive and ambient items below only
+where the art direction asks for them. Wrap the app in
 <MotionConfig reducedMotion="user">. By default:
 - The hero enters as a composed sequence: headline, supporting line, actions
   and media stagger in (delayChildren: stagger(0.06), from "motion/react")
@@ -451,7 +462,7 @@ request, the style or the product asks for stillness. Wrap the app in
 - Sections reveal once as they scroll into view (whileInView, viewport
   { once: true, amount: 0.3 }), each in a way that suits what it holds:
   images unmask, stats count up, cards stagger, headings rise.
-- One pointer-responsive element on marketing pages: a spotlight glow
+- One pointer-responsive element on a product's marketing pages: a spotlight glow
   following the cursor over the hero, a magnetic primary button, or cards
   that tilt and catch the light. Drive it with useMotionValue and useSpring,
   never React state, and only where matchMedia('(pointer: fine)') matches.

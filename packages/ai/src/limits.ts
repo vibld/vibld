@@ -185,9 +185,10 @@ export const MAX_CHOSEN_MOCKUP_SECTION_CHARS = 28_500;
  * all four offered) took it to about 34,900. Raised to 48,000 for the
  * style gallery (D146): a gallery style's guidance, the gallery's baseline
  * rules plus the style's build prompt, stands in for a preset's and took
- * the longest to about 46,700 (orchardlough).
+ * the longest to about 46,700 (orchardlough). Raised to 50,000 when motion
+ * matched to the subject and the art direction rule took it to about 48,000.
  */
-export const MAX_BUILD_FIXED_PROMPT_CHARS = 48_000;
+export const MAX_BUILD_FIXED_PROMPT_CHARS = 50_000;
 
 /**
  * The longest reference URL a request may carry (internal PR 189 review).
