@@ -238,6 +238,45 @@ jobs:
             echo "STRIPE_WEBHOOK_SECRET not set -- /api/stripe/webhook stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Stock photo search (D176): Unsplash first, Pexels when Unsplash finds
+      # none or refuses. Optional, and either alone works: with neither, a
+      # build with no uploaded media paints its images in CSS as before.
+      #
+      # Unlike the secrets above, a key removed from the environment is
+      # deleted from the Worker too: a Worker keeps a secret no deploy
+      # mentions, so taking a key out of `preview` would otherwise leave the
+      # Worker searching with it. Wrangler confirms the delete itself in CI.
+      - name: Sync stock photo keys to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+        run: |
+          set -euo pipefail
+          # The Worker's secret names, read once. A failure to read them
+          # fails the step: a key removed here must not stay live there.
+          secrets="$(pnpm dlx wrangler@4.137.0 secret list --format json | node -e '
+            let raw = "";
+            process.stdin.on("data", (chunk) => (raw += chunk));
+            process.stdin.on("end", () => {
+              for (const secret of JSON.parse(raw)) console.log(secret.name);
+            });
+          ')"
+          for name in UNSPLASH_ACCESS_KEY PEXELS_API_KEY; do
+            if [ -n "${!name}" ]; then
+              printf '%s' "${!name}" | pnpm dlx wrangler@4.137.0 secret put "$name"
+              echo "Synced $name." >> "$GITHUB_STEP_SUMMARY"
+            elif grep -qxF "$name" <<< "$secrets"; then
+              pnpm dlx wrangler@4.137.0 secret delete "$name"
+              echo "$name removed from the preview environment, so deleted from the Worker." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "$name not set -- no photos from that service on this deploy." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
       # The GitHub App that pushes a checkpoint to a user's repository
       # (internal issue 13). Optional, same rule as every secret above: unset means
       # /api/github/* answers "not configured" rather than the deploy

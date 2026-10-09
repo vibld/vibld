@@ -35,7 +35,7 @@ export interface CatalogInspiration {
   palette: readonly { role: string; hex: string }[];
 }
 
-const STOP_WORDS = new Set([
+export const STOP_WORDS = new Set([
   'and',
   'the',
   'for',
@@ -89,7 +89,7 @@ const STOP_WORDS = new Set([
  * page" names no subject, and every design whose summary says "landing" would
  * otherwise tie for it.
  */
-const FORM_WORDS = new Set([
+export const FORM_WORDS = new Set([
   'landing',
   'dashboard',
   'homepage',

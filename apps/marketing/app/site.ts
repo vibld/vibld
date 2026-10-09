@@ -141,9 +141,10 @@ export const SITE = {
    * It is the launch day, the day the beta opened (Chris, 2026-09-28). A
    * later revision of any one document changes this for all of them, since
    * they are one set. Revised 2026-10-07, when the welcome credit was
-   * retired (D163).
+   * retired (D163), and 2026-10-09, when the stock photo services were
+   * added as subprocessors (D176).
    */
-  legalEffectiveDate: '2026-10-07',
+  legalEffectiveDate: '2026-10-09',
   /**
    * Decisions BRAND-01 -- searching "vibld" returns Bible-study sites, because
    * Google reads the word as a misspelling of "Bible". Nothing on-page fixes

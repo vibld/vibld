@@ -1850,6 +1850,21 @@ holds (`mediaSection` in `@vibld/ai`) and references a file as
 the checkpoint references as `public/media/<name>` (`worker/media-export.ts`).
 The builder's side is `src/components/MediaLibrary.tsx`.
 
+### Stock photos (docs/decisions.md D176)
+
+A first build whose library is empty is offered up to eight stock photos of
+its subject (`stock-photos.ts` in `@vibld/ai`), hotlinked by the URL the
+service returned and credited beside the photo or in the footer. The query
+is the request's first few subject words, leaving out names. Unsplash is
+asked first; Pexels when Unsplash finds none or refuses (its spent hourly
+allowance answers 403). Each needs its own Worker secret,
+`UNSPLASH_ACCESS_KEY` or `PEXELS_API_KEY`, and either alone works.
+`deploy-web-preview.yml` syncs whichever the `preview` environment holds.
+With neither, the build paints its images in CSS as before. Once a build
+is over, each Unsplash photo the project kept is reported to that photo's
+download endpoint, as Unsplash's API guidelines ask (`trackStockDownloads`,
+the Workflow's `stock-downloads` step).
+
 ## Account deletion (docs/decisions.md L32)
 
 Anybody signed in can delete their account from the gear menu ("Account",

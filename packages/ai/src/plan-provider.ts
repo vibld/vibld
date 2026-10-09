@@ -32,6 +32,8 @@ import { patternGuidance } from './patterns.ts';
 import { backdropGuidance } from './backdrops.ts';
 import { motionGuidance } from './motion.ts';
 import { surfaceGuidance } from './surfaces.ts';
+import { stockPhotoSection } from './stock-photos.ts';
+import type { StockPhoto } from './stock-photos.ts';
 import { diagramGuidance } from './diagrams.ts';
 import { primitiveGuidance } from './primitives.ts';
 import { paletteGuidance, productFeelGuidance } from './palettes.ts';
@@ -702,7 +704,14 @@ export interface MediaManifestEntry {
  */
 export function mediaSection(
   media?: readonly MediaManifestEntry[] | null,
+  // Photos found for the request (D176), offered only while the library
+  // has nothing of the person's own: they take its place.
+  stockPhotos?: readonly StockPhoto[] | null,
 ): string | null {
+  if (!media || media.length === 0) {
+    const stock = stockPhotoSection(stockPhotos, media?.length === 0);
+    if (stock) return stock;
+  }
   if (!media) return null;
   // An empty library, read and found empty, is said as such: a request or
   // an earlier project can mention a /media/ path, and the build must know
@@ -746,6 +755,9 @@ export function buildUserPrompt(
   // directions to choose from, which carry their own palette and type, so
   // they stand in for the product-type default below.
   inspiration?: string | null,
+  // Stock photos found for the request (D176, `stockPhotoSection`), in
+  // place of the empty library's "paint it in CSS".
+  stockPhotos?: readonly StockPhoto[] | null,
 ): string {
   const base = request.base;
   const parts = [request.prompt];
@@ -810,7 +822,7 @@ Where these conflict with the request above, follow the request.`,
   // The person's uploaded media, after the direction and before the
   // project: what files exist is a fact about this build, and the one
   // thing a model must not invent is a path to a file nobody uploaded.
-  const library = mediaSection(media);
+  const library = mediaSection(media, stockPhotos);
   if (library) parts.push(library);
 
   if (base && base.files.length > 0) {

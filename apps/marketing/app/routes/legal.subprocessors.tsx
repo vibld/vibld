@@ -23,6 +23,11 @@ interface Subprocessor {
  * Terms of Service name Hangzhou DeepSeek Artificial Intelligence Co., Ltd.
  * Cloudflare's location is where the `vibld-control-plane` D1 database and
  * R2 bucket are: the ENAM location, default jurisdiction.
+ *
+ * The stock photo services (D176, packages/ai/src/stock-photos.ts) are named
+ * by their terms (checked 2026-10-09): Unsplash's API Terms are an agreement
+ * with Unsplash Inc. (Montréal), and Pexels' Terms of Service name it a
+ * Canva Germany GmbH brand.
  */
 const CURRENT: Subprocessor[] = [
   {
@@ -59,6 +64,18 @@ const CURRENT: Subprocessor[] = [
     name: 'Hangzhou DeepSeek Artificial Intelligence Co., Ltd.',
     purpose: 'Runs on DeepSeek models: the same as Anthropic',
     location: 'People’s Republic of China',
+  },
+  {
+    name: 'Unsplash Inc.',
+    purpose:
+      'Stock photos for a first build with no uploaded images: up to three words from your prompt, as a search, and which of its photos your site uses. Your site’s visitors load those photos from Unsplash',
+    location: 'Canada',
+  },
+  {
+    name: 'Canva Germany GmbH (Pexels)',
+    purpose:
+      'Stock photos when Unsplash has none: the same search words. Your site’s visitors load those photos from Pexels',
+    location: 'Germany',
   },
   {
     name: 'Resend',

@@ -25,7 +25,7 @@ import { dirname, join, resolve } from 'node:path';
 import { BoundedPlanProvider } from '../src/bounded-build.ts';
 import { createPlanClient, resolveModel } from '../src/select-client.ts';
 import { ProviderError } from '../src/errors.ts';
-import { checkDesign } from '../src/design-checks.ts';
+import { checkDesign, pageCode } from '../src/design-checks.ts';
 import { keepingRecordOf, repairPromptFor } from '../src/repair.ts';
 import { buildEnvironment, parsePlanArgs } from '../src/cli-args.ts';
 import { isStylePresetId } from '../src/style-presets.ts';
@@ -34,6 +34,8 @@ import {
   inspirationOf,
   matchCatalogDesigns,
 } from '../src/catalog-inspiration.ts';
+import { findStockPhotos, trackStockDownloads } from '../src/stock-photos.ts';
+import type { StockPhoto } from '../src/stock-photos.ts';
 import { DESIGN_TEMPLATE_INDEX } from '../src/design-template-index.ts';
 import { findDesignTemplate } from '../src/design-templates.ts';
 import { diffProjects, readProject } from '../src/read-project.ts';
@@ -134,8 +136,21 @@ if (inspiration) {
     `catalog directions: ${matchCatalogDesigns(prompt, DESIGN_TEMPLATE_INDEX).join(', ')}`,
   );
 }
+// Stock photos of the subject, as the Worker finds them (D176): on a first
+// build, with UNSPLASH_ACCESS_KEY or PEXELS_API_KEY set.
+const stock =
+  base === undefined ? await findStockPhotos(prompt, process.env) : null;
+if (stock?.query) {
+  const misses = stock.misses
+    .map((miss) => `${miss.source}: ${miss.reason}`)
+    .join(', ');
+  console.log(
+    `stock photos for "${stock.query}": ${stock.photos.length}${stock.photos[0] ? ` from ${stock.photos[0].source}` : ''}${misses ? ` (${misses})` : ''}`,
+  );
+}
 const provider = new BoundedPlanProvider(client, {
   model,
+  ...(stock?.photos.length ? { stockPhotos: stock.photos } : {}),
   ...(style !== undefined && isStylePresetId(style) ? { style } : {}),
   ...(inspiration ? { inspiration } : {}),
   onUsage: (reported) => {
@@ -205,9 +220,25 @@ try {
   if (out) {
     await writeProject(out, plan.files);
     console.log(`\nwrote ${plan.files.length} files to ${out}`);
-    if (args.build) {
-      const built = await buildAndRepair(out, plan.files);
-      if (!built) process.exit(1);
+    const final = args.build
+      ? await buildAndRepair(out, plan.files, stock?.photos)
+      : plan.files;
+    if (!final) process.exit(1);
+    // The photos the final project's page code uses, counted with Unsplash
+    // as the Worker's workflow counts them, and any it uses without its
+    // credit, said in the log.
+    if (stock?.photos.length) {
+      for (const finding of checkDesign([...final], {
+        stockPhotos: stock.photos,
+      }).errors.filter((error) => error.check === 'stock-credit')) {
+        console.log(`warning: ${finding.detail}`);
+      }
+      const counted = await trackStockDownloads(
+        stock.photos,
+        pageCode(final),
+        process.env,
+      );
+      if (counted) console.log(`counted ${counted} Unsplash downloads`);
     }
   }
 } catch (error) {
@@ -280,18 +311,19 @@ function build(root: string): { ok: boolean; output: string } {
  * project, and when it does not build, ask once for a repair with the
  * compiler's words and the design checks' findings, then build again. The
  * repair keeps the project's spec and is the product's own
- * (`repairPromptFor`, `keepingRecordOf`). Resolves true when the project
- * builds, first time or after the repair.
+ * (`repairPromptFor`, `keepingRecordOf`). Resolves to the files that
+ * build, first time or after the repair, or null when they do not.
  */
 async function buildAndRepair(
   root: string,
   files: readonly ProjectFile[],
-): Promise<boolean> {
+  stockPhotos?: readonly StockPhoto[],
+): Promise<readonly ProjectFile[] | null> {
   console.log(`\nbuilding ${root} with npm`);
   const first = build(root);
   if (first.ok) {
     console.log('built: the project installs and builds with plain npm');
-    return true;
+    return files;
   }
   const error = first.output.slice(-BUILD_OUTPUT_CHARS);
   console.log(
@@ -306,6 +338,7 @@ async function buildAndRepair(
     new BoundedPlanProvider(client, {
       model,
       keepSpec: true,
+      ...(stockPhotos?.length ? { stockPhotos } : {}),
       ...(style !== undefined && isStylePresetId(style) ? { style } : {}),
       onUsage: (reported) => {
         repairUsage = reported;
@@ -319,7 +352,11 @@ async function buildAndRepair(
     }),
   );
   const repaired = await repairer.generate({
-    prompt: repairPromptFor(error, checkDesign([...files]), false),
+    prompt: repairPromptFor(
+      error,
+      checkDesign([...files], stockPhotos?.length ? { stockPhotos } : {}),
+      false,
+    ),
     base: { revision: 'r-generated', files: [...files] },
   });
   if (repairUsage) {
@@ -336,10 +373,10 @@ async function buildAndRepair(
     console.log(
       'built after one repair: the project installs and builds with plain npm',
     );
-    return true;
+    return repaired.files;
   }
   console.error(
     `\nstill does not build after one repair:\n${second.output.slice(-BUILD_OUTPUT_CHARS).split('\n').slice(-25).join('\n')}`,
   );
-  return false;
+  return null;
 }

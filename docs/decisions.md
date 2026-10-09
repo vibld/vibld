@@ -403,8 +403,13 @@ paying accounts until midnight UTC.
   internal PR 394 (the template catalog as art direction for a typed request) and internal PR 396
   (motion matched to the subject).
 - **D176. Generated sites get photos from a stock API (Chris, 2026-10-09:
-  "Stock API").** Unsplash or Pexels; not built until one is chosen and a key
-  is configured.
+  "Stock API"; "Possible to wire in both and use both?").** Both: Unsplash
+  first, Pexels when Unsplash finds none or refuses, each with its own Worker
+  secret (`UNSPLASH_ACCESS_KEY`, `PEXELS_API_KEY`) and either alone enough. A
+  first build with an empty media library is offered up to eight photos of
+  its subject, hotlinked and credited the way each service asks, and lists
+  the ones it uses as sample content (D177). Each Unsplash photo a finished
+  project keeps is reported to its download endpoint.
 - **D177. Sample content in place, listed in the builder (Chris, 2026-10-09:
   "Sample content").** Where a request leaves out a detail the page needs, the
   build writes plausible sample content instead of a hedge or a marked

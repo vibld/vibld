@@ -30,6 +30,11 @@ import {
   MAX_REFERENCE_CHARS,
 } from '@vibld/ai/limits';
 import {
+  MAX_CREDIT_CHARS,
+  MAX_STOCK_URL_CHARS,
+  STOCK_PHOTO_LIMIT,
+} from '@vibld/ai/stock-photos';
+import {
   parseStyleGallery,
   styleGalleryGuidance,
 } from '@vibld/ai/style-gallery';
@@ -320,5 +325,32 @@ describe('what a build reserves for the media library', () => {
 
   it('tracks the real section rather than hiding it under a round number', () => {
     assert.ok(MAX_MEDIA_SECTION_CHARS <= largestMediaSection() * 2);
+  });
+});
+
+/**
+ * Stock photos (D176) stand where an empty library's sentence would, so
+ * they share its reservation: the most a search can offer, each with the
+ * longest URLs, credit and alt text it may carry.
+ */
+describe('what a build reserves for stock photos', () => {
+  it('fits the largest offer in the media reservation', () => {
+    const url = `https://images.unsplash.com/${'a'.repeat(MAX_STOCK_URL_CHARS)}`;
+    const section = mediaSection(
+      [],
+      Array.from({ length: STOCK_PHOTO_LIMIT + 5 }, () => ({
+        source: 'unsplash' as const,
+        url: `${url}?w=1600&q=80&auto=format&fit=max`,
+        width: 1600,
+        height: 99999,
+        alt: '"'.repeat(300),
+        photographer: '"'.repeat(MAX_CREDIT_CHARS),
+        photographerUrl: url,
+      })),
+    )!;
+    assert.ok(
+      section.length <= MAX_MEDIA_SECTION_CHARS,
+      `a ${section.length}-character stock section is over the ${MAX_MEDIA_SECTION_CHARS} reserved`,
+    );
   });
 });

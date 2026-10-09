@@ -7,8 +7,10 @@ import {
   PlanProvider,
   RUN_STEP_TIMEOUT_MS,
   createPlanClient,
+  pageCode,
 } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
+import { trackStockDownloads } from '@vibld/ai/stock-photos';
 import type { RunStepTrace } from '@vibld/core';
 
 import { D1GenerationStore } from './generation-store.ts';
@@ -518,6 +520,11 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
                   : {}),
                 ...(params.knowledge ? { knowledge: params.knowledge } : {}),
                 ...(params.media ? { media: params.media } : {}),
+                // The photos the build was offered (D176), so a repair is
+                // not told to paint in CSS the images the page already has.
+                ...(params.stockPhotos?.length
+                  ? { stockPhotos: params.stockPhotos }
+                  : {}),
                 onUnexpectedError: (error) => {
                   console.error('repair generation failed', error);
                 },
@@ -635,6 +642,28 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
     // accepted revision, so returning the first attempt here would show the
     // reader the broken files while the store held the fixed ones (internal issue 194).
     const final = repair.result ?? generation.result;
+
+    // Unsplash counts a use of each of its photos the project's page code
+    // kept (D176): not one named only in DESIGN.md or a comment.
+    // Once, with no retry: a retried call would count a use twice. Never a
+    // failure of the run, which is over.
+    const finalFiles = final.accepted?.files;
+    if (params.stockPhotos?.length && finalFiles) {
+      await step
+        .do(
+          'stock-downloads',
+          { retries: { limit: 0, delay: '5 seconds' }, timeout: '30 seconds' },
+          () =>
+            trackStockDownloads(
+              params.stockPhotos,
+              pageCode(finalFiles),
+              this.env,
+            ),
+        )
+        .catch((error: unknown) => {
+          console.error('could not report stock photo use', error);
+        });
+    }
     if (!checking) return final;
 
     // What the check found, for the revision the run ended at (D69): the

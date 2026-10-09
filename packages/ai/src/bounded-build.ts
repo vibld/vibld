@@ -71,6 +71,7 @@ import {
   withScaffold,
 } from './scaffold.ts';
 import type { ExtraDependency, ScaffoldInput } from './scaffold.ts';
+import type { StockPhoto } from './stock-photos.ts';
 
 /**
  * A build in bounded steps (docs/decisions.md, "Resolved 2026-09-29").
@@ -816,6 +817,11 @@ export type BoundedBuilderOptions = Pick<
    */
   inspiration?: string;
   /**
+   * Stock photos found for the request (D176), offered where the media
+   * library has nothing of the person's own.
+   */
+  stockPhotos?: readonly StockPhoto[];
+  /**
    * Told about an error that is not this package's own, before it is
    * replaced by a generic sentence. The Worker logs it; nothing else sees
    * it, because an upstream message can quote the request back.
@@ -866,6 +872,7 @@ export class BoundedBuilder {
       o.media,
       o.galleryGuidance,
       o.inspiration,
+      o.stockPhotos,
     );
   }
 

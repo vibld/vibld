@@ -142,6 +142,7 @@ export {
   checkDesign,
   describeFindings,
   normalizeCssValue,
+  pageCode,
 } from './design-checks.ts';
 export type {
   DesignFinding,

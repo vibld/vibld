@@ -5,6 +5,8 @@ import type { DesignSpec, MotionEntry } from './design-spec.ts';
 import { motionCoverage } from './motion-syntax.ts';
 import type { MotionBindings } from './motion-syntax.ts';
 import { dialectOf, expressionEnds, scriptSyntax } from './script-syntax.ts';
+import { stockCredit, uncreditedStockPhotos } from './stock-photos.ts';
+import type { StockPhoto } from './stock-photos.ts';
 import type { ScriptDialect, ScriptSyntax } from './script-syntax.ts';
 
 /**
@@ -59,6 +61,8 @@ interface ProjectFileLike {
 
 const SOURCE = /\.(tsx|jsx|ts|js|mjs|cjs|mts|cts|html|vue|svelte|astro)$/i;
 const STYLE = /\.(css|scss|sass|less)$/i;
+/** Data a page imports and shows: content files, inline graphics. */
+const PAGE_DATA = /\.(json|svg)$/i;
 /** Tailwind's own config, the only place its `theme.screens` means anything. */
 const TAILWIND_CONFIG = /(^|\/)tailwind\.config\.(js|cjs|mjs|ts|cts|mts)$/i;
 /** Source whose attributes follow HTML's rules rather than JSX's. */
@@ -4731,6 +4735,38 @@ function enclosingComponent(source: string, at: number): string | undefined {
     found = match[1] ?? match[2];
   }
   return found;
+}
+
+/**
+ * A project's page code, its source files and stylesheets, without their
+ * comments, and the data files a page imports (JSON, SVG): what a
+ * visitor's browser runs or shows, so not DESIGN.md or a note in a comment (`trackStockDownloads` reads it, D176).
+ */
+export function pageCode(
+  files: readonly { path: string; content: string }[],
+): { path: string; content: string }[] {
+  return files
+    .filter(
+      (file) =>
+        SOURCE.test(file.path) ||
+        STYLE.test(file.path) ||
+        PAGE_DATA.test(file.path),
+    )
+    .map((file) =>
+      PAGE_DATA.test(file.path)
+        ? withoutXmlComments(file)
+        : { path: file.path, content: withoutComments(file) },
+    );
+}
+
+/** A data file as a page shows it: an SVG without its XML comments. */
+function withoutXmlComments(file: { path: string; content: string }): {
+  path: string;
+  content: string;
+} {
+  return /\.svg$/i.test(file.path)
+    ? { path: file.path, content: file.content.replace(/<!--[\s\S]*?-->/g, '') }
+    : file;
 }
 
 /**
@@ -10053,6 +10089,11 @@ export function checkDesign(
      * show as broken. Absent, the check is skipped rather than guessed at.
      */
     mediaPaths?: readonly string[];
+    /**
+     * The stock photos the build was offered (D176). Given, each one the
+     * project uses without its credit is an error: both services ask for it.
+     */
+    stockPhotos?: readonly StockPhoto[];
   } = {},
 ): DesignReport {
   // Comments out first, of every file, so a stylesheet that imports
@@ -10087,6 +10128,29 @@ export function checkDesign(
     findings.push(
       ...mediaFindings(options.mediaPaths, files, css + '\n' + source),
     );
+  }
+  if (options.stockPhotos) {
+    // The page's own code with its comments out, and the data it imports,
+    // so a credit copied into DESIGN.md's sample list or a comment does not
+    // count as one shown.
+    const rendered = [
+      ...clean.filter((file) => SOURCE.test(file.path)),
+      ...clean
+        .filter((file) => PAGE_DATA.test(file.path))
+        .map(withoutXmlComments),
+    ];
+    const styles = clean.filter((file) => STYLE.test(file.path));
+    for (const photo of uncreditedStockPhotos(
+      options.stockPhotos,
+      rendered,
+      styles,
+    )) {
+      findings.push({
+        severity: 'error',
+        check: 'stock-credit',
+        detail: `The page uses the stock photo ${photo.url} without its credit. Add it beside the photo or in the footer, with both links: ${stockCredit(photo)}`,
+      });
+    }
   }
   if (spec) {
     findings.push(

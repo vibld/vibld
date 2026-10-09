@@ -6,6 +6,8 @@ import {
   resolveModel,
 } from '@vibld/ai';
 import type { MediaManifestEntry, PlanUsage } from '@vibld/ai';
+import { findStockPhotos } from '@vibld/ai/stock-photos';
+import type { StockPhoto, StockPhotoKeys } from '@vibld/ai/stock-photos';
 import { DEFAULT_PROJECT_NAME, sleep } from '@vibld/core';
 import type { RunRefusal } from '@vibld/core';
 
@@ -280,7 +282,12 @@ import {
   refusal,
 } from './access-handlers.ts';
 
-export interface Env extends PrincipalEnv, StyleGalleryEnv {
+export interface Env
+  extends
+    PrincipalEnv,
+    StyleGalleryEnv,
+    // Stock photo search (D176). Worker secrets; either alone works.
+    StockPhotoKeys {
   /** Worker secret. Never reaches the browser. */
   ANTHROPIC_API_KEY?: string;
   /** Worker secret. Never reaches the browser. */
@@ -1626,6 +1633,24 @@ async function handlePlan(
     }
   }
 
+  // Stock photos of the subject (D176), on a first build whose person has
+  // uploaded nothing of their own: Unsplash, then Pexels. After the gates
+  // above, so a refused request spends none of either service's hourly
+  // allowance. A search that finds none or fails leaves the build as it was.
+  let stockPhotos: StockPhoto[] | undefined;
+  if (!parsed.value.baseRevision && (!media || media.length === 0)) {
+    const found = await findStockPhotos(parsed.value.prompt, env).catch(
+      (error: unknown) => {
+        console.error('stock photo search failed', error);
+        return null;
+      },
+    );
+    for (const miss of found?.misses ?? []) {
+      console.warn(`stock photos: ${miss.source} gave none (${miss.reason})`);
+    }
+    if (found && found.photos.length > 0) stockPhotos = found.photos;
+  }
+
   // The run's row, before the run exists rather than from the moment its
   // model steps finish (`openStage`). Until then a bounded build has no
   // row at all, and a builder reopening the project could not see that it
@@ -1678,6 +1703,7 @@ async function handlePlan(
           ? { styleTokens: gallery.tokens, galleryGuidance: gallery.guidance }
           : {}),
         ...(inspiration ? { inspiration } : {}),
+        ...(stockPhotos ? { stockPhotos } : {}),
         ...(knowledge.value ? { knowledge: knowledge.value } : {}),
         ...(chosenMockup.value ? { chosenMockup: chosenMockup.value } : {}),
         ...(referenceContext ? { referenceContext } : {}),

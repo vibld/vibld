@@ -38,6 +38,7 @@ import type {
   PlanUsage,
 } from '@vibld/ai';
 import type { StylePresetId } from '@vibld/ai/style-presets';
+import type { StockPhoto } from '@vibld/ai/stock-photos';
 import type { StyleDna } from '@vibld/ai/style-dna';
 import { createValidator } from '../src/generation/validator.ts';
 import type { RunPhase } from '../src/generation/run-phase.ts';
@@ -112,6 +113,11 @@ export interface WorkflowParams {
    * (`readCatalogInspiration`), on a first build with no direction chosen.
    */
   inspiration?: string;
+  /**
+   * Stock photos found for the request (`findStockPhotos`, D176), on a
+   * first build whose person has uploaded no media.
+   */
+  stockPhotos?: StockPhoto[];
   knowledge?: string;
   /**
    * Already-fetched, already-truncated text from a reference URL (L52-style
@@ -600,6 +606,11 @@ export interface GenerationWorkflowEnv {
    */
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+  /**
+   * Read once a build is over, to tell Unsplash which of the stock photos
+   * it was offered the project uses (D176, `trackStockDownloads`).
+   */
+  UNSPLASH_ACCESS_KEY?: string;
   VIBLD_FREE_MONTHLY_MICRO_USD?: string;
   VIBLD_FREE_TRIAL_MICRO_USD?: string;
   /** Read by `reserveBudget` when the repair holds its own reservation. */
@@ -1256,6 +1267,7 @@ export async function buildInSteps(
       ? { galleryGuidance: params.galleryGuidance }
       : {}),
     ...(params.inspiration ? { inspiration: params.inspiration } : {}),
+    ...(params.stockPhotos?.length ? { stockPhotos: params.stockPhotos } : {}),
     ...(params.styleDna && Object.keys(params.styleDna).length > 0
       ? { styleDna: params.styleDna }
       : {}),
@@ -1625,6 +1637,7 @@ export async function verifyAndRepair(
     ...(params.media
       ? { mediaPaths: params.media.map((entry) => entry.path) }
       : {}),
+    ...(params.stockPhotos?.length ? { stockPhotos: params.stockPhotos } : {}),
   });
   const designCounts = {
     ...(design.errors.length > 0 ? { designErrors: design.errors.length } : {}),
@@ -1941,7 +1954,14 @@ export async function verifyAndRepair(
   // use from the spec instead of using it.
   const after = checkDesign(
     withRecordOf(result.accepted.files, outcome.result.accepted.files),
-    params.media ? { mediaPaths: params.media.map((entry) => entry.path) } : {},
+    {
+      ...(params.media
+        ? { mediaPaths: params.media.map((entry) => entry.path) }
+        : {}),
+      ...(params.stockPhotos?.length
+        ? { stockPhotos: params.stockPhotos }
+        : {}),
+    },
   );
 
   // A repair bought for the design alone, of a project that built, that is
