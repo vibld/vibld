@@ -632,3 +632,35 @@ describe('the motion table (D75)', () => {
     assert.equal(DesignSpecSchema.safeParse(older).success, false);
   });
 });
+
+describe('the sample content to replace (D177)', () => {
+  const sampled = {
+    ...SPEC,
+    sample: ['Our story: how they met', 'Footer: phone and email'],
+  };
+
+  it('is listed for a person, and reads back exactly', () => {
+    const md = renderDesignMd(sampled);
+    assert.ok(
+      md.includes(
+        '## Sample content to replace\n\n- Our story: how they met\n- Footer: phone and email\n',
+      ),
+    );
+    assert.deepEqual(readDesignSpec(md), sampled);
+  });
+
+  it('is left out when everything came from the request', () => {
+    assert.ok(!renderDesignMd(SPEC).includes('Sample content'));
+  });
+
+  it('reads a spec from before the list as one with none', () => {
+    const { sample: _sample, ...older } = SPEC;
+    const md = `---\n${JSON.stringify(older)}\n---\n\n# Design\n`;
+    assert.deepEqual(readDesignSpec(md), { ...older, sample: [] });
+  });
+
+  it('is required of a model', () => {
+    const { sample: _sample, ...older } = SPEC;
+    assert.equal(DesignSpecSchema.safeParse(older).success, false);
+  });
+});

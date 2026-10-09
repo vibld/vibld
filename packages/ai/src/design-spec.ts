@@ -134,6 +134,12 @@ export const DesignSpecSchema = z.object({
   avoid: z.array(z.string().min(1)),
   /** Observable facts a reviewer can confirm with the page open. */
   checks: z.array(z.string().min(1)),
+  /**
+   * The sample content written where the request left a detail out (D177),
+   * each entry where it is and what it stands in for. The builder lists it
+   * as content to replace, so the page itself carries no hedges.
+   */
+  sample: z.array(z.string().min(1)),
 });
 
 export type DesignSpec = z.infer<typeof DesignSpecSchema>;
@@ -146,6 +152,8 @@ export type DesignSpec = z.infer<typeof DesignSpecSchema>;
  */
 export const DesignSpecReadSchema = DesignSpecSchema.extend({
   motion: z.array(MotionEntrySchema).catch([]),
+  // A spec from before D177 has no sample list, and reads with an empty one.
+  sample: z.array(z.string().min(1)).catch([]),
 });
 
 export const DESIGN_MD_PATH = 'DESIGN.md';
@@ -273,6 +281,16 @@ ${list(spec.avoid)}
 ## Checks
 
 ${list(spec.checks)}
+${sampleSection(spec.sample)}`;
+}
+
+/** The sample content still to replace, for a person reading DESIGN.md. */
+function sampleSection(sample: readonly string[]): string {
+  if (sample.length === 0) return '';
+  return `
+## Sample content to replace
+
+${sample.map((entry) => `- ${entry}`).join('\n')}
 `;
 }
 

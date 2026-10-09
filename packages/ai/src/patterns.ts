@@ -52,7 +52,7 @@ export const MARKETING_PAGE_PATTERNS: readonly PagePattern[] = [
     name: 'About page',
     triggers: ['about page', 'about us', 'our story', 'company page'],
     guidance:
-      'A specific reason this exists, not a generic mission statement -- what problem, for whom, why now. Real people or a real timeline if the request supplies them; a placeholder clearly marked as one if it does not. This page earns trust through specificity, not through more adjectives.',
+      'A specific reason this exists, not a generic mission statement -- what problem, for whom, why now. Real people or a real timeline if the request supplies them; plausible sample content listed in the spec sample if it does not. This page earns trust through specificity, not through more adjectives.',
   },
   {
     id: 'contact',
@@ -97,7 +97,7 @@ export const MARKETING_PAGE_PATTERNS: readonly PagePattern[] = [
     name: 'Blog / articles index',
     triggers: ['blog page', 'blog index', 'articles page', 'news page'],
     guidance:
-      'A card per post with a title, date, and one-line summary -- enough to decide whether to click, not the full post. If no real posts exist yet, a small number of placeholder entries clearly marked as such, rather than an empty page or invented article content presented as real.',
+      'A card per post with a title, date, and one-line summary -- enough to decide whether to click, not the full post. If no real posts exist yet, a small number of sample entries listed in the spec sample, rather than an empty page.',
   },
   {
     id: 'careers',

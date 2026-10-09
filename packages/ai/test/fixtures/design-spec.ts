@@ -60,4 +60,5 @@ export const SPEC: DesignSpec = {
   do: ['Keep the hero scrim at rgba(2,10,18,.57) at the top'],
   avoid: ['A floating arrow button: it competes with the one form'],
   checks: ['The headline stays on one line at 1440px'],
+  sample: [],
 };

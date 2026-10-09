@@ -3142,3 +3142,10 @@ a.projectlist__name:hover {
   color: var(--muted);
   font-size: 0.875rem;
 }
+
+/* The sample content a build wrote where the request said nothing (D177). */
+.sample-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+}

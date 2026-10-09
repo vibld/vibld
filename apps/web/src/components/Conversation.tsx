@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { BuilderState } from '../generation/session.ts';
 import { LifecycleBar } from './LifecycleBar.tsx';
 import { ProgressMeter } from './ProgressMeter.tsx';
+import { SampleContent } from './SampleContent.tsx';
 import { StatusBanner } from './StatusBanner.tsx';
 import { Transcript } from './Transcript.tsx';
 
@@ -55,6 +56,10 @@ export function Conversation({ state }: { state: BuilderState }) {
         <StatusBanner state={state} />
       ) : null}
       <Transcript turns={turns} />
+      {/* After the conversation, at rest: what to replace in what was built. */}
+      {state.running ? null : (
+        <SampleContent snapshot={state.acceptedSnapshot} />
+      )}
       {/*
         Only while a run is going: at rest it was four grey dots that meant
         nothing yet, above the composer on every screen.

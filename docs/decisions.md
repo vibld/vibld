@@ -396,6 +396,24 @@ paying accounts until midnight UTC.
   (internal PR 391) and the v0.5.0 documentation pass. Notes in
   `docs/releases/v0.6.0.md`, published by the Public release workflow after
   the export of the commit that adds them.
+- **D175. Generated design quality is compared before it is changed (Chris,
+  2026-10-09: "Compare first").** The same wedding request was built on the
+  paid default and on Claude Opus 5.5; the findings and screenshots are the
+  design-quality review of 2026-10-09. The prompt fixes that followed are
+  internal PR 394 (the template catalog as art direction for a typed request) and internal PR 396
+  (motion matched to the subject).
+- **D176. Generated sites get photos from a stock API (Chris, 2026-10-09:
+  "Stock API").** Unsplash or Pexels; not built until one is chosen and a key
+  is configured.
+- **D177. Sample content in place, listed in the builder (Chris, 2026-10-09:
+  "Sample content").** Where a request leaves out a detail the page needs, the
+  build writes plausible sample content instead of a hedge or a marked
+  placeholder, and lists each piece in the spec's `sample`; the builder shows
+  that list as content to replace and DESIGN.md repeats it. Testimonials,
+  reviews, ratings, logos, statistics and awards are never sample content.
+- **D178. The paid default stays, and is compared again later (Chris,
+  2026-10-09: "Sol, retest later").** GPT-6 Sol remains the paid default; the
+  comparison with Opus 5.5 is rerun after the prompt, catalog and photo fixes.
 
 ### Checkpoint history, 2026-10-03
 

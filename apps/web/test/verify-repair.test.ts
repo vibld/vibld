@@ -1494,6 +1494,7 @@ describe('judging a design repair', () => {
             do: [],
             avoid: [],
             checks: [],
+            sample: [],
           }),
         },
       ],
