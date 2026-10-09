@@ -99,4 +99,30 @@ describe("the builder's shell", () => {
     ]);
     assert.ok(ours.equals(theirs), 'the two hosts ship different touch icons');
   });
+
+  it('links the .ico and the manifest, and ships both', async () => {
+    // The .ico used to answer with this shell's HTML (the single-page
+    // fallback), which is worse than a 404: a browser caches it as the icon.
+    const html = await readFile(SHELL, 'utf8');
+    assert.match(html, /<link[^>]+rel="icon"[^>]+href="\/favicon\.ico"/);
+    assert.match(
+      html,
+      /<link[^>]+rel="manifest"[^>]+href="\/manifest\.webmanifest"/,
+    );
+    const manifest = JSON.parse(
+      await readFile(
+        new URL('../public/manifest.webmanifest', import.meta.url),
+        'utf8',
+      ),
+    ) as { icons: { src: string }[]; display: string };
+    assert.equal(manifest.display, 'standalone');
+    // The same bytes as vibld.com's, for the reason the touch icon is.
+    for (const src of ['/favicon.ico', ...manifest.icons.map((i) => i.src)]) {
+      const [ours, theirs] = await Promise.all([
+        readFile(new URL(`../public${src}`, import.meta.url)),
+        readFile(new URL(`../../marketing/public${src}`, import.meta.url)),
+      ]);
+      assert.ok(ours.equals(theirs), `the two hosts ship different ${src}`);
+    }
+  });
 });

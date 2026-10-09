@@ -34,9 +34,13 @@
       vibld.com and a blank page glyph on app.vibld.com. Both files are
       generated from @vibld/brand by apps/marketing/scripts/brand-assets.ts,
       which writes them here as well, so they cannot drift from the mark.
+      The .ico is for whatever does not read SVG icons; the manifest gives
+      "Add to Home Screen" a real icon.
     -->
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
   </head>
   <body>
     <div id="root"></div>

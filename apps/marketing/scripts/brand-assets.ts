@@ -121,6 +121,120 @@ export function socialSvg({ blend }: { blend: boolean }): string {
 `;
 }
 
+/**
+ * The mark scaled into the middle of a full-bleed 32 box.
+ *
+ * For the two surfaces that crop the tile to a shape of their own: Android's
+ * adaptive icons and BIMI's circle. Both keep only a central circle (80% of
+ * the side for a maskable icon), and the mark at full size reaches past it:
+ * the miter at the foot of the offset stroke ends near y 30. Scaled by 0.72
+ * about the middle, every point of it sits within 11 of the center.
+ */
+function centeredMark(): string {
+  return `<g transform="translate(16 16) scale(0.72) translate(-16 -17.5)">
+    <path d="${CHEVRON}" stroke="${VERMILION.hex}" stroke-width="${STROKE}" fill="none" stroke-linejoin="miter"/>
+    <path d="${offsetPath()}" stroke="${CHALK.hex}" stroke-width="${STROKE}" fill="none" stroke-linejoin="miter"/>
+  </g>`;
+}
+
+/** The icon for Android's adaptive icons: full bleed, mark in the safe zone. */
+export function maskableSvg(): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <rect width="32" height="32" fill="${GRAPHITE.hex}"/>
+  ${centeredMark()}
+</svg>
+`;
+}
+
+/**
+ * The logo mailbox providers show beside vibld.com mail (BIMI, D173).
+ *
+ * BIMI accepts one SVG profile, "SVG Tiny Portable/Secure": version 1.2,
+ * `baseProfile="tiny-ps"`, a `<title>`, a square viewBox, no `x`/`y` on the
+ * root, no scripts, no external references and no blend modes, which is why
+ * this draws both strokes plainly, as the rasters do. Providers crop it to a
+ * circle, so the tile is square and full-bleed and the mark is the centered
+ * one, the way the hand-drawn file that shipped with D173 had it.
+ */
+export function bimiSvg(): string {
+  return `<svg version="1.2" baseProfile="tiny-ps" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>${WORDMARK}</title>
+  <rect width="32" height="32" fill="${GRAPHITE.hex}"/>
+  ${centeredMark()}
+</svg>
+`;
+}
+
+/** The PNG sizes `favicon.ico` carries: tab, taskbar and shortcut. */
+export const ICO_SIZES = [16, 32, 48] as const;
+
+/** The PNG icons the web manifest names. */
+export const MANIFEST_ICONS = [
+  { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+  { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+  {
+    src: '/icon-maskable-512.png',
+    sizes: '512x512',
+    type: 'image/png',
+    purpose: 'maskable',
+  },
+] as const;
+
+/**
+ * The web app manifest, for "Add to Home Screen" and Android's launcher.
+ *
+ * Without one, Chrome on Android builds a home-screen icon from a screenshot
+ * or the first letter of the title. The builder opens standalone, like the
+ * app it is; vibld.com stays a page in the browser.
+ */
+export function webManifest({ app }: { app: 'marketing' | 'builder' }): string {
+  const manifest = {
+    name: app === 'builder' ? `${WORDMARK} builder` : WORDMARK,
+    short_name: WORDMARK,
+    start_url: '/',
+    display: app === 'builder' ? 'standalone' : 'browser',
+    background_color: GRAPHITE.hex,
+    theme_color: GRAPHITE.hex,
+    icons: MANIFEST_ICONS,
+  };
+  return `${JSON.stringify(manifest, null, 2)}\n`;
+}
+
+/**
+ * Pack PNGs into one `.ico`.
+ *
+ * Browsers, crawlers and RSS readers still ask for `/favicon.ico` without
+ * reading any `<link>`, and vibld.com answered them with its 404 page while
+ * app.vibld.com answered with the app's HTML shell. Every browser since
+ * Windows Vista reads PNG-compressed entries, so each image is stored as the
+ * PNG it already is: a 6-byte header, a 16-byte directory entry per image,
+ * then the images.
+ */
+export function icoFromPngs(
+  images: readonly { size: number; png: Buffer }[],
+): Buffer {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(images.length, 4);
+  let offset = 6 + 16 * images.length;
+  const entries = images.map(({ size, png }) => {
+    const entry = Buffer.alloc(16);
+    // 0 in the width and height bytes means 256.
+    entry.writeUInt8(size >= 256 ? 0 : size, 0);
+    entry.writeUInt8(size >= 256 ? 0 : size, 1);
+    entry.writeUInt8(0, 2);
+    entry.writeUInt8(0, 3);
+    entry.writeUInt16LE(1, 4);
+    entry.writeUInt16LE(32, 6);
+    entry.writeUInt32LE(png.length, 8);
+    entry.writeUInt32LE(offset, 12);
+    offset += png.length;
+    return entry;
+  });
+  return Buffer.concat([header, ...entries, ...images.map((i) => i.png)]);
+}
+
 async function main(): Promise<void> {
   await mkdir(PUBLIC, { recursive: true });
   await mkdir(BUILDER_PUBLIC, { recursive: true });
@@ -130,6 +244,15 @@ async function main(): Promise<void> {
   await writeFile(
     join(BUILDER_PUBLIC, 'favicon.svg'),
     iconSvg({ blend: true }),
+  );
+  await writeFile(join(PUBLIC, 'bimi.svg'), bimiSvg());
+  await writeFile(
+    join(PUBLIC, 'manifest.webmanifest'),
+    webManifest({ app: 'marketing' }),
+  );
+  await writeFile(
+    join(BUILDER_PUBLIC, 'manifest.webmanifest'),
+    webManifest({ app: 'builder' }),
   );
 
   // sharp is a transitive dev dependency (wrangler > miniflare). Required
@@ -141,14 +264,13 @@ async function main(): Promise<void> {
   // the same object but TypeScript resolves the namespace rather than the
   // call signature under this module setting, so the shape is named here
   // instead of asserted against the namespace.
-  type Rasteriser = (input: Buffer) => {
-    resize(
-      width: number,
-      height: number,
-    ): Rasteriser extends never ? never : ReturnType<Rasteriser>;
-    png(): { toFile(path: string): Promise<unknown> };
+  interface Pipeline {
+    resize(width: number, height: number): Pipeline;
+    png(): Pipeline;
     toFile(path: string): Promise<unknown>;
-  };
+    toBuffer(): Promise<Buffer>;
+  }
+  type Rasteriser = (input: Buffer) => Pipeline;
   const sharp = require('sharp') as unknown as Rasteriser;
 
   await sharp(Buffer.from(iconSvg({ blend: false })))
@@ -160,6 +282,32 @@ async function main(): Promise<void> {
     .resize(180, 180)
     .png()
     .toFile(join(BUILDER_PUBLIC, 'apple-touch-icon.png'));
+
+  const raster = (svg: string, size: number): Promise<Buffer> =>
+    sharp(Buffer.from(svg)).resize(size, size).png().toBuffer();
+  const ico = icoFromPngs(
+    await Promise.all(
+      ICO_SIZES.map(async (size) => ({
+        size,
+        png: await raster(iconSvg({ blend: false }), size),
+      })),
+    ),
+  );
+  for (const dir of [PUBLIC, BUILDER_PUBLIC]) {
+    await writeFile(join(dir, 'favicon.ico'), ico);
+    await writeFile(
+      join(dir, 'icon-192.png'),
+      await raster(iconSvg({ blend: false }), 192),
+    );
+    await writeFile(
+      join(dir, 'icon-512.png'),
+      await raster(iconSvg({ blend: false }), 512),
+    );
+    await writeFile(
+      join(dir, 'icon-maskable-512.png'),
+      await raster(maskableSvg(), 512),
+    );
+  }
 
   await sharp(Buffer.from(socialSvg({ blend: false })))
     .png()

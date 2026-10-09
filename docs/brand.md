@@ -164,14 +164,24 @@ pnpm --filter @vibld/marketing brand:assets
   `screen`
 - `mark-mono.svg`, the single-ink fallback, in graphite
 - `apple-touch-icon.png`, 180x180, the favicon's tile
+- `favicon.ico`, the favicon's tile at 16, 32 and 48, for whatever asks for
+  `/favicon.ico` by name
+- `icon-192.png`, `icon-512.png` and `icon-maskable-512.png` (full bleed, the
+  mark scaled into the safe zone), named by `manifest.webmanifest`
+- `bimi.svg`, the logo mail providers show beside vibld.com mail (D173): SVG
+  Tiny Portable/Secure, full bleed, the mark scaled into the middle for the
+  circle crop. The test also checks the profile's rules.
 - `og-image.png`, 1200x630: graphite ground, the tiled mark's arrangement at
   scale, the wordmark in chalk (16.73), the tagline in the dark link ink
   (7.56), and a vermilion band along the foot. Vermilion would pass as text
   on graphite (5.49), and is still not used as text there: a rule with an
   exception for the one image every share carries is not a rule.
 
-`apps/marketing/test/brand-assets.test.ts` regenerates the SVGs and fails if
-the committed files differ, so they cannot drift from the palette.
+`apps/marketing/test/brand-assets.test.ts` regenerates the SVGs and the
+manifest and fails if the committed files differ, so they cannot drift from
+the palette. The icons and the manifest are written to app.vibld.com's
+`apps/web/public/` too, and `apps/web/test/shell-brand.test.ts` checks both
+hosts ship the same bytes.
 
 **Never write `oklch()` into a file rendered outside a browser.** The first
 social card the previous palette produced came out entirely black: librsvg,
