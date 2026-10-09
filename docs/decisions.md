@@ -391,6 +391,11 @@ paying accounts until midnight UTC.
   `p=quarantine` or `p=reject` (L19's later steps), and Gmail and Apple Mail
   also need a Verified Mark Certificate or Common Mark Certificate (`a=`),
   which vibld.com does not have.
+- **D174. v0.6.0 is released (Chris, 2026-10-09: "deploy the new release
+  v0.6 when the GH tools are ready").** After GitHub on self-hosted copies
+  (internal PR 391) and the v0.5.0 documentation pass. Notes in
+  `docs/releases/v0.6.0.md`, published by the Public release workflow after
+  the export of the commit that adds them.
 
 ### Checkpoint history, 2026-10-03
 

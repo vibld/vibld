@@ -42,9 +42,19 @@ The "Live Build" design (approved 2026-09-27), in the brand's colors:
   one cannot read as the other. `test/plans.test.ts` pins the prices to
   `docs/decisions.md` (L36, L38), and `turbo.json` in this directory makes a
   change to those files rebuild the site.
-- **Examples** ends with a separate, marked section of hand-built starter
-  templates (`app/templates.ts`), after every generated example, so the
-  page's "no hand edits" promise stays about the examples it is made of.
+- **Examples** has a sample gallery (D153): one brief per kind of site,
+  built in several styles, every one a real build. It ends with a separate,
+  marked section of hand-built starter templates (`app/templates.ts`),
+  after every generated example, so the page's "no hand edits" promise
+  stays about the examples it is made of.
+- **Templates** (`/templates`, `/templates/<group>` and
+  `/templates/<group>/<subcategory>`): the design catalog by category and
+  subcategory (D161, map in `packages/ai/src/design-categories.ts`), each a
+  prerendered page, with the style gallery's entries as template cards
+  under the website subcategory their industry names (D162). Their previews
+  past the first page load from `/templates/style-cards/<n>.json`.
+- **Style gallery** (`/styles/gallery` and `/styles/gallery/<id>`, D143):
+  one page per complete style.
 - **Styles**: every preset in `@vibld/ai/style-presets`, each drawn as a
   miniature site in HTML and CSS (`components/SiteMiniature.tsx`,
   `styles/miniature.css`). Presets with a palette are drawn only in their own

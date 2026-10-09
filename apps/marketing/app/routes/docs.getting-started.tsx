@@ -3,7 +3,7 @@ import { DOC_GUIDES, SITE, metaFor } from '../site';
 import { FREE_PLAN } from '../plan-sources';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'getting-started')!;
-const CHECKED = '2026-09-30';
+const CHECKED = '2026-10-09';
 
 export function meta() {
   return metaFor('/docs/getting-started');
@@ -74,8 +74,9 @@ export default function GettingStarted() {
         <li>
           <strong>Templates</strong> is the{' '}
           <a href="/templates">template catalog</a>, searchable by name and
-          filtered by kind and use case. Adding one puts its brief in your
-          message, as “Start from this template” on a template’s page does.
+          sorted by category (Websites, Apps, App screens) and subcategory, the
+          gallery styles among them. Adding one puts its brief in your message,
+          as “Start from this template” on a template’s page does.
         </li>
         <li>
           <strong>Reference</strong> is the address of a page to start from.
@@ -99,7 +100,11 @@ export default function GettingStarted() {
       <p>
         The model is the dropdown beside the send button. Which models are
         offered depends on the deployment and on your plan: a Free account
-        builds with {FREE_PLAN.models} only. The settings menu, under{' '}
+        builds with {FREE_PLAN.models} only. Beside the send button, the
+        composer shows what a build on that model is expected to cost, from the
+        last 30 days of builds on it, or the most it can cost, as “Up to”, when
+        there are too few. A project's first build also includes the most its
+        draft can cost. The settings menu, under{' '}
         <strong>This deployment</strong>, reports which model actually served
         the last run rather than which one was requested.
       </p>

@@ -2,7 +2,7 @@ import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'running-your-project')!;
-const CHECKED = '2026-09-30';
+const CHECKED = '2026-10-09';
 
 export function meta() {
   return metaFor('/docs/running-your-project');
@@ -45,9 +45,11 @@ export default function RunningYourProject() {
       <p>
         Sandboxes expire: after ten minutes without use, and thirty minutes
         after starting whatever happens. You have one at a time, so opening
-        another project stops it. A sandbox is for looking at your project, not
-        hosting it. For something that stays up, publish it or deploy it
-        yourself: see{' '}
+        another project stops it. On the Free plan, new previews stop starting
+        once two hours of the day are used (one already running finishes), and a
+        Free preview can wait in the queue while a few sandboxes are kept for
+        paid plans. A sandbox is for looking at your project, not hosting it.
+        For something that stays up, publish it or deploy it yourself: see{' '}
         <a href="/docs/taking-your-code">Taking your code with you</a>.
       </p>
 

@@ -80,6 +80,7 @@ describe('the roadmap data', () => {
     }
   });
 
+  // Checkpoint history moved to shipped when the History tab did (D152).
   it('uses the grouping Chris set on 2026-09-27, exactly', () => {
     const titles = (status: string) =>
       ROADMAP_ITEMS.filter((item) => item.status === status).map(
@@ -90,7 +91,6 @@ describe('the roadmap data', () => {
       'Modern component stack',
     ]);
     assert.deepEqual(titles('upcoming'), [
-      'Checkpoint history and rollback',
       'Custom domains',
       'Screenshot and image import',
     ]);
@@ -106,6 +106,7 @@ describe('the roadmap data', () => {
       'Command-line sync',
     ]);
     assert.deepEqual(titles('shipped'), [
+      'Checkpoint history and rollback',
       'Sandbox previews with share links',
       'One-step publishing',
       'GitHub pull requests',

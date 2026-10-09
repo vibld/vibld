@@ -323,7 +323,7 @@ function Pricing() {
           eyebrow="Pricing"
           id="pricing-title"
           title="A price, and the model spend it includes"
-          lede="Model spend is what costs money to run. Every plan, Free included, comes with some each month."
+          lede="Model spend is what costs money to run. Every paid plan comes with some each month, and Free does once a card is saved, after a one-time trial."
         />
         <PlanCards />
         <PlanFacts />

@@ -35,9 +35,12 @@ export default function Pricing() {
           <p className="lb-note">
             Prices are in US dollars and are charged through Stripe Checkout,
             which shows the total before anything is charged. Nothing is charged
-            automatically past the allowance. A build you cannot fully fund is
-            started smaller rather than refused, and once too little is left for
-            even that, runs are refused until the month resets or you buy a
+            automatically past the allowance unless you turn it on: auto-reload
+            buys a $10 top-up on your saved card when less than $1 is left, up
+            to a monthly cap you choose, and Start Build moves a Free account to
+            Build once when less than $1 is left. A build you cannot fully fund
+            is started smaller rather than refused, and once too little is left
+            for even that, runs are refused until the month resets or you buy a
             top-up.
           </p>
           <PlanFacts />
@@ -85,7 +88,10 @@ export default function Pricing() {
               <h3>A deployment-wide daily ceiling</h3>
               <p>
                 Across all accounts, so that one compromised account cannot
-                spend the month. Invisible in normal use.
+                spend the month. Invisible in normal use. Free runs also share
+                their own part of it, so free use takes at most that part and
+                the rest stays for paying accounts; runs paid from top-up credit
+                do not count as free use.
               </p>
             </li>
             <li>

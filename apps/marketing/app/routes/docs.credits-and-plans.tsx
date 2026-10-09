@@ -3,7 +3,7 @@ import { DOC_GUIDES, metaFor } from '../site';
 import { FREE_PLAN } from '../plan-sources';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'credits-and-plans')!;
-const CHECKED = '2026-10-07';
+const CHECKED = '2026-10-09';
 
 export function meta() {
   return metaFor('/docs/credits-and-plans');
@@ -75,6 +75,29 @@ export default function CreditsAndPlans() {
         purchase.
       </p>
 
+      <h2>Auto-reload and Start Build</h2>
+      <p>
+        Both are off until you turn them on, under{' '}
+        <strong>Plan and usage</strong> in the settings menu, and both charge
+        your saved card without you there.
+      </p>
+      <ul>
+        <li>
+          <strong>Auto-reload</strong> buys the $10 top-up whenever less than $1
+          of model spend is left, up to a monthly cap you choose between $10 and
+          $100 ($30 unless you change it). A declined charge turns it off.
+        </li>
+        <li>
+          <strong>Start Build when Free runs out</strong> moves a Free account
+          to the Build plan, once, when less than $1 is left. From then on it is
+          an ordinary Build subscription you can cancel.
+        </li>
+      </ul>
+      <p>
+        With both on, a Free account starts Build first, and no top-up is bought
+        while it does.
+      </p>
+
       <h2>How a run is priced</h2>
       <p>
         A run <strong>reserves its worst case up front</strong>, so no run
@@ -84,8 +107,12 @@ export default function CreditsAndPlans() {
       </p>
       <p>
         Prices follow the model that runs. A cheaper model reserves less and
-        costs less. Chat replies and the three sketches are priced the same way;
-        the sketches cost about a tenth of a build.
+        costs less. Beside <strong>Send</strong>, the composer shows what a
+        build on the chosen model is expected to cost, from the last 30 days of
+        builds on it; a model with too few builds shows the most a build can
+        cost, as “Up to”. A project’s first build also includes the most its
+        draft can cost. Chat replies and the three sketches are priced the same
+        way; the sketches cost about a tenth of a build.
       </p>
       <p>
         When you cannot fund a build’s full reservation, it is not refused
@@ -105,7 +132,9 @@ export default function CreditsAndPlans() {
         <li>
           A <strong>deployment-wide daily ceiling</strong>, across all accounts.
           It stops one compromised account spending the month, and is invisible
-          in normal use.
+          in normal use. Free runs also share their own part of it, so free use
+          takes at most that part and the rest stays for paying accounts. Runs
+          paid from top-up credit do not count as free use.
         </li>
         <li>
           Your <strong>monthly tier allowance</strong>.

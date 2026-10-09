@@ -192,6 +192,8 @@ Ask for an aurora, a starfield, a smoky gradient or any "animated background", a
 - Bounded, multi-step builds: a plan, then files in groups, each with its own ceiling on tokens and time, that keep running when you close the tab.
 - Three directions to compare before the first build, 24 style presets with mood suggestions, a reference page whose text, colors, fonts and spacing the spec measures, and your own uploaded images and video.
 - Four tested animated backgrounds a build imports when a request asks for motion.
+- Templates to start from, by category (Websites, Apps, App screens, then subcategories such as Ecommerce or Portfolio), with the 1,300+ gallery styles among them ([vibld.com/templates](https://vibld.com/templates)).
+- What a build is expected to cost on the chosen model, shown beside Send before you send it, from the last 30 days of builds on that model, or the most a build can cost ("Up to") until it has enough of them; a project's first build also adds the most its draft can cost.
 
 **Checking**
 
@@ -205,17 +207,18 @@ Ask for an aurora, a starfield, a smoky gradient or any "animated background", a
 - On a copy without Containers, the same preview bundled in the viewer's browser, in a frame with no origin of its own ([`apps/web/src/browser-preview`](apps/web/src/browser-preview)).
 - Projects: save, rename, archive, duplicate and delete, a read-only share link, and Remix for anyone you send it to.
 - One Ship menu: download a `.zip`, create or push to a GitHub repository for each project, or publish to `<name>.vibld-preview.dev` with safe default security headers ([`apps/publish`](apps/publish)).
+- A History tab: the newest 100 checkpoints, any of which can be restored in one step without deleting the others.
 - A Runs tab: every run's model, tokens, cost and why it stopped.
 
 **Accounts and operations**
 
 - Sign-in with Clerk, or on a copy of your own with an owner password or Cloudflare Access; projects in Cloudflare D1, R2 and a per-user Durable Object; builds as Cloudflare Workflows.
-- Plans and model-spend credit with Stripe, referrals, an access gate that is invite-only unless a deployment opens it, an admin panel with credit grants, bans and an audit log, and operator takedown for abuse reports.
+- Plans and model-spend credit with Stripe, with opt-in auto-reload of the top-up and opt-in Start Build when Free drops below $1, referrals, an access gate that is invite-only unless a deployment opens it, an admin panel with credit grants, bans and an audit log, and operator takedown for abuse reports.
 - An evaluation suite ([`packages/eval`](packages/eval)) and a model bakeoff, so model choices are measured, not guessed.
 
 ## Status
 
-**What runs today.** Everything above, deployed at [app.vibld.com](https://app.vibld.com) as a public beta. Paid plans are live; the Free plan builds with GPT-6 Luna, and a new account gets $1.00 of build credit once it adds a card, which is saved and not charged. From a checkout, `pnpm generate --build` builds a real project with your own provider key, and [a weekly workflow](.github/workflows/clean-clone.yml) proves that from a clean clone.
+**What runs today.** Everything above, deployed at [app.vibld.com](https://app.vibld.com) as a public beta. Paid plans are live; the Free plan builds with GPT-6 Luna, with a one-time $0.20 trial and then $1.00 of model spend a month once it saves a card no other account saved first (or buys a plan or top-up), which is not charged unless you turn on auto-reload or Start Build. From a checkout, `pnpm generate --build` builds a real project with your own provider key, and [a weekly workflow](.github/workflows/clean-clone.yml) proves that from a clean clone.
 
 **What does not exist yet.**
 
@@ -319,7 +322,7 @@ flowchart LR
 Self-hosting is possible, and still needs validation outside the project: a workflow deploys a separately named copy from the docs, signs in to it and builds one site on it, on Cloudflare and under Docker, but nobody else has deployed their own copy yet. A deployment needs:
 
 - **Cloudflare**, for three Workers (the builder, the sandbox and the publish service) plus D1, R2, a Durable Object and a Workflow behind the builder. Publishing, and live previews in a sandbox, run generated code in [Containers](https://developers.cloudflare.com/containers/), which need the Workers Paid plan, and building the sandbox image needs Docker. Without Containers, the Preview pane bundles the project in the viewer's browser instead (esbuild-wasm, packages from esm.sh, Tailwind compiled in the browser).
-- **A model provider API key.** Without one, generation refuses rather than degrading. The builder's configuration ships `VIBLD_MODEL` as `gpt-6-sol`: set it to a model your key serves. A copy that names a model none of its keys serves refuses to build and says why (D91). `scripts/self-host.mjs`, Docker and Render leave it unset, so they use the model your key serves.
+- **A model provider API key.** Without one, generation refuses rather than degrading. The builder's configuration ships `VIBLD_MODEL` as `gpt-6-sol`: set it to a model your key serves. A copy that names a model none of its keys serves refuses a build that does not pick a model, and says why (D91); a model picked in the builder that its keys serve still runs. `scripts/self-host.mjs`, Docker and Render leave it unset, so they use the model your key serves.
 - **A way to sign in**, one of three: an owner password (`VIBLD_AUTH=owner`, one person), Cloudflare Access in front of the builder (`VIBLD_AUTH=access`, free for up to 50 users), or Clerk (for sign-ups from the public, as app.vibld.com uses). There is no mode without sign-in, because the endpoints spend money.
 - **An open door.** A deployment is invite-only until `VIBLD_ACCESS_MODE` is `open`: before that, only the verified emails in `VIBLD_PLATFORM_ADMINS` and the people they invite get in, so list your own. The owner of an owner-password copy is always let in. Under Clerk, its session token has to carry `email` and `email_verified` for that match to work.
 - **Your own names.** The Worker names, database, bucket, Workflow, routes and Clerk domain in the `wrangler.jsonc` files are vibld's. `node scripts/self-host.mjs <settings.json>` writes a `wrangler.self-host.jsonc` beside each with all of them derived from a prefix of yours, and refuses to write one that still names vibld's ([Deploying](https://vibld.com/docs/deploying)).

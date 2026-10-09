@@ -299,7 +299,7 @@ export const DOC_GUIDES: DocGuide[] = [
     label: 'The builder, pane by pane',
     title: `The builder, pane by pane | ${SITE.name} docs`,
     description:
-      'What Preview, Code, Console, Problems and Runs each show, and what they do not.',
+      'What Preview, Code, Console, Problems, History and Runs each show, and what they do not.',
   },
   {
     slug: 'running-your-project',

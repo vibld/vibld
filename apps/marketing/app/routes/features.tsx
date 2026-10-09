@@ -50,7 +50,7 @@ const COMPOSER: Feature[] = [
   },
   {
     title: 'Templates',
-    body: 'A design from the template catalog as a starting point. Its brief is added to your message, to edit or send.',
+    body: 'A design from the template catalog as a starting point, by category and subcategory, the gallery styles among them. Its brief is added to your message, to edit or send.',
   },
   {
     title: 'Reference',
@@ -66,7 +66,7 @@ const COMPOSER: Feature[] = [
   },
   {
     title: 'A choice of model',
-    body: `Which models are offered depends on the deployment and your plan; Free builds with ${FREE_PLAN.models}. The settings menu reports which one actually served the last run.`,
+    body: `Which models are offered depends on the deployment and your plan; Free builds with ${FREE_PLAN.models}. Beside Send, what a build on it is expected to cost, from the last 30 days of builds, or the most a build can cost until there are enough of them, plus the draft on a project's first build. The settings menu reports which one actually served the last run.`,
   },
 ];
 
@@ -104,6 +104,10 @@ const PANES: Feature[] = [
     body: 'What vibld’s own checks found, including a build that did not pass its check.',
     limit:
       'Not the sandbox’s install, build or type errors, which are not reported here yet.',
+  },
+  {
+    title: 'History',
+    body: 'The newest 100 checkpoints, any one restored in a single step. Nothing is deleted, so a restore can be undone too.',
   },
   {
     title: 'Runs',

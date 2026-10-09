@@ -3,7 +3,7 @@ import { DOC_GUIDES, metaFor } from '../site';
 import { FREE_PLAN } from '../plan-sources';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'the-builder')!;
-const CHECKED = '2026-09-30';
+const CHECKED = '2026-10-09';
 
 export function meta() {
   return metaFor('/docs/the-builder');
@@ -69,6 +69,18 @@ export default function TheBuilder() {
         <strong>It is not the sandbox’s errors.</strong> Install failures, build
         failures and type errors from a sandbox run are not reported here yet. A
         sandbox that fails to start says so only in the Preview tab.
+      </p>
+
+      <h2>History</h2>
+      <p>
+        The newest 100 checkpoints this project has accepted, newest first. A
+        build’s checkpoint is named by its message while that message is still
+        in the conversation; a restore, a copy, or a build whose message is gone
+        gets a plain label instead. <strong>Restore</strong> makes an earlier
+        one the project’s code again, after asking: the preview and the next
+        build start from it. No checkpoint is deleted, so a restore can itself
+        be undone, and the published site and connected repository stay as they
+        were until you ship again. It is refused while a build runs.
       </p>
 
       <h2>Runs</h2>
@@ -150,10 +162,10 @@ export default function TheBuilder() {
       </p>
       <p>
         Everything that is configuration lives behind the gear: your plan and
-        this period’s spend against your allowance, your referral link, the
-        GitHub connection, deleting your account, and which provider and model
-        served the last run. None of it claims anything before there has been a
-        run.
+        this period’s spend against your allowance, auto-reload and Start Build
+        (both off until you turn them on), your referral link, the GitHub
+        connection, deleting your account, and which provider and model served
+        the last run. None of it claims anything before there has been a run.
       </p>
       <p>
         <strong>Delete account</strong> asks you to type a phrase to confirm.

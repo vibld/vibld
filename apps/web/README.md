@@ -157,8 +157,10 @@ An open deployment lets anybody with an email address spend model budget, so
 provider bill unless something else limits it. An account is still created
 freely (Clerk owns that) and, while the gate is closed, can do nothing until
 its identity is on the invite list. What limits an open deployment is the
-monthly allowance, the account-wide daily ceiling, and the welcome credit
-waiting for a saved card (see "The welcome credit" under Billing below).
+account-wide daily ceiling, Free's own share of it (D158), and Free's
+allowance: a one-time $0.20 trial, then the monthly allowance once it saves a
+card no other account saved first, or buys a plan or top-up (D159). The welcome credit that once waited for a card is retired
+(D163; "The welcome credit" under Billing below).
 
 ### Opening the beta (the flip)
 
@@ -704,9 +706,11 @@ true`).
 5. **Account-wide daily ceiling** -- `VIBLD_ACCOUNT_DAILY_MICRO_USD`,
    documented above (L29).
 6. **Free share of the day** -- `VIBLD_FREE_DAILY_MICRO_USD` (D158), $10 by
-   default: the most the Free plan may spend in a UTC day between all its
-   accounts, inside the account-wide ceiling, so free use never pauses a
-   paid run.
+   default: the most Free accounts' trial and monthly allowance may spend in a
+   UTC day between them, inside the account-wide ceiling, so free use can
+   take at most that much of it and the rest stays for paid runs. A Free
+   account's run paid from top-up credit leaves the pool (`reserveBudget`). Applied only when
+   billing is configured (`spendableFor`).
 
 ## Sandbox previews (docs/decisions.md L7-L11)
 
@@ -1032,10 +1036,30 @@ one. Existing subscriptions stay on the price they bought.
   (it has not been created yet, say), the flow opens without the offer
   and the refusal is logged, so nobody is kept from canceling. A
   subscription already set to end is sent to the plain portal instead.
-- `POST /api/billing/card` -- authenticated, gated, no body. Returns `{ url }`
+- `POST /api/billing/card` -- authenticated, gated, optional body
+  `{ "purpose": "auto-reload" }`. Returns `{ url }`
   for a Stripe Checkout Session in `setup` mode, which saves a card and
-  charges nothing. Answers 409 unless the caller is offered the welcome
-  credit.
+  charges nothing. On a Free account still on the trial, a card no other
+  account saved first unlocks the monthly allowance (D159). Answers 409 when a card is already
+  on file, unless the body is `{ "purpose": "auto-reload" }`, the card an
+  auto-reload or Start Build will charge.
+- `POST /api/billing/auto-reload` -- authenticated; turning it on is gated,
+  turning it off is not (`access-gate.ts`), body
+  `{ "enabled": boolean, "monthlyCapUsdCents"?: number }` (D166). When on,
+  a $10 top-up is bought on the saved card, off session, whenever what the
+  account can spend drops below $1, up to a monthly cap of $10 to $100 in
+  whole $10 steps ($30 unless set; `worker/auto-reload.ts`). Turning it on
+  refuses with `needsCard` when Stripe holds no card it can charge without
+  the person there, and reloads at once when the account is already below $1. A
+  declined charge turns it off. On a Free account with Start Build also on,
+  Start Build goes first, and no top-up is bought while it starts the plan
+  (`autoReloadFor`).
+- `POST /api/billing/auto-subscribe` -- authenticated, gated the same way
+  as auto-reload, body
+  `{ "enabled": boolean }` (D167). Free only: when what the account can
+  spend drops below $1, it starts the Build plan on the saved card, once
+  (`worker/auto-subscribe.ts`). The same `needsCard` refusal, and it starts
+  the plan at once when the account is already below $1.
 - `POST /api/stripe/webhook` -- Stripe's own POST, not a browser's. No Clerk
   session exists to check; the `Stripe-Signature` header, verified against
   the raw body before anything is parsed (L30), is the entire
@@ -1276,7 +1300,12 @@ ceilings each run against three layers, in order:
 
 1. **The account-wide daily ceiling** (L29) -- unchanged, still a UTC day.
 2. **The caller's own monthly tier allowance** (L36): Free $1/mo, Build
-   $14/mo, Ship $40/mo, resetting on the UTC calendar month.
+   $14/mo, Ship $40/mo, resetting on the UTC calendar month. On a deployment
+   with billing, Free has a one-time $0.20 trial instead
+   (`VIBLD_FREE_TRIAL_MICRO_USD`, D159) until it saves a card no other
+   account saved first, or buys a plan or top-up (`BillingStore.freeCardOf`);
+   then the monthly dollar starts. Free runs also count against Free's share of the daily
+   ceiling (`VIBLD_FREE_DAILY_MICRO_USD`, $10 by default, D158).
 3. **Top-up credit** (L37), tried only once the monthly allowance is
    genuinely exhausted, not merely low. A top-up is not period-scoped --
    it persists until spent, tracked as its own `USER_BUDGET` instance keyed
@@ -1439,8 +1468,12 @@ reserves against; nothing new is authoritative, `UserBudget` still is), plus:
 - **"Cancel plan"**, opening the cancel flow from `POST /api/billing/cancel`
   (`openCancelPlan`), which is where a monthly plan is offered half off a
   month -- shown only on a paid tier whose plan is not already set to end.
-- **"Add a card"**, for an account offered the welcome credit
-  (`src/components/SignupCreditOffer.tsx`), here and above the composer.
+- **"Add a card"**, for a Free account still on its $0.20 trial (D159),
+  which a card no other account saved first moves to $1 a month, here and
+  above the composer.
+- **Auto-reload** (`src/components/AutoReload.tsx`, D166) and **Start Build
+  when Free runs out** (`src/components/AutoSubscribe.tsx`, D167), both off
+  until turned on, beside the plan in the same header panel.
 
 Every button redirects the whole page to a Stripe-hosted URL and back
 (`success_url`/`cancel_url`/the Portal's `return_url`), so there is no
@@ -1619,16 +1652,18 @@ back.
 **Routes** (`worker/project-handlers.ts`), all behind Clerk like every
 other `/api/*` route, and a project that is not the caller's is 404:
 
-| Route                              | Does                                                                                       | Invite gate |
-| ---------------------------------- | ------------------------------------------------------------------------------------------ | ----------- |
-| `GET /api/projects`                | List, active and archived, with the tier's limit                                           | open        |
-| `POST /api/projects`               | Create (held to the limit)                                                                 | gated       |
-| `GET /api/projects/:id`            | Open: settings, conversation, accepted code                                                | open        |
-| `PATCH /api/projects/:id`          | Rename, archive, unarchive (held to the limit), save settings and conversation             | open        |
-| `DELETE /api/projects/:id`         | Delete: its published site first, then everything under its prefix, then its rows          | open        |
-| `POST /api/projects/:id/duplicate` | Copy the accepted code, settings and conversation into "<name> (copy)" (held to the limit) | gated       |
-| `POST /api/projects/:id/share`     | Turn its share link on (below)                                                             | gated       |
-| `DELETE /api/projects/:id/share`   | Turn it off, for good                                                                      | open        |
+| Route                                        | Does                                                                                        | Invite gate |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------- | ----------- |
+| `GET /api/projects`                          | List, active and archived, with the tier's limit                                            | open        |
+| `POST /api/projects`                         | Create (held to the limit)                                                                  | gated       |
+| `GET /api/projects/:id`                      | Open: settings, conversation, accepted code                                                 | open        |
+| `PATCH /api/projects/:id`                    | Rename, archive, unarchive (held to the limit), save settings and conversation              | open        |
+| `DELETE /api/projects/:id`                   | Delete: its published site first, then everything under its prefix, then its rows           | open        |
+| `POST /api/projects/:id/duplicate`           | Copy the accepted code, settings and conversation into "<name> (copy)" (held to the limit)  | gated       |
+| `POST /api/projects/:id/share`               | Turn its share link on (below)                                                              | gated       |
+| `DELETE /api/projects/:id/share`             | Turn it off, for good                                                                       | open        |
+| `GET /api/projects/:id/checkpoints`          | The newest 100 accepted checkpoints, newest first (D152)                                    | open        |
+| `POST /api/projects/:id/checkpoints/restore` | Make an earlier checkpoint the accepted one again; deletes none, refused while a build runs | open        |
 
 The gate's reasons are in `access-gate.ts`: making or copying a project is
 starting new work, and reading, tidying or deleting your own is not.

@@ -79,11 +79,12 @@ export const ROADMAP_ITEMS: readonly RoadmapItem[] = [
       'Generated projects are written with Tailwind CSS v4, shadcn/ui components and Motion for animation.',
   },
   {
+    // The History tab (D152).
     id: 'checkpoint-history',
-    status: 'upcoming',
+    status: 'shipped',
     title: 'Checkpoint history and rollback',
     description:
-      'A history that lists every accepted checkpoint and restores any one of them in a single step.',
+      'A history that lists the newest 100 accepted checkpoints and restores any one of them in a single step.',
   },
   {
     id: 'custom-domains',
@@ -248,13 +249,14 @@ export const ROADMAP_ITEMS: readonly RoadmapItem[] = [
       'Four moving backgrounds drawn in code from the project’s colors, used when a request asks for one.',
   },
   {
-    // Shipped as a gallery on vibld.com (internal PR 323, D100); picking a design inside
-    // the builder is not built, so the description does not claim it.
+    // A gallery on vibld.com (internal PR 323, D100), by category since D161, with the
+    // gallery styles among the templates (D162); the builder's template
+    // picker uses the same categories.
     id: 'template-gallery',
     status: 'shipped',
     title: 'Template gallery',
     description:
-      'Browse designs by use case at vibld.com/templates, each with its palette, its type and a build prompt to copy into the builder.',
+      'Browse templates by category at vibld.com/templates or in the builder, each with its palette, its type and a build prompt.',
   },
   {
     id: 'build-and-repair',

@@ -3,7 +3,7 @@ import { DOC_GUIDES, SITE, metaFor } from '../site';
 import { FREE_PLAN } from '../plan-sources';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'configuration')!;
-const CHECKED = '2026-09-30';
+const CHECKED = '2026-10-09';
 
 export function meta() {
   return metaFor('/docs/configuration');
@@ -159,11 +159,11 @@ export default function Configuration() {
           <code>VIBLD_PROVIDER</code> when set. The shipped{' '}
           <code>wrangler.jsonc</code> sets <code>VIBLD_PROVIDER</code> to{' '}
           <code>openai</code> and this to <code>gpt-6-sol</code>. If your keys
-          cannot serve the model named here, the builder does not refuse: it
-          falls back to the first model it can serve in catalog order, which on
-          an Anthropic-only deployment is Claude Fable 5.1, the dearest
-          Anthropic model. Set it to a model your key serves, or delete it to
-          get the provider’s default. On the command line, a set{' '}
+          cannot serve the model named here, a build that does not pick a model
+          is refused with a message saying why, rather than run on some other
+          model. A model picked in the builder that your keys do serve still
+          runs. Set this to a model your key serves, or delete it to get the
+          provider’s default. On the command line, a set{' '}
           <code>VIBLD_MODEL</code> picks the provider outright.
         </li>
       </ul>
@@ -178,9 +178,31 @@ export default function Configuration() {
         </li>
         <li>
           <code>VIBLD_FREE_MONTHLY_MICRO_USD</code>: the Free tier’s monthly
-          allowance. Set it only to change that figure. Paid tiers are not
-          configurable here, since their included spend is fixed by the price
-          table rather than by an operator.
+          allowance, $1 unless set. With billing configured, a Free account has
+          it once it saves a card no other account saved first, or pays for a
+          plan or a top-up. Set it only to change that figure. Paid tiers are
+          not configurable here, since their included spend is fixed by the
+          price table rather than by an operator.
+        </li>
+        <li>
+          <code>VIBLD_FREE_TRIAL_MICRO_USD</code>: with billing configured, what
+          a Free account without the monthly allowance may spend, once: $0.20
+          unless set, and 0 means nothing until the account has the allowance.
+          Without billing it does not apply.
+        </li>
+        <li>
+          <code>VIBLD_FREE_DAILY_MICRO_USD</code>: Free runs’ share of the
+          deployment’s daily ceiling, $10 unless set: free use takes at most
+          that much, and the rest stays for paying accounts. A Free account’s
+          run paid from top-up credit does not count against it. Like the trial,
+          it applies only with billing configured.
+        </li>
+        <li>
+          <code>VIBLD_FREE_PREVIEW_DAILY_MINUTES</code>, on the preview Worker:
+          after how many minutes in a day a Free account’s sandbox previews stop
+          starting, 120 unless set. A preview already running finishes, so a day
+          can run over by one preview (at most 30 minutes). Like the other Free
+          limits, it applies only with billing configured.
         </li>
         <li>
           <code>VIBLD_MAX_IN_FLIGHT</code>: concurrent runs per user.
