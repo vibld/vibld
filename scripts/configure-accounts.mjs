@@ -761,18 +761,26 @@ async function configureClerkOAuth(key, apply, report) {
   } else if (!apply) {
     report.line(`- Would set: \`${JSON.stringify(changes)}\``);
   } else {
-    const updated = await clerk(
-      key,
-      'PATCH',
-      '/instance/oauth_application_settings',
-      changes,
-    );
-    if (updated.status >= 200 && updated.status < 300) {
-      report.line(`- Set: \`${JSON.stringify(changes)}\``);
-    } else {
-      report.fail(
-        `The Clerk OAuth settings were not set: ${clerkError(updated)}`,
+    // Clerk refuses default scopes naming a scope that does not exist yet
+    // (`build` is created in the Dashboard), and refuses the whole request
+    // with them, so they go in a request of their own.
+    const { default_scopes, ...rest } = changes;
+    const batches = [rest, default_scopes ? { default_scopes } : {}];
+    for (const batch of batches) {
+      if (Object.keys(batch).length === 0) continue;
+      const updated = await clerk(
+        key,
+        'PATCH',
+        '/instance/oauth_application_settings',
+        batch,
       );
+      if (updated.status >= 200 && updated.status < 300) {
+        report.line(`- Set: \`${JSON.stringify(batch)}\``);
+      } else {
+        report.fail(
+          `Clerk did not take \`${JSON.stringify(batch)}\`: ${clerkError(updated)}`,
+        );
+      }
     }
   }
   report.line(
