@@ -1315,3 +1315,52 @@ describe('files a crawler should not find', () => {
     }
   });
 });
+
+describe('agent discovery files', () => {
+  it('indexes every agent skill with the digest of the file served', async () => {
+    const { createHash } = await import('node:crypto');
+    const index = JSON.parse(
+      readFileSync(join(CLIENT, '.well-known/agent-skills/index.json'), 'utf8'),
+    ) as {
+      $schema: string;
+      skills: { name: string; type: string; url: string; digest: string }[];
+    };
+    assert.equal(
+      index.$schema,
+      'https://schemas.agentskills.io/discovery/0.2.0/schema.json',
+    );
+    assert.ok(index.skills.some((skill) => skill.name === 'vibld'));
+    for (const skill of index.skills) {
+      assert.match(skill.name, /^[a-z0-9-]+$/);
+      assert.equal(skill.type, 'skill-md');
+      const bytes = readFileSync(join(CLIENT, skill.url));
+      assert.equal(
+        skill.digest,
+        `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+      );
+    }
+  });
+
+  it('publishes auth.md, headed as one, and claiming no agent registration', () => {
+    const auth = readFileSync(join(CLIENT, 'auth.md'), 'utf8');
+    assert.match(auth, /^# .*auth\.md$/m);
+    assert.match(auth, /no agent registration endpoint/);
+    assert.doesNotMatch(auth, /register_uri|agent_auth/);
+  });
+});
+
+describe('the template catalog for WebMCP', () => {
+  it('lists designs whose pages were built', () => {
+    const catalog = JSON.parse(
+      readFileSync(join(CLIENT, 'templates/index.json'), 'utf8'),
+    ) as { id: string; name: string; url: string }[];
+    assert.ok(catalog.length > 100, `only ${catalog.length} designs`);
+    for (const entry of catalog) {
+      assert.ok(entry.name, entry.id);
+      assert.ok(
+        existsSync(htmlPathFor(entry.url)),
+        `${entry.url} was not built`,
+      );
+    }
+  });
+});

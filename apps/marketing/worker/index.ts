@@ -9,6 +9,8 @@ import { secured } from '@vibld/security-headers';
 import {
   apiCatalogResponse,
   API_CATALOG_PATH,
+  authorizationMetadata,
+  isAuthorizationMetadataPath,
   withHomeLinks,
 } from './agent-discovery.ts';
 import { markdownFor, varyByAccept } from './markdown.ts';
@@ -128,6 +130,10 @@ async function route(request: Request, env: Env): Promise<Response> {
   // The builder API's catalog (worker/agent-discovery.ts, D186).
   if (url.pathname === API_CATALOG_PATH) {
     return apiCatalogResponse(request);
+  }
+  // Clerk's sign-in metadata, redirected to its own origin (D180).
+  if (isAuthorizationMetadataPath(url.pathname)) {
+    return authorizationMetadata(request);
   }
 
   if (url.pathname === '/api/hit' && request.method === 'POST') {

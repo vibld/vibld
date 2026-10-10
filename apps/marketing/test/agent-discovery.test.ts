@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { API_SPEC, API_STATUS, HOME_LINKS } from '../worker/agent-discovery.ts';
+import {
+  API_SPEC,
+  API_STATUS,
+  AUTHORIZATION_METADATA_PATHS,
+  authorizationMetadata,
+  HOME_LINKS,
+} from '../worker/agent-discovery.ts';
 import worker from '../worker/index.ts';
 
 const html = (body: string) => ({
@@ -91,5 +97,33 @@ describe("the home page's Link header", () => {
       { ASSETS: html('<!doctype html>') },
     );
     assert.equal(response.headers.get('link'), null);
+  });
+});
+
+describe('the sign-in metadata', () => {
+  for (const path of AUTHORIZATION_METADATA_PATHS) {
+    it(`redirects ${path} to Clerk's own document`, () => {
+      for (const method of ['GET', 'HEAD']) {
+        const response = authorizationMetadata(
+          new Request(`https://vibld.com${path}`, { method }),
+        );
+        assert.equal(response.status, 302);
+        assert.equal(
+          response.headers.get('location'),
+          `https://clerk.vibld.com${path}`,
+        );
+        assert.equal(response.headers.get('access-control-allow-origin'), '*');
+      }
+    });
+  }
+
+  it('is routed by the Worker, and refuses a write', async () => {
+    const post = await worker.fetch(
+      new Request('https://vibld.com/.well-known/oauth-authorization-server', {
+        method: 'POST',
+      }),
+      {},
+    );
+    assert.equal(post.status, 405);
   });
 });

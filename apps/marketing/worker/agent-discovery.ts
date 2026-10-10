@@ -77,3 +77,41 @@ export function withHomeLinks(pathname: string, response: Response): Response {
   linked.headers.append('link', HOME_LINKS);
   return linked;
 }
+
+/** Who signs people in to vibld (D180): Clerk, on vibld's own domain. */
+export const AUTHORIZATION_SERVER = 'https://clerk.vibld.com';
+
+/**
+ * The OAuth and OpenID Connect discovery paths answered here. Each one
+ * redirects to the authorization server's own document at the same path:
+ * the metadata names `https://clerk.vibld.com` as its issuer, and OIDC
+ * Discovery 4.3 and RFC 8414 3.3 require a client to reject it when it was
+ * fetched from any other origin, so it is never replayed on vibld.com.
+ */
+export const AUTHORIZATION_METADATA_PATHS = [
+  '/.well-known/openid-configuration',
+  '/.well-known/oauth-authorization-server',
+] as const;
+
+export function isAuthorizationMetadataPath(pathname: string): boolean {
+  return (AUTHORIZATION_METADATA_PATHS as readonly string[]).includes(pathname);
+}
+
+/** A redirect to Clerk's discovery document, at its own origin (D180). */
+export function authorizationMetadata(request: Request): Response {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response('Method not allowed', {
+      status: 405,
+      headers: { allow: 'GET, HEAD' },
+    });
+  }
+  const { pathname } = new URL(request.url);
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: `${AUTHORIZATION_SERVER}${pathname}`,
+      'cache-control': 'public, max-age=3600',
+      'access-control-allow-origin': '*',
+    },
+  });
+}

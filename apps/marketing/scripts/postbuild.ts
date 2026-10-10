@@ -10,6 +10,7 @@
  * Run as part of `pnpm build` (see package.json), after `react-router build`.
  */
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -21,6 +22,7 @@ import {
 } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 
+import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
 import { answers } from '../app/answers.ts';
 import { readPlans, type Plans } from '../app/plans.ts';
 import { placeOf } from '../app/template-places.ts';
@@ -35,6 +37,7 @@ import {
   routeFor,
 } from '../app/site.ts';
 import { USE_CASES } from '../app/use-cases.ts';
+import { TEMPLATE_CATALOG_PATH } from '../app/webmcp.ts';
 import { markdownPath } from '../worker/markdown.ts';
 import { toMarkdown } from './markdown.ts';
 import { zip } from './zip.ts';
@@ -531,11 +534,76 @@ function markdownPages(): void {
   console.log(`  wrote ${written} Markdown pages`);
 }
 
+/**
+ * The Agent Skills discovery index (RFC v0.2.0,
+ * https://github.com/cloudflare/agent-skills-discovery-rfc): one entry per
+ * SKILL.md under `public/.well-known/agent-skills/`, each with the digest
+ * of the bytes actually served, so an edited skill cannot ship with a stale
+ * one. The name and description come from the skill's own front matter.
+ */
+const AGENT_SKILLS_DIR = '.well-known/agent-skills';
+
+function agentSkills(): string {
+  const dir = join(CLIENT, AGENT_SKILLS_DIR);
+  const skills = readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+    .map((name) => {
+      const bytes = readFileSync(join(dir, name, 'SKILL.md'));
+      const front = /^---\n([\s\S]*?)\n---\n/.exec(bytes.toString('utf8'))?.[1];
+      const field = (key: string) =>
+        new RegExp(`^${key}: (.+)$`, 'm').exec(front ?? '')?.[1]?.trim();
+      if (field('name') !== name || !field('description')) {
+        throw new Error(
+          `${name}/SKILL.md needs front matter naming it ${name}`,
+        );
+      }
+      return {
+        name,
+        type: 'skill-md',
+        description: field('description')!,
+        url: `/${AGENT_SKILLS_DIR}/${name}/SKILL.md`,
+        digest: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+      };
+    });
+  return `${JSON.stringify(
+    {
+      $schema: 'https://schemas.agentskills.io/discovery/0.2.0/schema.json',
+      skills,
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+/**
+ * The template catalog as JSON, for the WebMCP template search
+ * (app/webmcp.ts): each design that has a page of its own, by name, with
+ * its page's address.
+ */
+function templateCatalog(): string {
+  return `${JSON.stringify(
+    DESIGN_TEMPLATE_INDEX.filter((template) => !template.mergedInto).map(
+      (template) => ({
+        id: template.id,
+        name: template.name,
+        summary: template.summary,
+        kind: template.kind,
+        category: template.category,
+        url: `/templates/${template.id}`,
+      }),
+    ),
+  )}\n`;
+}
+
 console.log('postbuild:');
 write('robots.txt', robots());
 write('sitemap.xml', sitemap());
 write('llms.txt', llms());
 write('llms-full.txt', llmsFull());
+write(`${AGENT_SKILLS_DIR}/index.json`, agentSkills());
+write(TEMPLATE_CATALOG_PATH.slice(1), templateCatalog());
 relocate404();
 removeSpaFallback();
 markdownPages();

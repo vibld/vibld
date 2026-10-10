@@ -8,9 +8,11 @@ import {
   ScrollRestoration,
   isRouteErrorResponse,
   useLocation,
+  useNavigate,
 } from 'react-router';
 
 import type { Route } from './+types/root';
+import { registerSiteTools } from './webmcp';
 import { beaconFor } from './pageview.ts';
 import {
   CONSENT_CHANGED_EVENT,
@@ -657,6 +659,10 @@ function storage() {
 }
 
 export default function App() {
+  const navigate = useNavigate();
+  // Read-only tools for an agent in the visitor's browser (app/webmcp.ts),
+  // where the browser has WebMCP.
+  useEffect(() => registerSiteTools((path) => navigate(path)), [navigate]);
   return <Outlet />;
 }
 
