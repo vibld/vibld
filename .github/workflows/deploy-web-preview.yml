@@ -210,6 +210,41 @@ jobs:
             echo "PUBLISH_INTERNAL_SECRET not set -- /api/publish stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Custom domains for published sites (D189). Optional, same as the
+      # publish secret above: unset means the builder offers no domains.
+      # Needs Zone: SSL and Certificates: Edit on vibld-preview.dev.
+      - name: Sync the custom domains token to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CUSTOM_HOSTNAME_API_TOKEN: ${{ secrets.CUSTOM_HOSTNAME_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CUSTOM_HOSTNAME_API_TOKEN" ]; then
+            printf '%s' "$CUSTOM_HOSTNAME_API_TOKEN" | pnpm dlx wrangler@4.137.0 secret put CUSTOM_HOSTNAME_API_TOKEN
+            echo "Synced CUSTOM_HOSTNAME_API_TOKEN." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # A Worker secret outlives the environment secret it came from, so
+          # one removed here is deleted there too, or custom domains would
+          # stay on. A failure to read the list fails the step, for the same
+          # reason.
+          secrets="$(pnpm dlx wrangler@4.137.0 secret list --format json | node -e '
+            let raw = "";
+            process.stdin.on("data", (chunk) => (raw += chunk));
+            process.stdin.on("end", () => {
+              for (const secret of JSON.parse(raw)) console.log(secret.name);
+            });
+          ')"
+          if grep -qxF CUSTOM_HOSTNAME_API_TOKEN <<< "$secrets"; then
+            pnpm dlx wrangler@4.137.0 secret delete CUSTOM_HOSTNAME_API_TOKEN
+            echo "CUSTOM_HOSTNAME_API_TOKEN removed from the preview environment, so deleted from the Worker." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "CUSTOM_HOSTNAME_API_TOKEN not set -- custom domains stay unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       # Stripe billing (docs/decisions.md L12-L15). Optional, same as
       # PREVIEW_INTERNAL_SECRET above: unset means handlePlan's budget gate
       # and /api/billing/* answer "not configured" rather than the whole

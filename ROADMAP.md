@@ -63,7 +63,7 @@ Status: shipped: projects that keep their whole conversation and settings, follo
 
 Ship to an approved Cloudflare target, with deployment status, logs, rollback and environment/secret handling behind an adapter. Published sites can use the owner's own domain as well as a `vibld-preview.dev` name. Verify an independent static-hosting path. GitHub branch and PR support is already part of M1; broader existing-repository workflows follow as scoped developer use cases.
 
-Status: shipped: one-step publishing of a project to its own `<slug>.vibld-preview.dev` site, and taking it down (`apps/publish`). Not built: the owner's own domain, rolling back to an earlier published version, and an independent static-hosting path. Next: custom domains (D189) and SEO for published sites (D194). Backlog: cookieless analytics (D195) and invite-only publishing (D196).
+Status: shipped: one-step publishing of a project to its own `<slug>.vibld-preview.dev` site, and taking it down (`apps/publish`). Built, waiting on the zone setup: the owner's own domain on paid plans (D189). Not built: rolling back to an earlier published version, and an independent static-hosting path. Next: SEO for published sites (D194). Backlog: cookieless analytics (D195) and invite-only publishing (D196).
 
 ## M4: One full-stack integration
 

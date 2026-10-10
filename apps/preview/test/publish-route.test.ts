@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { isPublishedHost } from '../worker/publish-route.ts';
+import { isCustomHost, isPublishedHost } from '../worker/publish-route.ts';
 import { shareIdFromHost } from '../worker/share-route.ts';
 
 const HOST = 'vibld-preview.dev';
@@ -51,5 +51,29 @@ describe('published hosts on this machine under Docker (D126)', () => {
       false,
     );
     assert.equal(isPublishedHost('acme.localhost', 'localhost:8788'), false);
+  });
+});
+
+describe("an owner's own domain (D189)", () => {
+  it('is a published site where the route catches custom hostnames', () => {
+    assert.equal(isCustomHost('www.bakery.com', HOST, 'on'), true);
+    assert.equal(isCustomHost('WWW.Bakery.com', HOST, 'on'), true);
+  });
+
+  it("never takes the preview domain's own hosts or this Worker's", () => {
+    for (const host of [
+      HOST,
+      `acme.${HOST}`,
+      `5173-abc-tok.${HOST}`,
+      'internal.invalid',
+      'localhost:8788',
+    ]) {
+      assert.equal(isCustomHost(host, HOST, 'on'), false, host);
+    }
+  });
+
+  it('is off unless the deployment says so', () => {
+    assert.equal(isCustomHost('www.bakery.com', HOST, undefined), false);
+    assert.equal(isCustomHost('preview', HOST, undefined), false);
   });
 });

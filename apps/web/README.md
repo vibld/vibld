@@ -993,9 +993,37 @@ offers nothing. A slug is required on a project's first publish. On success,
 shows the live URL (and which binary asset paths, if any, were skipped); on
 failure, the error inline.
 
-**Not built yet:** the opt-in custom-domain step ADR-0010 describes, and
-rolling back to a _previous_ published checkpoint rather than taking the
-site down (it needs the retention decision ADR-0013 left open).
+**Custom domains (D189).** Under a live site on a paid plan, the owner can
+connect their own domain (`CustomDomain.tsx`, `/api/projects/:id/domain`,
+`worker/domain-handlers.ts`). Each domain is a Cloudflare for SaaS custom
+hostname on the preview zone. Before it is registered, the owner proves
+the domain is theirs with a TXT record at `_vibld.<domain>` whose value
+is bound to their account (`ownershipRecord`), so nobody can claim
+somebody else's domain first. Then the owner adds one CNAME to
+`domains.vibld-preview.dev`, Cloudflare checks it and issues the
+certificate, and the builder's "Check again" asks Cloudflare where it
+stands. One domain per project, one project per domain. Deleting the
+project disconnects it first, and a project whose domain Cloudflare
+could not remove is not deleted yet. Deleting the account disconnects it
+in the purge, before the rows go, and a purge that could not waits for
+the next night. Taking the site down keeps it, so publishing again brings
+it back. A plan that ends (canceled, unpaid, a gift run out) loses it: a
+nightly pass on its own Cron Trigger (`47 9 * * *`, `sweepLapsedDomains`)
+disconnects the domains of accounts whose plan reads Free. It checks up
+to 300 a night, the least recently checked first, so every domain comes
+round in turn.
+
+It needs `CUSTOM_HOSTNAME_ZONE_ID` and `CUSTOM_HOSTNAME_TARGET`
+(`wrangler.jsonc`) and the secret `CUSTOM_HOSTNAME_API_TOKEN` (Zone: SSL and
+Certificates: Edit and Zone: DNS: Edit on vibld-preview.dev, set on the
+`preview` environment and synced by `deploy-web-preview.yml`). Without the
+secret the builder offers no domains. The zone itself is prepared once by
+`configure-custom-hostnames.yml` (`scripts/configure-custom-hostnames.mjs`):
+the fallback origin's proxied record, and the fallback origin.
+
+**Not built yet:** rolling back to a _previous_ published checkpoint rather
+than taking the site down (it needs the retention decision ADR-0013 left
+open).
 
 ### Setup
 

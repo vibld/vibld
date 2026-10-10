@@ -107,6 +107,15 @@
     // CLERK_PUBLISHABLE_KEY are Worker/build secrets set out of band.
     "CLERK_FRONTEND_API_URL": "https://clerk.vibld.com",
 
+    // A published site's own domain (D189, worker/custom-domain.ts): the
+    // preview zone (vibld-preview.dev), where Cloudflare for SaaS makes one
+    // custom hostname per domain, and the name an owner's CNAME points at,
+    // which is the zone's fallback origin. Both public. The token that
+    // edits the zone's custom hostnames, CUSTOM_HOSTNAME_API_TOKEN, is a
+    // Worker secret; without it the builder offers no domains.
+    "CUSTOM_HOSTNAME_ZONE_ID": "3f49356ba40be20bd9094c2c73e1c2a0",
+    "CUSTOM_HOSTNAME_TARGET": "domains.vibld-preview.dev",
+
     // D1 queries the nightly billing pass may spend in one invocation: all
     // four of its phases between them, not each.
     //
@@ -268,6 +277,14 @@
       "namespace_id": "1012",
       "simple": { "limit": 2, "period": 60 },
     },
+    // A project's own domain (D189, domain-handlers.ts), per Clerk user id
+    // after identity. Every request asks Cloudflare's API, whose limit is
+    // the whole account's, so one person checking a domain cannot spend it.
+    {
+      "name": "DOMAIN_BURST",
+      "namespace_id": "1013",
+      "simple": { "limit": 20, "period": 60 },
+    },
   ],
 
   // The spend ceiling. Also not provisioned: the object is created on first
@@ -335,6 +352,8 @@
   // Stripe billing (docs/decisions.md L12-L15). STRIPE_SECRET_KEY and
   // STRIPE_WEBHOOK_SECRET are Worker secrets, set out of band -- see
   // apps/web/README.md's "Billing" section. Off-peak UTC time, arbitrarily;
-  // nothing about the reconcile depends on when it runs.
-  "triggers": { "crons": ["17 9 * * *"] },
+  // nothing about the reconcile depends on when it runs. The second is the
+  // custom domain plan check (D189, `sweepLapsedDomains`), on its own so
+  // its D1 queries are an invocation of their own.
+  "triggers": { "crons": ["17 9 * * *", "47 9 * * *"] },
 }

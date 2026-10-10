@@ -302,12 +302,23 @@ import {
   refusal,
 } from './access-handlers.ts';
 import { handleHealth, handleOpenApi } from './api-description.ts';
+import type { CustomHostnameEnv } from './custom-domain.ts';
+import {
+  handleProjectDomain,
+  removeProjectDomain,
+  sweepLapsedDomains,
+} from './domain-handlers.ts';
+
+/** `wrangler.jsonc`'s second Cron Trigger: the custom domain plan check. */
+const DOMAIN_SWEEP_CRON = '47 9 * * *';
 
 export interface Env
   extends
     PrincipalEnv,
     StyleGalleryEnv,
     WebBotAuthEnv,
+    // A published site's own domain (D189, `custom-domain.ts`).
+    CustomHostnameEnv,
     // Stock photo search (D176). Worker secrets; either alone works.
     StockPhotoKeys {
   /** Worker secret. Never reaches the browser. */
@@ -468,6 +479,11 @@ export interface Env
   PUBLISH_BURST?: RateLimit;
   /** Uploads to the media library, per caller (`media-handlers.ts`). */
   MEDIA_BURST?: RateLimit;
+  /**
+   * A project's own domain, per caller (`domain-handlers.ts`): each request
+   * asks Cloudflare's API, whose rate limit is the whole account's.
+   */
+  DOMAIN_BURST?: RateLimit;
   /**
    * A project's share link, per address (`share-handlers.ts`): the view,
    * and the live preview's state and start. Keyed on the address rather
@@ -3373,10 +3389,29 @@ export default {
    * no separate cron to declare.
    */
   async scheduled(
-    _event: unknown,
+    event: { cron?: string },
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
+    // The custom domain plan check (D189) has a Cron Trigger of its own.
+    if (event?.cron === DOMAIN_SWEEP_CRON) {
+      ctx.waitUntil(
+        sweepLapsedDomains(env, {
+          tierOf: async (userId) =>
+            billingConfigured(env) && env.DB
+              ? (await planOf(env.DB, userId)).tier
+              : null,
+        }).then(
+          (result) =>
+            console.log(
+              JSON.stringify({ event: 'custom_domains.swept', ...result }),
+            ),
+          (error: unknown) =>
+            console.error('custom domain plan check failed', error),
+        ),
+      );
+      return;
+    }
     /*
      * D1 stops a Worker invocation at its query limit by throwing, and the
      * limit depends on the plan: 1000 on Workers Paid, 50 on Workers Free.
@@ -4302,6 +4337,10 @@ async function route(
       : {}),
     ...(stopSharePreview ? { stopSharePreview } : {}),
     ...(instanceStatus ? { instanceStatus } : {}),
+    // A deleted project's own domain goes with it (D189), whatever state
+    // its site is in. A takedown alone keeps it, so publishing again
+    // brings the domain back as it was.
+    removeDomain: (projectId: string) => removeProjectDomain(env, projectId),
   };
   if (pathname === '/api/projects') {
     return handleProjects(request, env, projectDeps);
@@ -4320,6 +4359,16 @@ async function route(
   }
   if (pathname === '/api/projects/:id/checkpoints/restore') {
     return handleProjects(request, env, projectDeps);
+  }
+  if (pathname === '/api/projects/:id/domain') {
+    return handleProjectDomain(request, env, {
+      resolvePrincipal: (req) => resolvePrincipal(req, env),
+      // No plans sold here, no tier to ask about: every account may.
+      tierOf: async (userId) =>
+        billingConfigured(env) && env.DB
+          ? (await planOf(env.DB, userId)).tier
+          : null,
+    });
   }
 
   // A project's share link, from the side of whoever holds it

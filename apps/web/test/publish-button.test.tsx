@@ -736,24 +736,27 @@ describe('the publish button, per project', () => {
 
   it('names the project on a publish and on a takedown', async () => {
     let answer = siteReply;
-    const calls = serving(() => answer());
+    // A live site also asks after its domain (D189); only publishing counts.
+    const all = serving(() => answer());
+    const calls = () => all.filter((call) => call.url === '/api/publish');
     const view = await mount(
       <PublishButton snapshot={snapshot('r1')} projectId="project-7" />,
     );
     await view.type('bakery');
     await view.click();
-    assert.equal(calls[0]?.body?.projectId, 'project-7');
+    assert.equal(calls()[0]?.body?.projectId, 'project-7');
 
     answer = () => reply({ slug: 'bakery' });
     await view.askToTakeDown();
     await view.confirm();
-    assert.equal(calls[1]?.method, 'DELETE');
-    assert.deepEqual(calls[1]?.body, { projectId: 'project-7' });
+    assert.equal(calls()[1]?.method, 'DELETE');
+    assert.deepEqual(calls()[1]?.body, { projectId: 'project-7' });
     view.unmount();
   });
 
   it("starts from the project's live site: no slug to type, and a way to take it down", async () => {
-    const calls = serving(siteReply);
+    const all = serving(siteReply);
+    const calls = () => all.filter((call) => call.url === '/api/publish');
     const view = await mount(
       <PublishButton
         snapshot={snapshot('r1')}
@@ -770,7 +773,7 @@ describe('the publish button, per project', () => {
     assert.ok(view.takeDownButton(), 'no way to take the site down');
 
     await view.click();
-    assert.equal(calls[0]?.body?.slug, 'bakery');
+    assert.equal(calls()[0]?.body?.slug, 'bakery');
     view.unmount();
   });
 

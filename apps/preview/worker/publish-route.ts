@@ -30,3 +30,28 @@ export function isPublishedHost(
   if (label === 'share' || label.startsWith('sh-')) return false;
   return !/^\d{4,5}-/.test(label);
 }
+
+/**
+ * A host that is not the preview domain's at all: an owner's own domain,
+ * connected to their published site through Cloudflare for SaaS (D189).
+ * Such a request only reaches this Worker once Cloudflare has activated
+ * the domain as a custom hostname on the zone, and only through the
+ * zone's catch-all route; apps/publish then finds the site by hostname.
+ *
+ * Off unless `customHostnames` is set, because elsewhere the hosts this
+ * Worker sees that are not the preview domain's are its own (Docker's
+ * service name, `internal.invalid` over a service binding), and those
+ * must keep reaching `/internal/` here rather than a published site.
+ */
+export function isCustomHost(
+  hostname: string,
+  previewHostname: string | undefined,
+  customHostnames: string | undefined,
+): boolean {
+  if (customHostnames !== 'on' || !previewHostname) return false;
+  const host = hostname.toLowerCase();
+  if (host === previewHostname || host.endsWith(`.${previewHostname}`)) {
+    return false;
+  }
+  return host !== 'internal.invalid' && !host.includes(':');
+}

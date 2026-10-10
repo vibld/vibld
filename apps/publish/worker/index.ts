@@ -500,9 +500,29 @@ async function route(request: Request, env: Env): Promise<Response> {
   const hostname = env.PUBLISH_HOSTNAME ?? 'vibld-preview.dev';
   // `host`, not `hostname`: under Docker the published host carries a
   // port (`localhost:8789`), and on Cloudflare the two are the same.
-  const slug = slugFromHost(url.host, hostname);
+  const slug =
+    slugFromHost(url.host, hostname) ??
+    (await customDomainSlug(env, url.host, hostname));
   if (!slug) {
     return json({ error: 'Not found.' }, 404);
   }
   return handlePublished(env, slug, url.pathname, request);
+}
+
+/**
+ * An owner's own domain (D189): the site it is connected to. apps/preview
+ * forwards such a host only once Cloudflare has activated it on the zone,
+ * and a host under `{PUBLISH_HOSTNAME}` is never one, so a slug can never
+ * be reached through somebody else's domain row.
+ */
+async function customDomainSlug(
+  env: Env,
+  host: string,
+  publishHostname: string,
+): Promise<string | undefined> {
+  const name = host.toLowerCase();
+  if (name === publishHostname || name.endsWith(`.${publishHostname}`)) {
+    return undefined;
+  }
+  return new PublishStore(env.DB, env.PROJECT_CONTENT).slugForHostname(name);
 }

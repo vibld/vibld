@@ -345,6 +345,53 @@ describe('apps/publish Worker: public serving', () => {
     return env;
   }
 
+  it("serves a site on its owner's own domain (D189)", async () => {
+    const env = await publishedEnv();
+    await (env.DB as SqliteD1Database)
+      .prepare(
+        `INSERT INTO custom_domains
+           (hostname, project_id, user_id, cloudflare_id, created_at)
+         VALUES ('www.acme.com', 'p1', 'u1', 'ch1', '2026-10-10')`,
+      )
+      .run();
+    const response = await worker.fetch(
+      publicRequest('WWW.acme.com', '/about'),
+      env,
+    );
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), '<h1>About</h1>');
+    // A domain nobody connected, and one under this Worker's own domain,
+    // are not sites.
+    assert.equal(
+      (await worker.fetch(publicRequest('www.other.com', '/'), env)).status,
+      404,
+    );
+    assert.equal(
+      (await worker.fetch(publicRequest('a.b.vibld-preview.dev', '/'), env))
+        .status,
+      404,
+    );
+  });
+
+  it("stops serving the owner's domain when the site is taken down", async () => {
+    const env = await publishedEnv();
+    await (env.DB as SqliteD1Database)
+      .prepare(
+        `INSERT INTO custom_domains
+           (hostname, project_id, user_id, cloudflare_id, created_at)
+         VALUES ('www.acme.com', 'p1', 'u1', 'ch1', '2026-10-10')`,
+      )
+      .run();
+    await worker.fetch(
+      internalRequest('internal/unpublish', { userId: 'u1', projectId: 'p1' }),
+      env,
+    );
+    assert.equal(
+      (await worker.fetch(publicRequest('www.acme.com', '/'), env)).status,
+      404,
+    );
+  });
+
   it('serves the root of a published slug', async () => {
     const env = await publishedEnv();
     const response = await worker.fetch(

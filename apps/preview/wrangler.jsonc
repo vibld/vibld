@@ -56,9 +56,11 @@
   // One label deep, because the zone's free Universal SSL certificate
   // covers one level only. apps/web reaches /internal/* over its service
   // binding; on a public host it is still gated by PREVIEW_INTERNAL_SECRET.
-  "routes": [
-    { "pattern": "*.vibld-preview.dev/*", "zone_name": "vibld-preview.dev" },
-  ],
+  //
+  // `*/*` rather than `*.vibld-preview.dev/*` so the route also catches the
+  // owners' own domains that Cloudflare for SaaS sends into this zone as
+  // custom hostnames (D189); `CUSTOM_HOSTNAMES` below tells the Worker so.
+  "routes": [{ "pattern": "*/*", "zone_name": "vibld-preview.dev" }],
 
   // Published sites (see the routes comment above).
   "services": [{ "binding": "PUBLISH", "service": "vibld-publish" }],
@@ -67,6 +69,9 @@
     // Public: the domain exposePort() mints preview URLs under. Matches
     // the routes pattern above.
     "PREVIEW_HOSTNAME": "vibld-preview.dev",
+    // Owners' own domains reach this Worker (D189): a host off the preview
+    // domain is a published site, handed to apps/publish.
+    "CUSTOM_HOSTNAMES": "on",
   },
 
   // The media library, read-only: a preview serves `/media/<name>` from the

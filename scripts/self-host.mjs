@@ -285,6 +285,10 @@ export function selfHostConfig(app, base, settings) {
       delete vars.VIBLD_LOCAL_BASE_URL;
       delete vars.VIBLD_LOCAL_MODEL;
     }
+    // Custom domains (D189) run on vibld's own zone through Cloudflare for
+    // SaaS. A copy has no such zone set up, so it offers none.
+    delete vars.CUSTOM_HOSTNAME_ZONE_ID;
+    delete vars.CUSTOM_HOSTNAME_TARGET;
     if (s.builderDomain)
       vars.VIBLD_REFERRAL_ORIGIN = `https://${s.builderDomain}`;
     else delete vars.VIBLD_REFERRAL_ORIGIN;
@@ -298,6 +302,8 @@ export function selfHostConfig(app, base, settings) {
     }
   }
   if (app === 'preview') {
+    // The route below catches the preview domain only, not custom hostnames.
+    delete vars.CUSTOM_HOSTNAMES;
     if (s.previewDomain) {
       config.routes = [
         { pattern: `*.${s.previewDomain}/*`, zone_name: s.previewDomain },

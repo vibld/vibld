@@ -307,4 +307,41 @@ describe('deleting a project', () => {
       assert.equal(deleted.status, 200, state);
     }
   });
+
+  it("disconnects the project's own domain, whatever its site's state (D189)", async () => {
+    for (const state of ['live', 'down', 'held'] as const) {
+      const db = await withSite(state);
+      const asked: string[] = [];
+      const deleted = await call(db, ALICE, 'DELETE', '/api/projects/doomed', {
+        takeDownSite: async (projectId) => {
+          await exec(
+            db,
+            `UPDATE published_projects SET unpublished_at = ?1, generation = NULL
+              WHERE project_id = ?2`,
+            AT,
+            projectId,
+          );
+        },
+        removeDomain: async (projectId) => {
+          asked.push(projectId);
+          return true;
+        },
+      });
+      assert.equal(deleted.status, 200, state);
+      // Before the project goes, and once more after, for a connect that
+      // was already running.
+      assert.deepEqual(asked, ['doomed', 'doomed'], state);
+    }
+  });
+
+  it('is refused, and deletes nothing, when the domain could not be disconnected', async () => {
+    const db = await withSite('down');
+    const deleted = await call(db, ALICE, 'DELETE', '/api/projects/doomed', {
+      removeDomain: async () => false,
+    });
+    assert.equal(deleted.status, 502);
+    assert.match(deleted.body.error, /custom domain could not be disconnected/);
+    const still = await call(db, ALICE, 'GET', '/api/projects/doomed');
+    assert.equal(still.status, 200);
+  });
 });

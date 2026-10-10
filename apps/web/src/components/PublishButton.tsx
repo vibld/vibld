@@ -5,6 +5,7 @@ import {
   unpublishProject,
 } from '../generation/publish-client.ts';
 import { createStatusGate } from '../github/panel-view.ts';
+import { CustomDomain } from './CustomDomain.tsx';
 import type { ProjectSite } from '../projects/projects-client.ts';
 
 /**
@@ -419,6 +420,8 @@ export function PublishButton({
           {state.error}
         </p>
       ) : null}
+      {/* The site's own domain (D189), while there is a live site. */}
+      {live && projectId ? <CustomDomain projectId={projectId} /> : null}
     </div>
   );
 }

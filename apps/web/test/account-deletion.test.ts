@@ -107,6 +107,20 @@ async function exec(db: D1Database, sql: string, ...values: unknown[]) {
     .run();
 }
 
+/** The Cloudflare ids of an account's domains still on record. */
+async function hostnameIds(
+  w: { db: D1Database },
+  userId: string,
+): Promise<string[]> {
+  const rows = await w.db
+    .prepare(
+      'SELECT cloudflare_id FROM custom_domains WHERE user_id = ?1 ORDER BY hostname',
+    )
+    .bind(userId)
+    .all<{ cloudflare_id: string }>();
+  return (rows.results ?? []).map((row) => row.cloudflare_id);
+}
+
 interface FakeStripe extends StripeSubscriptions {
   cancelled: { id: string; params: unknown }[];
   down: boolean;
@@ -1256,6 +1270,127 @@ describe('the purge', () => {
     assert.equal(w.ledger.length, 2, 'a finished step ran again');
   });
 
+  it("disconnects the account's own domains at Cloudflare before their rows go (D189)", async () => {
+    const w = world();
+    await seed(w);
+    for (const [user, hostname, id] of [
+      [USER, 'www.leaver.com', 'ch_leaver'],
+      [OTHER, 'www.stays.com', 'ch_stays'],
+    ] as const) {
+      await exec(
+        w.db,
+        `INSERT INTO custom_domains
+           (hostname, project_id, user_id, cloudflare_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)`,
+        hostname,
+        `project_${id}`,
+        user,
+        id,
+        REQUESTED,
+      );
+    }
+    const removed: string[] = [];
+    let cloudflareDown = true;
+    w.deps.removeCustomHostname = async (id) => {
+      if (cloudflareDown) return false;
+      removed.push(id);
+      return true;
+    };
+    await requestAccountDeletion(w.deps, USER);
+    w.clock.now = new Date(PURGE_AT);
+    const first = await runDeletionNight(
+      w.deps,
+      await findDeletionWork(w.deps),
+      500,
+    );
+    assert.equal(first.purged, 0);
+    const stuck = (await w.store.find(USER))!;
+    assert.match(stuck.lastError ?? '', /custom domain/);
+    assert.deepEqual(await hostnameIds(w, USER), ['ch_leaver']);
+
+    cloudflareDown = false;
+    w.clock.now = new Date('2026-10-02T00:00:00.000Z');
+    const second = await runDeletionNight(
+      w.deps,
+      await findDeletionWork(w.deps),
+      500,
+    );
+    assert.equal(second.purged, 1);
+    assert.deepEqual(removed, ['ch_leaver']);
+    assert.deepEqual(await hostnameIds(w, USER), []);
+    assert.deepEqual(await hostnameIds(w, OTHER), ['ch_stays']);
+  });
+
+  it('keeps what it has disconnected when it stops part way through many domains', async () => {
+    const w = world();
+    await seed(w);
+    for (const n of [1, 2, 3]) {
+      await exec(
+        w.db,
+        `INSERT INTO custom_domains
+           (hostname, project_id, user_id, cloudflare_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)`,
+        `www.leaver${n}.com`,
+        `project_${n}`,
+        USER,
+        `ch_${n}`,
+        REQUESTED,
+      );
+    }
+    const removed: string[] = [];
+    w.deps.removeCustomHostname = async (id) => {
+      // Cloudflare stops answering after the first two.
+      if (removed.length === 2) return false;
+      removed.push(id);
+      return true;
+    };
+    await requestAccountDeletion(w.deps, USER);
+    w.clock.now = new Date(PURGE_AT);
+    await runDeletionNight(w.deps, await findDeletionWork(w.deps), 500);
+    assert.deepEqual(removed, ['ch_1', 'ch_2']);
+    assert.deepEqual(await hostnameIds(w, USER), ['ch_3']);
+
+    w.deps.removeCustomHostname = async (id) => {
+      removed.push(id);
+      return true;
+    };
+    w.clock.now = new Date('2026-10-02T00:00:00.000Z');
+    const second = await runDeletionNight(
+      w.deps,
+      await findDeletionWork(w.deps),
+      500,
+    );
+    assert.equal(second.purged, 1);
+    assert.deepEqual(removed, ['ch_1', 'ch_2', 'ch_3'], 'none asked twice');
+    assert.deepEqual(await hostnameIds(w, USER), []);
+  });
+
+  it('waits, rather than dropping domain ids, where there is no token to remove them', async () => {
+    const w = world();
+    await seed(w);
+    await exec(
+      w.db,
+      `INSERT INTO custom_domains
+         (hostname, project_id, user_id, cloudflare_id, created_at)
+       VALUES ('www.leaver.com', 'project_x', ?1, 'ch_leaver', ?2)`,
+      USER,
+      REQUESTED,
+    );
+    await requestAccountDeletion(w.deps, USER);
+    w.clock.now = new Date(PURGE_AT);
+    const night = await runDeletionNight(
+      w.deps,
+      await findDeletionWork(w.deps),
+      500,
+    );
+    assert.equal(night.purged, 0);
+    assert.match(
+      (await w.store.find(USER))!.lastError ?? '',
+      /CUSTOM_HOSTNAME_API_TOKEN/,
+    );
+    assert.deepEqual(await hostnameIds(w, USER), ['ch_leaver']);
+  });
+
   it('stays inside a small share every night, and finishes over several', async () => {
     const w = world();
     await seed(w);
@@ -1387,6 +1522,9 @@ describe('the purge', () => {
       'user_bans.user_id',
       // D182: deleted in `deleteAccountRows`.
       'mcp_builds.user_id',
+      // D189: deleted in `deleteAccountRows`, once disconnected at
+      // Cloudflare by the account rows step.
+      'custom_domains.user_id',
       'admin_audit_log.target_user_id',
     ]);
     const tables =

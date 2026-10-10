@@ -103,6 +103,12 @@ export interface ProjectsDeps {
    */
   takeDownSite?: (projectId: string) => Promise<void>;
   /**
+   * Disconnect this project's own domain (D189) before the project is
+   * deleted; true once it has none. False stops the deletion, so the row
+   * naming the hostname at Cloudflare is still there to try again with.
+   */
+  removeDomain?: (projectId: string) => Promise<boolean>;
+  /**
    * Stop the live preview a share link may have started (`share-handlers.
    * ts`). Called when the link stops for a reason somebody is present for,
    * so a viewer already watching it does not keep a sandbox for the rest of
@@ -711,6 +717,18 @@ export async function handleProjects(
         );
       }
     }
+    // The project's own domain (D189), whether its site is live, held or
+    // already down: a takedown keeps the domain, and nothing after the
+    // deletion would reach it.
+    if (deps.removeDomain && !(await deps.removeDomain(project.id))) {
+      return json(
+        {
+          error:
+            "This project's custom domain could not be disconnected. Try deleting it again shortly.",
+        },
+        502,
+      );
+    }
     // The link goes before the bytes, so a deletion that only gets part way
     // (a large project, below) does not leave a stranger looking at half of
     // it. The owner asked for all of it to go, the link included.
@@ -727,6 +745,14 @@ export async function handleProjects(
         },
         503,
       );
+    }
+    // Once more, now the project row is gone, for a domain a connect that
+    // was already running recorded after the first pass. None can be
+    // recorded from here on (`CustomDomainStore.add`). One Cloudflare could
+    // not remove keeps its row, and the nightly check removes it there
+    // (`sweepLapsedDomains`), since nothing here can reach it again.
+    if (deps.removeDomain && !(await deps.removeDomain(project.id))) {
+      console.error('project deletion: late custom domain left', project.id);
     }
     return json({ deleted: true });
   }

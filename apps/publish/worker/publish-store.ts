@@ -154,6 +154,24 @@ export class PublishStore {
   }
 
   /**
+   * The slug of the site an owner's own domain is connected to (D189,
+   * apps/web's `0053_custom_domains.sql`), or undefined for a hostname
+   * nobody connected. Only the name: whether the site is up is
+   * `resolveSlug`'s question, asked next, the same as for any slug.
+   */
+  async slugForHostname(hostname: string): Promise<string | undefined> {
+    const row = await this.#db
+      .prepare(
+        `SELECT s.slug FROM custom_domains AS d
+           JOIN published_projects AS s ON s.project_id = d.project_id
+          WHERE d.hostname = ?1`,
+      )
+      .bind(hostname.toLowerCase())
+      .first<{ slug: string }>();
+    return row?.slug;
+  }
+
+  /**
    * The project a public request's slug resolves to, if published.
    *
    * A tombstoned slug resolves to nothing, which is the whole of what

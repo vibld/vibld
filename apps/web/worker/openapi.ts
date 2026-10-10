@@ -4361,6 +4361,255 @@ export const OPENAPI = {
         },
       },
     },
+    '/api/projects/{id}/domain': {
+      parameters: [
+        {
+          name: 'id',
+          in: 'path',
+          required: true,
+          description:
+            'The project id. An id that does not match the pattern, or names a project the caller does not own, is answered 404 (never 403).',
+          schema: {
+            type: 'string',
+            pattern: '^[A-Za-z0-9_-]{1,128}$',
+          },
+        },
+      ],
+      get: {
+        operationId: 'getProjectDomain',
+        summary:
+          "A published project's own domain, and whether it is live yet.",
+        description:
+          'Asks Cloudflare where the domain stands each time. `configured` is false on a deployment without custom domains; `eligible` is false on the Free plan.',
+        tags: ['Projects'],
+        security: [{ clerk: [] }],
+        parameters: [],
+        responses: {
+          '200': {
+            description: 'The domain, or null for none.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ProjectDomainState' },
+              },
+            },
+          },
+          '401': {
+            description: 'Not signed in.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '404': {
+            description: 'No such project of the caller.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '429': {
+            description: 'Too many domain requests.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        operationId: 'connectProjectDomain',
+        summary:
+          "Connect the owner's own domain to the project's published site.",
+        description:
+          "Paid plans only (D189). One domain per project; the project has to be published. The domain is registered only once a TXT record proves it is the caller's: until then the answer is a 409 with `code` `verify-ownership` and the `record` to add. The answer lists the DNS records to add: a CNAME to the deployment's target, and any check Cloudflare still needs.",
+        tags: ['Projects'],
+        security: [{ clerk: [] }],
+        parameters: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['hostname'],
+                properties: {
+                  hostname: {
+                    type: 'string',
+                    description: 'The domain, such as www.example.com.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Connected; waiting for DNS.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ProjectDomainState' },
+              },
+            },
+          },
+          '400': {
+            description: "Not a domain, or one of vibld's own.",
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '401': {
+            description: 'Not signed in.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '402': {
+            description: 'The Free plan. `code` is `paid-plan-required`.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '403': {
+            description: 'Cross-site request, or no invitation to the beta.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '404': {
+            description: 'No such project of the caller.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '409': {
+            description:
+              'Not published, already connected, the domain is connected to another site, or its ownership is not proven yet (`code` `verify-ownership`, with the TXT `record` to add).',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '415': {
+            description: 'The body is not JSON.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '429': {
+            description: 'Too many domain requests.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '502': {
+            description: 'Cloudflare did not accept the domain.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '503': {
+            description:
+              'Custom domains are not configured on this deployment.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+      delete: {
+        operationId: 'disconnectProjectDomain',
+        summary: "Disconnect the project's own domain.",
+        description: 'The site stays published at its vibld address.',
+        tags: ['Projects'],
+        security: [{ clerk: [] }],
+        parameters: [],
+        responses: {
+          '200': {
+            description: 'Disconnected.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['hostname'],
+                  properties: { hostname: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '401': {
+            description: 'Not signed in.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '403': {
+            description: 'Cross-site request.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '404': {
+            description: 'No such project of the caller, or it has no domain.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '429': {
+            description: 'Too many domain requests.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '502': {
+            description: 'Cloudflare did not remove the domain.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+          '503': {
+            description:
+              'Custom domains are not configured on this deployment.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Error' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/api/projects/{id}/checkpoints/restore': {
       parameters: [
         {
@@ -7222,6 +7471,47 @@ export const OPENAPI = {
             },
           },
         ],
+      },
+      ProjectDomainState: {
+        type: 'object',
+        required: ['configured'],
+        properties: {
+          configured: { type: 'boolean' },
+          eligible: {
+            type: 'boolean',
+            description: 'False on the Free plan.',
+          },
+          target: {
+            type: 'string',
+            description: "What the domain's CNAME record points at.",
+          },
+          domain: {
+            oneOf: [
+              {
+                type: 'object',
+                required: ['hostname', 'status', 'records', 'errors'],
+                properties: {
+                  hostname: { type: 'string' },
+                  status: { enum: ['active', 'pending', 'failed'] },
+                  records: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['type', 'name', 'value'],
+                      properties: {
+                        type: { enum: ['CNAME', 'TXT'] },
+                        name: { type: 'string' },
+                        value: { type: 'string' },
+                      },
+                    },
+                  },
+                  errors: { type: 'array', items: { type: 'string' } },
+                },
+              },
+              { type: 'null' },
+            ],
+          },
+        },
       },
       CheckpointRestoreRequest: {
         type: 'object',

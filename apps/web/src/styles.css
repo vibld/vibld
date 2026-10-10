@@ -1324,6 +1324,67 @@ body {
   width: 10rem;
 }
 
+/* A published site's own domain (D189), under the publish controls. */
+.custom-domain {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.45rem;
+  margin-top: 0.2rem;
+}
+
+.custom-domain .pane-note,
+.custom-domain__actions {
+  margin: 0;
+}
+
+.custom-domain__form {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.custom-domain__status {
+  font-size: 0.7rem;
+  border-radius: var(--radius);
+  padding: 0.05rem 0.4rem;
+  background: var(--caution-bg);
+  color: var(--caution);
+}
+
+.custom-domain__status--active {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.custom-domain__status--failed {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.custom-domain__records {
+  font-size: 0.72rem;
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.custom-domain__records th,
+.custom-domain__records td {
+  text-align: left;
+  padding: 0.2rem 0.35rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.custom-domain__records th:first-child,
+.custom-domain__records td:first-child {
+  width: 3.5rem;
+}
+
 /* The one decision in the builder a stranger can see the result of
  * (ADR-0013). It is drawn in the caution tone rather than the error one,
  * because nothing has gone wrong: something is about to become public. */
@@ -3194,4 +3255,8 @@ a.projectlist__name:hover {
   margin: 0.5rem 0 0;
   padding-left: 1.1rem;
   font-size: 0.8125rem;
+}
+
+.custom-domain__form .custom-domain__records {
+  flex-basis: 100%;
 }

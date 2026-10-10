@@ -84,6 +84,12 @@ export const GATED_METHODS: Readonly<Record<string, readonly string[]>> = {
   // who could not pull their own link would be left with their work in
   // front of strangers and no control that stops it.
   '/api/projects/:id/share': ['POST'],
+  // POST connects a published site to the owner's own domain (D189): a new
+  // address strangers can reach, and a custom hostname on this deployment's
+  // Cloudflare zone. DELETE disconnects it and is open for the reason
+  // DELETE on the share link is: a revoked owner must be able to stop their
+  // own domain from serving.
+  '/api/projects/:id/domain': ['POST'],
 };
 
 /** Routes an uninvited caller must not reach, whatever the method. */
@@ -397,6 +403,8 @@ export const PROJECT_SHARE_ROUTE = '/api/projects/:id/share';
 /** A project's accepted checkpoints, and restoring one (D152). */
 export const PROJECT_CHECKPOINTS_ROUTE = '/api/projects/:id/checkpoints';
 export const PROJECT_RESTORE_ROUTE = '/api/projects/:id/checkpoints/restore';
+/** A published site's own domain (D189, `domain-handlers.ts`). */
+export const PROJECT_DOMAIN_ROUTE = '/api/projects/:id/domain';
 /**
  * A share link's routes carry its token rather than a project id, and are
  * named the same way for the same reason (`share-handlers.ts`).
@@ -412,6 +420,7 @@ const PROJECT_DUPLICATE = /^\/api\/projects\/([^/]+)\/duplicate$/;
 const PROJECT_SHARE = /^\/api\/projects\/([^/]+)\/share$/;
 const PROJECT_CHECKPOINTS = /^\/api\/projects\/([^/]+)\/checkpoints$/;
 const PROJECT_RESTORE = /^\/api\/projects\/([^/]+)\/checkpoints\/restore$/;
+const PROJECT_DOMAIN = /^\/api\/projects\/([^/]+)\/domain$/;
 const SHARE_VIEW = /^\/api\/share\/([^/]+)$/;
 const SHARE_PREVIEW = /^\/api\/share\/([^/]+)\/preview$/;
 const SHARE_REMIX = /^\/api\/share\/([^/]+)\/remix$/;
@@ -422,6 +431,7 @@ export function routeKeyFor(pathname: string): string {
   if (PROJECT_SHARE.test(pathname)) return PROJECT_SHARE_ROUTE;
   if (PROJECT_CHECKPOINTS.test(pathname)) return PROJECT_CHECKPOINTS_ROUTE;
   if (PROJECT_RESTORE.test(pathname)) return PROJECT_RESTORE_ROUTE;
+  if (PROJECT_DOMAIN.test(pathname)) return PROJECT_DOMAIN_ROUTE;
   if (PROJECT_ITEM.test(pathname)) return PROJECT_ITEM_ROUTE;
   if (SHARE_PREVIEW.test(pathname)) return SHARE_PREVIEW_ROUTE;
   if (SHARE_REMIX.test(pathname)) return SHARE_REMIX_ROUTE;
@@ -446,6 +456,7 @@ export function projectIdInPath(pathname: string): string | null {
       PROJECT_SHARE.exec(pathname) ??
       PROJECT_CHECKPOINTS.exec(pathname) ??
       PROJECT_RESTORE.exec(pathname) ??
+      PROJECT_DOMAIN.exec(pathname) ??
       PROJECT_ITEM.exec(pathname),
   );
 }

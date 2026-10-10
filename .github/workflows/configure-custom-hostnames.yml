@@ -1,0 +1,43 @@
+# Brings the preview zone to what custom domains need (docs/decisions.md
+# D189): the fallback origin's DNS record and Cloudflare for SaaS's fallback
+# origin. `inspect` only reads; `apply` writes and is safe to repeat. See
+# scripts/configure-custom-hostnames.mjs.
+name: Configure custom domains
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: inspect (read only) or apply
+        type: choice
+        options: [inspect, apply]
+        default: inspect
+
+permissions:
+  contents: read
+
+concurrency:
+  group: configure-custom-hostnames
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    # The token exists only in the private working repository.
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Configure
+        env:
+          CONFIGURE_MODE: ${{ inputs.mode }}
+          CUSTOM_HOSTNAME_API_TOKEN: ${{ secrets.CUSTOM_HOSTNAME_API_TOKEN }}
+        run: node scripts/configure-custom-hostnames.mjs

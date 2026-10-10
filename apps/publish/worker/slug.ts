@@ -26,6 +26,8 @@ const RESERVED_SLUGS = new Set([
   'status',
   'share',
   'published',
+  // The fallback origin owners' own domains point their CNAME at (D189).
+  'domains',
 ]);
 
 /**

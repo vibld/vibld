@@ -483,7 +483,17 @@ paying accounts until midnight UTC.
   part of this.
 - **D189. Custom domains for published sites, built next (Chris,
   2026-10-10).** Roadmap M3; Cloudflare for SaaS custom hostnames on the
-  publish Worker, for paid plans.
+  publish Worker, for paid plans. Built: one domain per project, connected
+  under the live site in the builder; the owner adds a CNAME to
+  `domains.vibld-preview.dev`; deleting the project or the account
+  disconnects it (ADR-0010's 2026-10-10 addendum). The owner proves the
+  domain with a TXT record before it is registered. When the plan ends,
+  a nightly pass disconnects it (Chris, 2026-10-10, "Disconnect nightly").
+  Accepted as known limits (Chris, 2026-10-10, "Accept both"): the TXT
+  proof is a fixed value per account and hostname, so a record a former
+  owner leaves in place still proves it; and a hostname whose row write
+  and compensating removal both fail stays at Cloudflare for an operator
+  to remove there.
 - **D190. Editing-level MCP tools, built next (Chris, 2026-10-10).** File
   reads and writes, typecheck, screenshots, logs and checkpoints on `/mcp`,
   so a person's own assistant can edit a vibld project. After D185; how it

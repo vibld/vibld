@@ -20,7 +20,7 @@ import {
   shareLink,
   withoutGrantCookie,
 } from './share-route.ts';
-import { isPublishedHost } from './publish-route.ts';
+import { isCustomHost, isPublishedHost } from './publish-route.ts';
 import { signShare, verifyShare } from './share-token.ts';
 import {
   isProjectFileArray,
@@ -63,6 +63,11 @@ export interface Env {
    * (publish-route.ts). Unset, those hosts answer 404 as they always have.
    */
   PUBLISH?: { fetch(request: Request): Promise<Response> };
+  /**
+   * `on` where the zone's route catches owners' own domains (D189), so a
+   * host off the preview domain is a published site (`isCustomHost`).
+   */
+  CUSTOM_HOSTNAMES?: string;
 }
 
 /** The reserved subdomain share links are served from -- see `handleSharedPreview`. */
@@ -486,7 +491,11 @@ export default {
     // answers (and gates with its own secret) for the examples script.
     // `host`, not `hostname`, here and below: under Docker the preview host
     // carries a port (`localhost:8788`); on Cloudflare the two are the same.
-    if (env.PUBLISH && isPublishedHost(url.host, env.PREVIEW_HOSTNAME)) {
+    if (
+      env.PUBLISH &&
+      (isPublishedHost(url.host, env.PREVIEW_HOSTNAME) ||
+        isCustomHost(url.host, env.PREVIEW_HOSTNAME, env.CUSTOM_HOSTNAMES))
+    ) {
       return env.PUBLISH.fetch(request);
     }
 

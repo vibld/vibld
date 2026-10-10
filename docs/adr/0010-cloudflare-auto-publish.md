@@ -125,6 +125,19 @@ shapes, so the two can never take each other's hostnames. The separation
 argument above now rests on that rule rather than on a `published.` label.
 The custom-domain step's CNAME target becomes `<slug>.vibld-preview.dev`.
 
+## Addendum, 2026-10-10: custom domains through Cloudflare for SaaS (D189)
+
+The custom-domain step is built differently from the Decision above. It
+asks for no token from the owner and needs no Cloudflare account of
+theirs: each domain is a custom hostname on Vibld's own preview zone
+(Cloudflare for SaaS), the owner adds one CNAME to
+`domains.vibld-preview.dev` at whatever DNS provider they use, and
+Cloudflare checks it and issues the certificate. apps/preview's route on
+the zone became `*/*` so those hostnames reach it, and apps/publish serves
+the site by the hostname (`custom_domains`). No user credential is held,
+so the blast-radius paragraph below no longer applies to this step. It is
+offered on paid plans (D189).
+
 ## Consequences
 
 **New abuse surface, addressed like every other mutating endpoint in this

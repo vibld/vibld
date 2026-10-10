@@ -568,12 +568,47 @@ export class AccountDeletionStore {
       // Which assistants started which builds (D182): only a count for a
       // cap, and nothing to cap once the account is gone.
       `DELETE FROM mcp_builds WHERE user_id = ?1`,
+      // The account's own domains (D189). The purge's account rows step
+      // disconnects each one from Cloudflare first, and comes here only
+      // once every one is gone there (`PURGE_STEPS` in account-deletion.ts).
+      `DELETE FROM custom_domains WHERE user_id = ?1`,
     ]) {
       await this.#db.prepare(sql).bind(userId).run();
     }
   }
 
-  static readonly ACCOUNT_ROW_QUERIES = 15;
+  static readonly ACCOUNT_ROW_QUERIES = 16;
+
+  /**
+   * The Cloudflare id of one of the account's own domains (D189), or null
+   * when none is left. The purge disconnects them one at a time before
+   * `deleteAccountRows`. One query.
+   */
+  async nextCustomHostnameId(userId: string): Promise<string | null> {
+    const row = await this.#db
+      .prepare(
+        'SELECT cloudflare_id FROM custom_domains WHERE user_id = ?1 ORDER BY hostname LIMIT 1',
+      )
+      .bind(userId)
+      .first<{ cloudflare_id: string }>();
+    return row?.cloudflare_id ?? null;
+  }
+
+  /**
+   * The row of a domain Cloudflare has just removed, so a purge that stops
+   * after it does not ask Cloudflare again. One query.
+   */
+  async forgetCustomHostname(
+    userId: string,
+    cloudflareId: string,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        'DELETE FROM custom_domains WHERE user_id = ?1 AND cloudflare_id = ?2',
+      )
+      .bind(userId, cloudflareId)
+      .run();
+  }
 
   /**
    * The published site's catalogue, for a site that is already down.

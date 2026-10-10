@@ -203,9 +203,18 @@ endpoint with its own `PUBLISH_BURST` rate limit, the same shape
 `PLAN_BURST` uses -- so the "no real caller yet to gate" reasoning this
 section used to give is resolved.
 
+An owner's own domain (D189) is served here too. apps/preview's route on
+the zone is `*/*`, so a custom hostname Cloudflare for SaaS has activated
+reaches it, and it forwards any host off the preview domain to this Worker
+(`isCustomHost`). `route` then looks the host up in `custom_domains`
+(apps/web's `0053_custom_domains.sql`) and serves that site's slug exactly
+as it serves `<slug>.vibld-preview.dev`. apps/web makes and removes the
+custom hostnames (`worker/custom-domain.ts`); this Worker only reads the
+table. The slug `domains` is reserved: `domains.vibld-preview.dev` is the
+fallback origin owners point their CNAME at.
+
 Still not built, per ADR-0010's own scoping:
 
-- The opt-in custom-domain step (the user's own pasted Cloudflare token).
 - Storage quota per user/plan tier (only a request-rate limit exists so
   far, not a cap on how much R2 storage one account may occupy).
 - Slug release/reclaim rules after a project is deleted. Taking a site

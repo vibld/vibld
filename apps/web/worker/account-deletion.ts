@@ -48,6 +48,11 @@ import { AUTO_SUBSCRIBE_DISPATCH_LEASE_MS } from './auto-subscribe.ts';
 import { BILLABLE_STATUSES, BillingStore } from './billing-store.ts';
 import { clerkLookupConfigured } from './clerk-lookup.ts';
 import type { ClerkLookupEnv } from './clerk-lookup.ts';
+import {
+  CustomHostnames,
+  customHostnamesConfigured,
+  type CustomHostnameEnv,
+} from './custom-domain.ts';
 import { GitHubStore } from './github-store.ts';
 import { previewConfigured, stopPreview } from './preview-client.ts';
 import type { PreviewServiceEnv, ServiceOutcome } from './preview-client.ts';
@@ -111,11 +116,22 @@ export interface DeletionDeps {
   /** The spend ledger's Durable Objects, by name. Null when unbound. */
   ledger: ((name: string) => { forget(): Promise<void> }) | null;
   deleteClerkUser: (userId: string) => Promise<ClerkDeletion>;
+  /**
+   * Disconnect one of the account's own domains at Cloudflare (D189), by
+   * its custom hostname id; true once it is gone there. Absent where this
+   * deployment has no custom domains, so none was ever connected.
+   */
+  removeCustomHostname?: ((cloudflareId: string) => Promise<boolean>) | null;
   now: () => Date;
 }
 
 export interface DeletionEnv
-  extends StripeEnv, PreviewServiceEnv, ClerkLookupEnv, PrincipalEnv {
+  extends
+    StripeEnv,
+    PreviewServiceEnv,
+    ClerkLookupEnv,
+    PrincipalEnv,
+    CustomHostnameEnv {
   DB?: D1Database;
   PROJECT_CONTENT?: R2Bucket;
   USER_BUDGET?: DurableObjectNamespace<{ forget(): void }>;
@@ -203,6 +219,15 @@ export function deletionDepsFor(env: DeletionEnv): DeletionDeps {
     deleteClerkUser: SKIPS_CLERK.has(signInMode(env) ?? '')
       ? async () => ({ ok: true })
       : (userId) => deleteClerkUser(env, userId),
+    removeCustomHostname: customHostnamesConfigured(env)
+      ? async (cloudflareId) =>
+          (
+            await new CustomHostnames(
+              env.CUSTOM_HOSTNAME_ZONE_ID!,
+              env.CUSTOM_HOSTNAME_API_TOKEN!,
+            ).remove(cloudflareId)
+          ).ok
+      : null,
     now: () => new Date(),
   };
 }
@@ -565,8 +590,41 @@ export const PURGE_STEPS: readonly PurgeStep[] = [
   },
   {
     name: 'account rows',
-    queries: AccountDeletionStore.ACCOUNT_ROW_QUERIES,
+    // And the read of the account's next domain, below. A pass that
+    // disconnects one costs that read and its row's delete, fewer than the
+    // last pass, which finds none and deletes the rest.
+    queries: AccountDeletionStore.ACCOUNT_ROW_QUERIES + 1,
     async run(deps, record) {
+      // Each of the account's own domains (D189) is disconnected at
+      // Cloudflare before the rows go, because the row is the only record
+      // of its id there. One a pass (`again`), and its row goes as soon as
+      // Cloudflare has removed it, so an account with many domains makes
+      // progress every night rather than starting the list over. One
+      // Cloudflare could not remove keeps its row, and the step tries again
+      // the next night, rather than leaving a hostname registered that
+      // nobody can connect again.
+      //
+      // A deployment that has rows but no token to remove them with (one
+      // taken off after domains were connected) is waiting the same way,
+      // as an unconfigured Clerk does (`deletionDepsFor`), rather than dropping
+      // the ids.
+      const id = await deps.store.nextCustomHostnameId(record.userId);
+      if (id !== null) {
+        if (!deps.removeCustomHostname) {
+          return {
+            error:
+              'The purge has custom domains to disconnect, and this deployment has no CUSTOM_HOSTNAME_API_TOKEN to do it with.',
+          };
+        }
+        if (!(await deps.removeCustomHostname(id))) {
+          return {
+            error:
+              'The purge could not disconnect a custom domain at Cloudflare yet.',
+          };
+        }
+        await deps.store.forgetCustomHostname(record.userId, id);
+        return 'again';
+      }
       await deps.store.deleteAccountRows(record.userId);
       return 'done';
     },

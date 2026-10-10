@@ -38,6 +38,7 @@ describe('isValidSlug', () => {
       'status',
       'share',
       'published',
+      'domains',
     ]) {
       assert.equal(isValidSlug(reserved), false, reserved);
     }
