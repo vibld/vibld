@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
+  CLERK_OAUTH_SETTINGS,
   LEGACY_WEBHOOK_URLS,
   PLAN_KEY_METADATA,
   PORTAL_SETTINGS,
@@ -12,6 +13,7 @@ import {
   REQUIRED_WEBHOOK_EVENTS,
   RETENTION_COUPON,
   WEBHOOK_URL,
+  clerkOAuthChanges,
   formPairs,
   missingWebhookEvents,
   plannedPriceMoves,
@@ -307,4 +309,38 @@ test('a product is updated only when its copy differs', () => {
     null,
   );
   assert.equal(plannedProductCopy({ description: 'x', metadata: {} }), null);
+});
+
+test('clerkOAuthChanges asks for opaque tokens and the MCP default scopes', () => {
+  assert.deepEqual(clerkOAuthChanges({ jwt_access_tokens: true }), {
+    oauth_jwt_access_tokens: false,
+    aud_claim_enabled: true,
+    default_scopes: CLERK_OAUTH_SETTINGS.default_scopes,
+  });
+  assert.deepEqual(
+    clerkOAuthChanges({
+      oauth_jwt_access_tokens: false,
+      aud_claim_enabled: true,
+      default_scopes: 'build email openid profile',
+    }),
+    {},
+  );
+  assert.deepEqual(
+    clerkOAuthChanges({
+      jwt_access_tokens: false,
+      aud_claim_enabled: true,
+      default_scopes: ['openid', 'profile', 'email'],
+    }),
+    { default_scopes: CLERK_OAUTH_SETTINGS.default_scopes },
+  );
+});
+
+test('clerkOAuthChanges never touches client onboarding (D185)', () => {
+  const changes = clerkOAuthChanges({
+    dynamic_oauth_client_registration: true,
+    client_id_metadata_documents_advertised: false,
+  });
+  assert.ok(
+    Object.keys(changes).every((k) => !/dynamic|client_id_metadata/.test(k)),
+  );
 });

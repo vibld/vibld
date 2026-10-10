@@ -325,6 +325,15 @@ paying accounts until midnight UTC.
   0 on the deploy environment (the Worker secret persists until replaced).
   Accounts already granted it keep it until it expires. vibld.com states the
   grant only while it is above zero.
+- **D165. The build cost estimate stays as built (Chris, 2026-10-07:
+  decision card D165, "Keep as is").** Beside Send, the composer shows the
+  90th percentile of the last 30 days of builds on the chosen model (a build
+  counted with its repair), plus a quarter, never more than the reservation
+  for a project at the size limit plus its repair's; with fewer than ten
+  builds on a model it shows that ceiling as "Up to". Each traced build is
+  priced again at the rates in force and the larger of that and what it was
+  charged is kept, so a price rise counts at once and a price cut lowers the
+  estimate only as older builds leave the window (internal PR 383).
 - **D166. Opt-in auto-reload of the top-up (Chris, 2026-10-07: decision
   card D166, recommended "Cap $30/mo"; amends L37).** Off unless an account
   turns it on in the builder. With it on, when the most the next run could

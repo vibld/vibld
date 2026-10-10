@@ -9,8 +9,9 @@
 // amount differs from `PRICE_AMOUNTS`.
 //
 // What the APIs do not reach (Stripe's own-account branding, public details
-// and statement descriptor, Clerk's logo and application name) is a
-// Dashboard step, and the run summary lists each one with its URL.
+// and statement descriptor, Clerk's logo, favicon and application name,
+// its `build` OAuth scope) is a Dashboard step, and the run
+// summary lists each one with its URL.
 //
 // The portal's own retention-coupon drop-down is deliberately not one of
 // them and stays empty. It offers one coupon to every subscription, and the
@@ -241,6 +242,46 @@ export const PORTAL_SETTINGS = {
 };
 
 export const CLERK_INSTANCE_SETTINGS = { support_email: 'support@vibld.com' };
+
+// The MCP server's OAuth settings (docs/mcp-server.md, D182): opaque access
+// tokens, which Clerk can revoke, the `aud` claim from the RFC 8707 resource
+// parameter, and the scopes a dynamically registered client gets. How
+// clients onboard (Client ID Metadata Documents, DCR) is D185's to settle,
+// so `apply` never sends those fields. Creating the `build` scope is not in
+// Clerk's Backend API and stays a Dashboard step.
+export const CLERK_OAUTH_SETTINGS = {
+  oauth_jwt_access_tokens: false,
+  aud_claim_enabled: true,
+  default_scopes: ['openid', 'profile', 'email', 'build'],
+};
+
+/**
+ * The fields of `CLERK_OAUTH_SETTINGS` whose live value differs. Clerk reads
+ * the token format back as `jwt_access_tokens` or `oauth_jwt_access_tokens`
+ * depending on API version, and scopes as an array or a space-separated
+ * string; scope order does not count.
+ */
+export function clerkOAuthChanges(current) {
+  const changes = {};
+  const jwt =
+    current?.oauth_jwt_access_tokens ?? current?.jwt_access_tokens ?? null;
+  if (jwt !== CLERK_OAUTH_SETTINGS.oauth_jwt_access_tokens) {
+    changes.oauth_jwt_access_tokens =
+      CLERK_OAUTH_SETTINGS.oauth_jwt_access_tokens;
+  }
+  if (current?.aud_claim_enabled !== CLERK_OAUTH_SETTINGS.aud_claim_enabled) {
+    changes.aud_claim_enabled = CLERK_OAUTH_SETTINGS.aud_claim_enabled;
+  }
+  const raw = current?.default_scopes ?? [];
+  const scopes = (Array.isArray(raw) ? raw : String(raw).split(/\s+/))
+    .filter(Boolean)
+    .sort();
+  const wanted = [...CLERK_OAUTH_SETTINGS.default_scopes].sort();
+  if (scopes.join(' ') !== wanted.join(' ')) {
+    changes.default_scopes = CLERK_OAUTH_SETTINGS.default_scopes;
+  }
+  return changes;
+}
 
 /**
  * Stripe's form encoding: nested objects as `a[b][c]`, arrays as `a[]`.
@@ -693,6 +734,52 @@ async function configureClerk(key, apply, report) {
   }
 }
 
+function clerkError(result) {
+  const first = result.json?.errors?.[0];
+  return first?.long_message ?? first?.message ?? `HTTP ${result.status}`;
+}
+
+async function configureClerkOAuth(key, apply, report) {
+  report.line('### Clerk OAuth applications');
+  const current = await clerk(
+    key,
+    'GET',
+    '/instance/oauth_application_settings',
+  );
+  if (current.status !== 200) {
+    report.fail(
+      `The Clerk OAuth settings could not be read: ${clerkError(current)}`,
+    );
+    return;
+  }
+  report.line(`- Now: \`${JSON.stringify(current.json)}\``);
+  const changes = clerkOAuthChanges(current.json);
+  if (Object.keys(changes).length === 0) {
+    report.line(
+      '- Token format, `aud` claim and default scopes already match.',
+    );
+  } else if (!apply) {
+    report.line(`- Would set: \`${JSON.stringify(changes)}\``);
+  } else {
+    const updated = await clerk(
+      key,
+      'PATCH',
+      '/instance/oauth_application_settings',
+      changes,
+    );
+    if (updated.status >= 200 && updated.status < 300) {
+      report.line(`- Set: \`${JSON.stringify(changes)}\``);
+    } else {
+      report.fail(
+        `The Clerk OAuth settings were not set: ${clerkError(updated)}`,
+      );
+    }
+  }
+  report.line(
+    '- Dashboard only (https://dashboard.clerk.com/~/oauth-applications): create and advertise the `build` scope, and client onboarding per D185.',
+  );
+}
+
 async function main() {
   const mode = process.env.CONFIGURE_MODE === 'apply' ? 'apply' : 'inspect';
   const lines = [`## Configure accounts (${mode})`];
@@ -715,6 +802,11 @@ async function main() {
   }
   if (process.env.CLERK_SECRET_KEY) {
     await configureClerk(
+      process.env.CLERK_SECRET_KEY,
+      mode === 'apply',
+      report,
+    );
+    await configureClerkOAuth(
       process.env.CLERK_SECRET_KEY,
       mode === 'apply',
       report,
