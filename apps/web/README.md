@@ -389,6 +389,17 @@ The URL is scoped to the request it was submitted with -- unlike standing
 instructions, it is cleared from the field once sent, so an unrelated
 follow-up prompt never re-fetches a page nobody meant it for.
 
+Each HTTPS request it sends (the page, each redirect hop, each stylesheet) is
+signed under Web Bot Auth (`worker/web-bot-auth.ts`): an RFC 9421 Ed25519
+signature over `@authority` and `Signature-Agent: sig1="https://app.vibld.com"`,
+so a site can tell the fetch came from vibld. The public key is served,
+itself signed, at `/.well-known/http-message-signatures-directory`. The
+private key is the Worker secret `WEB_BOT_AUTH_KEY`, written only by the
+**Web Bot Auth key** workflow (`.github/workflows/web-bot-auth-key.yml`),
+which generates it on the runner and pipes it to `wrangler secret put`
+without printing it; run it again with `rotate` to replace it. Without the
+secret, requests go unsigned and the directory answers 404.
+
 The Worker verifies the Clerk session JWT itself (`worker/principal.ts`,
 `worker/clerk-auth.ts`) rather than trusting the browser's session cookie --
 which never arrives here anyway, since the cookie is scoped to Clerk's own

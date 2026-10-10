@@ -74,6 +74,8 @@
       "/_templates/*",
       "/mcp",
       "/.well-known/oauth-protected-resource/mcp",
+      // Web Bot Auth's key directory (worker/web-bot-auth.ts).
+      "/.well-known/http-message-signatures-directory",
     ],
   },
 

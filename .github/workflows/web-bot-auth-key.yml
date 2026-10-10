@@ -1,0 +1,95 @@
+name: Web Bot Auth key
+
+# Writes WEB_BOT_AUTH_KEY, the Ed25519 private JWK the builder signs its
+# reference fetches with (apps/web/worker/web-bot-auth.ts). The key is
+# generated on the runner and piped straight into `wrangler secret put`: it
+# is never printed, never stored as a GitHub secret, and never leaves the
+# pipe. The public half is what /.well-known/http-message-signatures-directory
+# then serves.
+#
+# Manual only. Without `rotate`, a Worker that already has the key is left
+# alone, so running this twice is harmless. With `rotate`, a new key replaces
+# the old one; signatures last five minutes, so sites that cached the old
+# directory stop accepting vibld within that window and then refetch.
+on:
+  workflow_dispatch:
+    inputs:
+      rotate:
+        description: Replace the key even if the Worker already has one
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-bot-auth-key
+  cancel-in-progress: false
+
+jobs:
+  key:
+    name: Write the signing key to the builder Worker
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: preview
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Require Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=0
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::CLOUDFLARE_API_TOKEN is not set"; missing=1; }
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not set"; missing=1; }
+          [ "$missing" -eq 0 ] || exit 1
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Generate and write the key
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ROTATE: ${{ inputs.rotate }}
+        run: |
+          set -euo pipefail
+          # Names only: `secret list` never returns values.
+          names=$(pnpm dlx wrangler@4.137.0 secret list --format json)
+          if printf '%s' "$names" | jq -e 'any(.[]; .name == "WEB_BOT_AUTH_KEY")' > /dev/null \
+            && [ "$ROTATE" != "true" ]; then
+            echo "WEB_BOT_AUTH_KEY is already set; left as is. Run with rotate to replace it." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node --input-type=module -e '
+            const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+            const { kty, crv, x, d } = await crypto.subtle.exportKey("jwk", pair.privateKey);
+            process.stdout.write(JSON.stringify({ kty, crv, x, d }));
+          ' | pnpm dlx wrangler@4.137.0 secret put WEB_BOT_AUTH_KEY
+          echo "Wrote WEB_BOT_AUTH_KEY. The public key is at https://app.vibld.com/.well-known/http-message-signatures-directory" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5 6; do
+            status=$(curl -s -o directory.json -w '%{http_code}' https://app.vibld.com/.well-known/http-message-signatures-directory || true)
+            if [ "$status" = "200" ] && jq -e '.keys[0].kty == "OKP" and (.keys[0] | has("d") | not)' directory.json > /dev/null; then
+              echo "Directory serves the public key." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::The directory did not serve a key yet (last status $status). It needs the deploy that adds the route."

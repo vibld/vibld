@@ -1,3 +1,4 @@
+import { signedFetch, type SigningKey } from './web-bot-auth.ts';
 import {
   MAX_REFERENCE_CHARS,
   MAX_REFERENCE_MEASURE_CHARS,
@@ -326,6 +327,8 @@ async function readCapped(
 
 export interface ReferenceFetchOptions {
   fetchImpl?: typeof fetch;
+  /** Signs every request this makes (`web-bot-auth.ts`); unsigned without. */
+  signingKey?: SigningKey | null;
   maxChars?: number;
   /** Set false to skip the stylesheet fetches. Tests that count requests use it. */
   readStylesheets?: boolean;
@@ -338,7 +341,10 @@ export async function fetchReferenceContext(
   const target = parseReferenceTarget(url);
   if (!target.ok) return target;
 
-  const doFetch = options.fetchImpl ?? fetch;
+  const doFetch = signedFetch(
+    options.fetchImpl ?? fetch,
+    options.signingKey ?? null,
+  );
   const maxChars = options.maxChars ?? MAX_REFERENCE_CHARS;
 
   let response: Response;

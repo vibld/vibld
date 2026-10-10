@@ -66,6 +66,12 @@ import {
   parseStylePreset,
 } from './request-guard.ts';
 import { fetchReferenceContext } from './reference-fetch.ts';
+import {
+  DIRECTORY_PATH,
+  handleDirectory,
+  signingKey,
+  type WebBotAuthEnv,
+} from './web-bot-auth.ts';
 import { handleMedia, handleMediaFile } from './media-handlers.ts';
 import { handleStyleGallery, readGalleryStyle } from './style-gallery.ts';
 import type { StyleGalleryEnv } from './style-gallery.ts';
@@ -301,6 +307,7 @@ export interface Env
   extends
     PrincipalEnv,
     StyleGalleryEnv,
+    WebBotAuthEnv,
     // Stock photo search (D176). Worker secrets; either alone works.
     StockPhotoKeys {
   /** Worker secret. Never reaches the browser. */
@@ -1289,7 +1296,9 @@ async function handlePlan(
   let referencePaletteSource: string | undefined;
   let referencePaletteMode: 'light' | 'dark' | undefined;
   if (referenceUrl.value) {
-    const fetched = await fetchReferenceContext(referenceUrl.value);
+    const fetched = await fetchReferenceContext(referenceUrl.value, {
+      signingKey: await signingKey(env),
+    });
     if (!fetched.ok) {
       return refuse('request-invalid', fetched.error, 422);
     }
@@ -4008,6 +4017,10 @@ async function route(
   }
   if (pathname === '/api/health') {
     return handleHealth(request);
+  }
+  // The key the reference fetches are signed with (web-bot-auth.ts).
+  if (pathname === DIRECTORY_PATH) {
+    return handleDirectory(request, env);
   }
 
   env = await withPanelKeys(env);
