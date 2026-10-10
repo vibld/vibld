@@ -295,6 +295,7 @@ import {
   handleInviteRevoke,
   refusal,
 } from './access-handlers.ts';
+import { handleHealth, handleOpenApi } from './api-description.ts';
 
 export interface Env
   extends
@@ -3999,6 +4000,16 @@ async function route(
   // back into this router as the person, and is gated there.
   if (pathname === '/mcp') return handleMcp(request, env, ctx);
   if (pathname === MCP_METADATA_PATH) return handleMcpMetadata(request, env);
+  // What describes this API rather than being part of it (D186): open to
+  // anybody, identifying nobody and touching no binding, so answered before
+  // the panel keys are read from D1.
+  if (pathname === '/api/openapi.json') {
+    return handleOpenApi(request, env);
+  }
+  if (pathname === '/api/health') {
+    return handleHealth(request);
+  }
+
   env = await withPanelKeys(env);
 
   /*

@@ -437,6 +437,15 @@ paying accounts until midnight UTC.
   refuse Clerk-signed tokens that are not sessions. Server Card at
   `https://vibld.com/.well-known/mcp/server-card.json`. Design, limits and
   phases: `docs/mcp-server.md`.
+- **D186. The builder API is described as a public contract (Chris,
+  2026-10-09: "OpenAPI spec").** app.vibld.com serves an OpenAPI 3.1
+  document for every `/api/` route except administration, the Stripe and
+  GitHub webhooks and the GitHub callback, at `/api/openapi.json`, plus an
+  open `/api/health`. vibld.com lists both in an RFC 9727 API catalog at
+  `/.well-known/api-catalog`, links them from the home page's `Link`
+  header, and explains them at `/docs/api`. The document is written by
+  hand in `apps/web/worker/openapi.ts`; `apps/web/test/openapi.test.ts`
+  holds it to the router.
 - **D187. CI pulls Docker Hub images through a mirror (Chris, 2026-10-09:
   "Add mirror").** The Docker and eval-build jobs pull each Docker Hub image
   they use from mirror.gcr.io and tag it with its Docker Hub name, after

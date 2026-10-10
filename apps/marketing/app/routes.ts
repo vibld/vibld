@@ -87,6 +87,7 @@ export default [
   route('docs/running-your-project', 'routes/docs.running-your-project.tsx'),
   route('docs/taking-your-code', 'routes/docs.taking-your-code.tsx'),
   route('docs/credits-and-plans', 'routes/docs.credits-and-plans.tsx'),
+  route('docs/api', 'routes/docs.api.tsx'),
   route('docs/self-hosting', 'routes/docs.self-hosting.tsx'),
   route('docs/configuration', 'routes/docs.configuration.tsx'),
   route('docs/deploying', 'routes/docs.deploying.tsx'),

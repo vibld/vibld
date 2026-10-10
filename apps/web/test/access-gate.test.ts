@@ -193,13 +193,26 @@ describe('the invite gate', () => {
     const gate = source.indexOf('if (isGated(pathname, request.method))');
     assert.ok(gate > 0, 'the router does not call the gate at all');
 
-    const firstDispatch = source.indexOf("if (pathname === '/api/");
+    const firstDispatch = source.indexOf("if (pathname === '/api/", gate);
     assert.ok(firstDispatch > 0, 'no route dispatch found to compare against');
 
-    assert.ok(
-      gate < firstDispatch,
-      'a route is dispatched before the invite gate runs',
-    );
+    // A route the table never gates (the API's own description and its
+    // liveness check, D186) may be answered first, so that it touches no
+    // binding; any other route dispatched ahead of the gate is open.
+    const early = [
+      ...source
+        .slice(0, gate)
+        .matchAll(/if \(pathname === '(\/api\/[^']+)'\)/g),
+    ].map((match) => match[1]!);
+    for (const path of early) {
+      for (const method of ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+        assert.equal(
+          isGated(path, method),
+          false,
+          `${method} ${path} is dispatched before the invite gate runs`,
+        );
+      }
+    }
   });
 
   it('resolves a principal inside the gate, so an uninvited and an unauthenticated caller differ', async () => {
@@ -209,7 +222,10 @@ describe('the invite gate', () => {
     const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
     const gate = source.slice(
       source.indexOf('if (isGated(pathname, request.method))'),
-      source.indexOf("if (pathname === '/api/"),
+      source.indexOf(
+        "if (pathname === '/api/",
+        source.indexOf('if (isGated(pathname, request.method))'),
+      ),
     );
     assert.match(gate, /resolvePrincipal/);
     assert.match(gate, /decideAccessFor/);

@@ -6,6 +6,11 @@ import {
   record,
 } from './analytics.ts';
 import { secured } from '@vibld/security-headers';
+import {
+  apiCatalogResponse,
+  API_CATALOG_PATH,
+  withHomeLinks,
+} from './agent-discovery.ts';
 import { markdownFor, varyByAccept } from './markdown.ts';
 import {
   handleRoadmapVote,
@@ -120,6 +125,11 @@ async function route(request: Request, env: Env): Promise<Response> {
     });
   }
 
+  // The builder API's catalog (worker/agent-discovery.ts, D186).
+  if (url.pathname === API_CATALOG_PATH) {
+    return apiCatalogResponse(request);
+  }
+
   if (url.pathname === '/api/hit' && request.method === 'POST') {
     return handleHit(request, env);
   }
@@ -152,16 +162,21 @@ async function route(request: Request, env: Env): Promise<Response> {
     // the same header.
     const markdown = await markdownFor(request, env.ASSETS);
     if (markdown) {
-      return env.VIBLD_NOINDEX === '1' ? noindex(markdown) : markdown;
+      const linked = withHomeLinks(url.pathname, markdown);
+      return env.VIBLD_NOINDEX === '1' ? noindex(linked) : linked;
     }
-    const response = varyByAccept(
-      permanentRedirect(
-        request.method,
-        hashedAssetHeaders(
-          url.pathname,
-          discoveryHeaders(
+    // The home page also points at the builder API (worker/agent-discovery.ts).
+    const response = withHomeLinks(
+      url.pathname,
+      varyByAccept(
+        permanentRedirect(
+          request.method,
+          hashedAssetHeaders(
             url.pathname,
-            fontHeaders(url.pathname, await env.ASSETS.fetch(request)),
+            discoveryHeaders(
+              url.pathname,
+              fontHeaders(url.pathname, await env.ASSETS.fetch(request)),
+            ),
           ),
         ),
       ),

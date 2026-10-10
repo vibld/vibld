@@ -154,6 +154,11 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // The shell asks this before it can render anything, including the screen
   // that tells somebody they are not on the list.
   '/api/config': 'the shell cannot render the refusal without it',
+  // The API's own description and a liveness check (D186). Neither resolves
+  // a principal, reads anything stored or spends anything: they say what
+  // the routes are, and whether the Worker is answering.
+  '/api/openapi.json': 'the public description of these routes',
+  '/api/health': 'a liveness check that touches nothing',
   '/api/access/status': 'this is the endpoint that reports the refusal',
   // A readout of the caller's own balance. Hiding it would leave somebody
   // who was invited, spent, and then had access revoked with no way to see

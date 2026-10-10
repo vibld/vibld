@@ -327,6 +327,14 @@ export const DOC_GUIDES: DocGuide[] = [
       'What a run costs, what a plan includes, and the order the three layers of credit are spent in.',
   },
   {
+    slug: 'api',
+    track: 'hosted',
+    label: 'The builder API',
+    title: `The builder API | ${SITE.name} docs`,
+    description:
+      'The HTTP API the builder runs on: where it is described, how a request signs in, and what it answers.',
+  },
+  {
     slug: 'self-hosting',
     track: 'self-hosted',
     label: 'What self-hosting involves',
