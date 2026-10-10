@@ -12,6 +12,10 @@ name: vibld.com DNS records
 # - `default._bimi.vibld.com` (D173): points mailbox providers at the logo in
 #   apps/marketing/public/bimi.svg. They show it only once DMARC is at
 #   quarantine or reject.
+# - `_mcp._agents.vibld.com` (DNS-AID, draft-mozleywilliams-dnsop-dnsaid):
+#   an SVCB record pointing agents at the MCP server on app.vibld.com (D182).
+#   The path is not in DNS; vibld.com/.well-known/mcp/server-card.json names
+#   the endpoint. Written only once the endpoint answers.
 #
 # Dispatch only, and idempotent: a record already holding the value is left
 # alone, one holding another value is updated in place, and a missing one is
@@ -214,4 +218,66 @@ jobs:
             sleep 10
           done
           echo "::error::$ns answers \"$answer\" for $NAME, not \"$CONTENT\"."
+          exit 1
+
+      - name: Set _mcp._agents.vibld.com
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          NAME: _mcp._agents.vibld.com
+          TARGET: app.vibld.com.
+          PARAMS: alpn="h2,h3" port=443 mandatory=alpn,port
+          ENDPOINT: https://app.vibld.com/mcp
+        run: |
+          set -euo pipefail
+          # A record points only at an endpoint that is there: the MCP server
+          # answers an unauthenticated call with 401 and a Bearer challenge
+          # naming its resource metadata. A bare 401 from anything else in
+          # front of it does not count.
+          status=$(curl -sS -o /dev/null -D headers.txt -w '%{http_code}' -X POST "$ENDPOINT" || true)
+          if [ "$status" != "401" ] \
+            || ! grep -qiE '^www-authenticate: *Bearer .*resource_metadata="https://app\.vibld\.com/\.well-known/oauth-protected-resource/mcp"' headers.txt; then
+            echo "::error::$ENDPOINT answers $status without the MCP server's Bearer challenge. Deploy the MCP server first."
+            exit 1
+          fi
+          api() {
+            curl -sS --fail-with-body -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H 'Content-Type: application/json' "$@"
+          }
+          base=https://api.cloudflare.com/client/v4
+          records=$(api "$base/zones/$ZONE_ID/dns_records?type=SVCB&name=$NAME")
+          count=$(jq '.result | length' <<< "$records")
+          body=$(jq -n --arg name "$NAME" --arg target "$TARGET" --arg value "$PARAMS" \
+            '{type: "SVCB", name: $name, ttl: 3600, data: {priority: 1, target: $target, value: $value}, comment: "DNS-AID, D182, dns-vibld-com.yml"}')
+          if [ "$count" -gt 1 ]; then
+            echo "::error::$NAME has $count SVCB records. Remove the extras by hand."
+            exit 1
+          elif [ "$count" -eq 1 ]; then
+            current=$(jq -c '.result[0].data | {priority, target, value}' <<< "$records")
+            wanted=$(jq -c '.data | {priority, target, value}' <<< "$body")
+            if [ "$current" = "$wanted" ]; then
+              echo "$NAME already holds $wanted." | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            id=$(jq -r '.result[0].id' <<< "$records")
+            api -X PUT "$base/zones/$ZONE_ID/dns_records/$id" --data "$body" > /dev/null
+            echo "Updated $NAME from $current to $wanted." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            api -X POST "$base/zones/$ZONE_ID/dns_records" --data "$body" > /dev/null
+            echo "Created $NAME: SVCB 1 $TARGET $PARAMS." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          # dig prints the parameters in key order, not in the order they were
+          # written, so compare the whole answer as a sorted set of fields.
+          set -f
+          want=$(printf '%s\n' 1 "$TARGET" $PARAMS | sort | tr '\n' ' ')
+          ns=$(dig +short NS vibld.com @1.1.1.1 | head -n 1)
+          for i in $(seq 1 12); do
+            answer=$(dig +short SVCB "$NAME" "@$ns" || true)
+            got=$(printf '%s\n' $answer | sort | tr '\n' ' ')
+            if [ "$got" = "$want" ]; then
+              echo "$NAME answers $answer (from $ns)" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$ns answers \"$answer\" for $NAME, not \"1 $TARGET $PARAMS\"."
           exit 1
