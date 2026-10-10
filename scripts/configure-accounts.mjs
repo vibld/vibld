@@ -245,15 +245,33 @@ export const CLERK_INSTANCE_SETTINGS = { support_email: 'support@vibld.com' };
 
 // The MCP server's OAuth settings (docs/mcp-server.md, D182): opaque access
 // tokens, which Clerk can revoke, the `aud` claim from the RFC 8707 resource
-// parameter, and the scopes a dynamically registered client gets. How
-// clients onboard (Client ID Metadata Documents, DCR) is D185's to settle,
-// so `apply` never sends those fields. Creating the `build` scope is not in
-// Clerk's Backend API and stays a Dashboard step.
+// parameter, the scopes a dynamically registered client gets, and how
+// clients onboard: Client ID Metadata Documents and Dynamic Client
+// Registration both on (D185). Default scopes apply only when a client names
+// none, so `dynamic_client_allowed_scopes` caps what a self-registered client
+// may ask for (plus `offline_access`, which Clerk adds for refresh tokens).
+// Creating the `build` scope is not in Clerk's Backend API and stays a
+// Dashboard step.
 export const CLERK_OAUTH_SETTINGS = {
   oauth_jwt_access_tokens: false,
   aud_claim_enabled: true,
+  client_id_metadata_documents_advertised: true,
+  dynamic_oauth_client_registration: true,
   default_scopes: ['openid', 'profile', 'email', 'build'],
+  dynamic_client_allowed_scopes: [
+    'openid',
+    'profile',
+    'email',
+    'build',
+    'offline_access',
+  ],
 };
+
+/** The OAuth settings that name scopes, as opposed to switches. */
+export const CLERK_SCOPE_FIELDS = [
+  'default_scopes',
+  'dynamic_client_allowed_scopes',
+];
 
 /**
  * The fields of `CLERK_OAUTH_SETTINGS` whose live value differs. Clerk reads
@@ -269,16 +287,24 @@ export function clerkOAuthChanges(current) {
     changes.oauth_jwt_access_tokens =
       CLERK_OAUTH_SETTINGS.oauth_jwt_access_tokens;
   }
-  if (current?.aud_claim_enabled !== CLERK_OAUTH_SETTINGS.aud_claim_enabled) {
-    changes.aud_claim_enabled = CLERK_OAUTH_SETTINGS.aud_claim_enabled;
+  for (const field of [
+    'aud_claim_enabled',
+    'client_id_metadata_documents_advertised',
+    'dynamic_oauth_client_registration',
+  ]) {
+    if (current?.[field] !== CLERK_OAUTH_SETTINGS[field]) {
+      changes[field] = CLERK_OAUTH_SETTINGS[field];
+    }
   }
-  const raw = current?.default_scopes ?? [];
-  const scopes = (Array.isArray(raw) ? raw : String(raw).split(/\s+/))
-    .filter(Boolean)
-    .sort();
-  const wanted = [...CLERK_OAUTH_SETTINGS.default_scopes].sort();
-  if (scopes.join(' ') !== wanted.join(' ')) {
-    changes.default_scopes = CLERK_OAUTH_SETTINGS.default_scopes;
+  for (const field of CLERK_SCOPE_FIELDS) {
+    const raw = current?.[field] ?? [];
+    const scopes = (Array.isArray(raw) ? raw : String(raw).split(/\s+/))
+      .filter(Boolean)
+      .sort();
+    const wanted = [...CLERK_OAUTH_SETTINGS[field]].sort();
+    if (scopes.join(' ') !== wanted.join(' ')) {
+      changes[field] = CLERK_OAUTH_SETTINGS[field];
+    }
   }
   return changes;
 }
@@ -756,18 +782,25 @@ async function configureClerkOAuth(key, apply, report) {
   const changes = clerkOAuthChanges(current.json);
   if (Object.keys(changes).length === 0) {
     report.line(
-      '- Token format, `aud` claim and default scopes already match.',
+      '- Token format, `aud` claim, client onboarding and default scopes already match.',
     );
   } else if (!apply) {
     report.line(`- Would set: \`${JSON.stringify(changes)}\``);
   } else {
-    // Clerk refuses default scopes naming a scope that does not exist yet
-    // (`build` is created in the Dashboard), and refuses the whole request
-    // with them, so they go in a request of their own.
-    const { default_scopes, ...rest } = changes;
-    const batches = [rest, default_scopes ? { default_scopes } : {}];
-    for (const batch of batches) {
-      if (Object.keys(batch).length === 0) continue;
+    // Clerk refuses scopes naming one that does not exist yet (`build` is
+    // created in the Dashboard), and refuses the whole request with them, so
+    // they go in a request of their own. They go first: client onboarding is
+    // not opened unless the scope cap is in place.
+    const scopes = {};
+    const rest = { ...changes };
+    for (const field of CLERK_SCOPE_FIELDS) {
+      if (field in rest) {
+        scopes[field] = rest[field];
+        delete rest[field];
+      }
+    }
+    const send = async (batch) => {
+      if (Object.keys(batch).length === 0) return true;
       const updated = await clerk(
         key,
         'PATCH',
@@ -776,15 +809,25 @@ async function configureClerkOAuth(key, apply, report) {
       );
       if (updated.status >= 200 && updated.status < 300) {
         report.line(`- Set: \`${JSON.stringify(batch)}\``);
-      } else {
-        report.fail(
-          `Clerk did not take \`${JSON.stringify(batch)}\`: ${clerkError(updated)}`,
-        );
+        return true;
+      }
+      report.fail(
+        `Clerk did not take \`${JSON.stringify(batch)}\`: ${clerkError(updated)}`,
+      );
+      return false;
+    };
+    if (!(await send(scopes))) {
+      for (const field of [
+        'client_id_metadata_documents_advertised',
+        'dynamic_oauth_client_registration',
+      ]) {
+        if (rest[field]) delete rest[field];
       }
     }
+    await send(rest);
   }
   report.line(
-    '- Dashboard only (https://dashboard.clerk.com/~/oauth-applications): create and advertise the `build` scope, and client onboarding per D185.',
+    '- Dashboard only (https://dashboard.clerk.com/~/oauth-applications): create and advertise the `build` scope.',
   );
 }
 

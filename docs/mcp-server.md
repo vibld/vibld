@@ -79,9 +79,12 @@ https://dashboard.clerk.com/~/oauth-applications
 - **Scopes tab:** create the scope `build` (description: "Start and follow
   builds on your vibld account") and turn on advertising it in Clerk's
   OAuth metadata.
-- **Settings tab, Client onboarding:** turn on what D185 settles (Client ID
-  Metadata Documents, and Publish DCR support if chosen), then set
-  **Default scopes for dynamic clients** to `openid profile email build`.
+- **Settings tab, Client onboarding:** Client ID Metadata Documents and
+  Dynamic Client Registration both on (D185), and **Default scopes for
+  dynamic clients** `openid profile email build`. Default scopes apply only
+  when a client names none, so `scripts/configure-accounts.mjs` also caps
+  what such a client may request (`dynamic_client_allowed_scopes`) at those
+  four plus `offline_access`.
 - **Settings tab:** turn on the `aud` claim from the RFC 8707 resource
   parameter (`aud_claim_enabled`); without it no token names this server
   and every assistant is refused.

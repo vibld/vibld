@@ -315,12 +315,22 @@ test('clerkOAuthChanges asks for opaque tokens and the MCP default scopes', () =
   assert.deepEqual(clerkOAuthChanges({ jwt_access_tokens: true }), {
     oauth_jwt_access_tokens: false,
     aud_claim_enabled: true,
+    client_id_metadata_documents_advertised: true,
+    dynamic_oauth_client_registration: true,
     default_scopes: CLERK_OAUTH_SETTINGS.default_scopes,
+    dynamic_client_allowed_scopes:
+      CLERK_OAUTH_SETTINGS.dynamic_client_allowed_scopes,
   });
+  const onboarding = {
+    client_id_metadata_documents_advertised: true,
+    dynamic_oauth_client_registration: true,
+    dynamic_client_allowed_scopes: 'offline_access build email openid profile',
+  };
   assert.deepEqual(
     clerkOAuthChanges({
       oauth_jwt_access_tokens: false,
       aud_claim_enabled: true,
+      ...onboarding,
       default_scopes: 'build email openid profile',
     }),
     {},
@@ -329,18 +339,28 @@ test('clerkOAuthChanges asks for opaque tokens and the MCP default scopes', () =
     clerkOAuthChanges({
       jwt_access_tokens: false,
       aud_claim_enabled: true,
+      ...onboarding,
       default_scopes: ['openid', 'profile', 'email'],
     }),
     { default_scopes: CLERK_OAUTH_SETTINGS.default_scopes },
   );
 });
 
-test('clerkOAuthChanges never touches client onboarding (D185)', () => {
-  const changes = clerkOAuthChanges({
-    dynamic_oauth_client_registration: true,
-    client_id_metadata_documents_advertised: false,
-  });
-  assert.ok(
-    Object.keys(changes).every((k) => !/dynamic|client_id_metadata/.test(k)),
+test('clerkOAuthChanges turns on CIMD and DCR (D185)', () => {
+  assert.deepEqual(
+    clerkOAuthChanges({
+      oauth_jwt_access_tokens: false,
+      aud_claim_enabled: true,
+      client_id_metadata_documents_advertised: false,
+      dynamic_oauth_client_registration: false,
+      default_scopes: ['openid', 'profile', 'email', 'build'],
+      dynamic_client_allowed_scopes: null,
+    }),
+    {
+      client_id_metadata_documents_advertised: true,
+      dynamic_oauth_client_registration: true,
+      dynamic_client_allowed_scopes:
+        CLERK_OAUTH_SETTINGS.dynamic_client_allowed_scopes,
+    },
   );
 });

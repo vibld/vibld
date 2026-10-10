@@ -446,6 +446,13 @@ paying accounts until midnight UTC.
   refuse Clerk-signed tokens that are not sessions. Server Card at
   `https://vibld.com/.well-known/mcp/server-card.json`. Design, limits and
   phases: `docs/mcp-server.md`.
+- **D185. Assistants onboard to vibld's Clerk sign-in by Client ID Metadata
+  Document and by Dynamic Client Registration (Chris, 2026-10-10: decision
+  card D185, "CIMD and DCR").** Claude, ChatGPT and most MCP clients can
+  connect; any client can register itself, still needs the person's consent,
+  and may ask for no scope beyond `openid profile email build` (plus
+  `offline_access` for refresh tokens). `scripts/configure-accounts.mjs` sets
+  both switches and that scope cap in Clerk's OAuth settings.
 - **D186. The builder API is described as a public contract (Chris,
   2026-10-09: "OpenAPI spec").** app.vibld.com serves an OpenAPI 3.1
   document for every `/api/` route except administration, the Stripe and
