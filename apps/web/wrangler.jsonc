@@ -67,7 +67,14 @@
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/_style-gallery/*", "/_templates/*"],
+    // `/mcp` and its RFC 9728 metadata: the MCP server (D182).
+    "run_worker_first": [
+      "/api/*",
+      "/_style-gallery/*",
+      "/_templates/*",
+      "/mcp",
+      "/.well-known/oauth-protected-resource/mcp",
+    ],
   },
 
   // ANTHROPIC_API_KEY is a Worker secret, set out of band and never committed.
@@ -237,6 +244,27 @@
       "name": "SHARE_PREVIEW_BURST",
       "namespace_id": "1009",
       "simple": { "limit": 10, "period": 60 },
+    },
+    // The MCP server (D182). MCP_BURST counts every message from one
+    // account's assistants, after the token is verified; a build being
+    // polled every fifteen seconds is four a minute. MCP_IP_BURST is per
+    // address before identity, and loose, because an assistant's requests
+    // come from its provider's servers, shared by everybody it serves.
+    // MCP_BUILD_BURST is builds started from assistants, per account.
+    {
+      "name": "MCP_BURST",
+      "namespace_id": "1010",
+      "simple": { "limit": 60, "period": 60 },
+    },
+    {
+      "name": "MCP_IP_BURST",
+      "namespace_id": "1011",
+      "simple": { "limit": 600, "period": 60 },
+    },
+    {
+      "name": "MCP_BUILD_BURST",
+      "namespace_id": "1012",
+      "simple": { "limit": 2, "period": 60 },
     },
   ],
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { resolvePrincipal } from '../worker/principal.ts';
+import { actAs, carryActing, resolvePrincipal } from '../worker/principal.ts';
 import { resetClerkKeyCache } from '../worker/clerk-auth.ts';
 import type { ClerkJwk } from '../worker/clerk-auth.ts';
 import { AccountDeletionStore } from '../worker/account-deletion-store.ts';
@@ -60,6 +60,7 @@ async function sign(
 
 const validPayload = {
   sub: 'user_2abc123',
+  sid: 'sess_2abc123',
   iss: ISSUER,
   exp: NOW + 3600,
   iat: NOW - 10,
@@ -427,5 +428,109 @@ describe('resolvePrincipal for a banned account', () => {
       true,
     );
     assert.equal((await signedIn(db)).denied, null);
+  });
+});
+
+/**
+ * D182: Clerk signs OAuth access tokens and ID tokens for other clients
+ * with the same issuer and keys as the builder's sessions. Only a session
+ * (which carries `sid`) opens the builder's API; an assistant's token goes
+ * through `/mcp`, which acts for the person with `actAs`.
+ */
+describe('resolvePrincipal and tokens that are not sessions', () => {
+  beforeEach(() => resetClerkKeyCache());
+
+  it('refuses a Clerk-signed token with no session id', async () => {
+    const { privateKey, jwk } = await makeKeypair('k1');
+    const liveNow = Math.floor(Date.now() / 1000);
+    const { sid, ...oauthLike } = validPayload;
+    void sid;
+    const token = await sign(
+      privateKey,
+      { alg: 'RS256', kid: 'k1', typ: 'at+jwt' },
+      {
+        ...oauthLike,
+        client_id: 'client_assistant',
+        exp: liveNow + 3600,
+        iat: liveNow - 10,
+      },
+    );
+    const restore = stubGlobalFetch(jwk);
+    try {
+      const result = await resolvePrincipal(requestWithToken(token), {
+        CLERK_FRONTEND_API_URL: ISSUER,
+      });
+      assert.ok(result.denied);
+      assert.equal(result.denied.status, 403);
+    } finally {
+      restore();
+    }
+  });
+
+  it('answers an internal request with the person it acts for', async () => {
+    const request = actAs(requestWithToken(), {
+      userId: 'user_2abc123',
+      policyIdentity: 'unknown',
+    });
+    const result = await resolvePrincipal(request, {
+      CLERK_FRONTEND_API_URL: ISSUER,
+    });
+    assert.equal(result.denied, null);
+    assert.ok(!result.denied);
+    assert.equal(result.principal.userId, 'user_2abc123');
+    assert.equal(result.principal.policyIdentity, 'unknown');
+  });
+
+  it('keeps the identity across the copy the router makes', async () => {
+    const original = actAs(requestWithToken(), {
+      userId: 'user_2abc123',
+      policyIdentity: 'unknown',
+    });
+    const copy = carryActing(original, new Request(original));
+    const result = await resolvePrincipal(copy, {
+      CLERK_FRONTEND_API_URL: ISSUER,
+    });
+    assert.equal(result.denied, null);
+  });
+
+  it('gives a look-alike request nothing: the mark is the object, not its contents', async () => {
+    actAs(requestWithToken(), {
+      userId: 'user_2abc123',
+      policyIdentity: 'unknown',
+    });
+    const result = await resolvePrincipal(requestWithToken(), {
+      CLERK_FRONTEND_API_URL: ISSUER,
+    });
+    assert.ok(result.denied);
+    assert.equal(result.denied.status, 401);
+  });
+
+  it('still refuses a banned account it acts for', async () => {
+    const db = new SqliteD1Database(schemaSql()) as unknown as D1Database;
+    await new AdminStore(db).recordBan(
+      'user_2abc123',
+      'admin@vibld.com',
+      'x',
+      '2026-09-29T00:00:00.000Z',
+      {
+        at: '2026-09-29T00:00:00.000Z',
+        adminEmail: 'admin@vibld.com',
+        action: 'ban',
+        targetUserId: 'user_2abc123',
+        target: null,
+        reason: 'test',
+        detail: null,
+      },
+    );
+    const request = actAs(requestWithToken(), {
+      userId: 'user_2abc123',
+      policyIdentity: 'unknown',
+    });
+    const result = await resolvePrincipal(request, {
+      CLERK_FRONTEND_API_URL: ISSUER,
+      DB: db,
+    });
+    assert.ok(result.denied);
+    assert.equal(result.denied.status, 403);
   });
 });

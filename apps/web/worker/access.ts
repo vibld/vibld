@@ -74,9 +74,20 @@ export async function decideAccess(input: {
    * never claims an invite and an admin never spends one.
    */
   claimInvite: () => Promise<boolean>;
+  /**
+   * For an assistant acting for an account (D182), which has no verified
+   * email to claim with: whether this account already redeemed an invite.
+   * It never claims one.
+   */
+  redeemedBefore?: () => Promise<boolean>;
 }): Promise<AccessDecision> {
   if (input.isAdmin) return { allowed: true, because: 'admin' };
   if (input.mode === 'open') return { allowed: true, because: 'open' };
+  if (input.redeemedBefore) {
+    return (await input.redeemedBefore())
+      ? { allowed: true, because: 'invited' }
+      : { allowed: false, because: 'not-invited' };
+  }
   if (!isUsableIdentity(input.identity)) {
     return { allowed: false, because: 'unverified-identity' };
   }

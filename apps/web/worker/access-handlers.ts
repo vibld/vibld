@@ -96,6 +96,12 @@ export async function decideAccessFor(
       store
         ? store.claimInvite(principal.policyIdentity, principal.userId)
         : Promise.resolve(false),
+    ...(principal.viaAssistant
+      ? {
+          redeemedBefore: () =>
+            store ? store.redeemedBy(principal.userId) : Promise.resolve(false),
+        }
+      : {}),
   });
 }
 

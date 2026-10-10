@@ -115,6 +115,17 @@ describe('AccessStore', () => {
     assert.equal((await store.list()).invites.length, 1);
   });
 
+  it('knows which account redeemed an invite it still holds', async () => {
+    const store = newStore();
+    await store.invite('chris@example.com', 'admin@vibld.com');
+    assert.equal(await store.redeemedBy('user_1'), false);
+    assert.equal(await store.claimInvite('chris@example.com', 'user_1'), true);
+    assert.equal(await store.redeemedBy('user_1'), true);
+    assert.equal(await store.redeemedBy('user_2'), false);
+    await store.revoke('chris@example.com', '2026-09-16T00:00:00.000Z');
+    assert.equal(await store.redeemedBy('user_1'), false);
+  });
+
   it('does not un-revoke an invite by re-issuing it', async () => {
     // Reinstating somebody is a deliberate act, and it says so.
     const store = newStore();

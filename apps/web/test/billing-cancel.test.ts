@@ -391,6 +391,7 @@ describe('POST /api/billing/cancel', () => {
       JSON.stringify({
         sub: userId,
         iss: ISSUER,
+        sid: 'sess_test',
         exp: now + 3600,
         iat: now - 10,
       }),

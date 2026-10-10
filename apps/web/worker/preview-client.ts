@@ -15,8 +15,12 @@ export interface PreviewFile {
 export type PreviewStatus =
   | { status: 'queued'; position: number }
   | { status: 'ready-to-start' }
-  | { status: 'installing' }
-  | { status: 'starting' }
+  /**
+   * `revision`: the one being started, or served while a live update
+   * installs `updatingTo` (D74).
+   */
+  | { status: 'installing'; revision?: string; updatingTo?: string }
+  | { status: 'starting'; revision?: string }
   | {
       status: 'ready';
       url: string;
@@ -89,6 +93,12 @@ function authHeaders(env: PreviewServiceEnv): Record<string, string> {
  * parse, and it would do it upstream of the browser's own parser, which is
  * where the same fault was just fixed.
  */
+function revisionOf(record: Record<string, unknown>): { revision?: string } {
+  return typeof record.revision === 'string' && record.revision !== ''
+    ? { revision: record.revision }
+    : {};
+}
+
 function parseStatus(body: unknown): PreviewStatus | null {
   const record = (body ?? {}) as Record<string, unknown>;
   switch (record.status) {
@@ -100,9 +110,15 @@ function parseStatus(body: unknown): PreviewStatus | null {
     case 'ready-to-start':
       return { status: 'ready-to-start' };
     case 'installing':
-      return { status: 'installing' };
+      return {
+        status: 'installing',
+        ...revisionOf(record),
+        ...(typeof record.updatingTo === 'string' && record.updatingTo !== ''
+          ? { updatingTo: record.updatingTo }
+          : {}),
+      };
     case 'starting':
-      return { status: 'starting' };
+      return { status: 'starting', ...revisionOf(record) };
     case 'ready':
       if (
         typeof record.url === 'string' &&
@@ -121,9 +137,7 @@ function parseStatus(body: unknown): PreviewStatus | null {
             ? { typecheckFailure: record.typecheckFailure }
             : {}),
           // Likewise: a revision that cannot be read is one not known.
-          ...(typeof record.revision === 'string' && record.revision !== ''
-            ? { revision: record.revision }
-            : {}),
+          ...revisionOf(record),
         };
       }
       // A ready with nowhere to point is not a ready, and it is not the

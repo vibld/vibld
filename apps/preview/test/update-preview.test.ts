@@ -345,7 +345,10 @@ describe('an update that brings new dependencies', () => {
     const result = await w.sandbox.updatePreview(WITH_DEPENDENCY, 'r2');
     assert.deepEqual(result, { outcome: 'installing' });
     // Not mistaken for a start-up lost with an earlier instance.
-    assert.equal((await w.sandbox.getPreviewStatus()).status, 'installing');
+    const installing = await w.sandbox.getPreviewStatus();
+    assert.equal(installing.status, 'installing');
+    // Still serving r1 until the install ends, and saying where it is going.
+    assert.equal(installing.updatingTo, 'r2');
     // A second update waits rather than writing underneath the install.
     assert.deepEqual(await w.sandbox.updatePreview(SECOND, 'r3'), {
       outcome: 'busy',
@@ -358,6 +361,7 @@ describe('an update that brings new dependencies', () => {
     const status = await w.sandbox.getPreviewStatus();
     assert.equal(status.status, 'ready');
     assert.equal(status.revision, 'r2');
+    assert.equal(status.updatingTo, undefined);
     assert.equal(readyUrl(status), 'https://5173-sandbox-1.vibld-preview.dev');
     assert.deepEqual(
       w.killed,

@@ -565,12 +565,15 @@ export class AccountDeletionStore {
       // And the top-ups it was waiting on, which buy nothing until credited.
       `DELETE FROM billing_unsettled_topups WHERE user_id = ?1`,
       `DELETE FROM user_bans WHERE user_id = ?1`,
+      // Which assistants started which builds (D182): only a count for a
+      // cap, and nothing to cap once the account is gone.
+      `DELETE FROM mcp_builds WHERE user_id = ?1`,
     ]) {
       await this.#db.prepare(sql).bind(userId).run();
     }
   }
 
-  static readonly ACCOUNT_ROW_QUERIES = 14;
+  static readonly ACCOUNT_ROW_QUERIES = 15;
 
   /**
    * The published site's catalogue, for a site that is already down.

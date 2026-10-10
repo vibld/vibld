@@ -712,6 +712,14 @@ true`).
    account's run paid from top-up credit leaves the pool (`reserveBudget`). Applied only when
    billing is configured (`spendableFor`).
 
+## MCP server (docs/decisions.md D182)
+
+`/mcp` lets an assistant the person connected (Claude, Cursor) search
+templates, start builds, follow them and open previews on that person's
+account. Sign-in is OAuth through Clerk; each tool calls this Worker's own
+routes as the person, so every gate and limit above applies. Design, limits
+and the one-time Clerk setting: [docs/mcp-server.md](../../docs/mcp-server.md).
+
 ## Sandbox previews (docs/decisions.md L7-L11)
 
 `/api/preview` runs the caller's own project for real -- `npm install`, then

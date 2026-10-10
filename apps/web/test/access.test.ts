@@ -132,6 +132,24 @@ describe('decideAccess', () => {
     );
   });
 
+  it('admits an assistant only to an account that redeemed an invite, and never claims one', async () => {
+    let claimed = false;
+    const claimInvite = async () => {
+      claimed = true;
+      return true;
+    };
+    const assistant = { ...BASE, identity: UNKNOWN_IDENTITY, claimInvite };
+    assert.deepEqual(
+      await decideAccess({ ...assistant, redeemedBefore: async () => true }),
+      { allowed: true, because: 'invited' },
+    );
+    assert.deepEqual(
+      await decideAccess({ ...assistant, redeemedBefore: async () => false }),
+      { allowed: false, because: 'not-invited' },
+    );
+    assert.equal(claimed, false);
+  });
+
   it('still lets an unverified identity in when the deployment is open', async () => {
     // Open means open. The verification check exists to protect the list,
     // and there is no list in this mode.

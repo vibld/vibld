@@ -468,3 +468,27 @@ describe('the asset store’s redirects', () => {
     assert.equal(response.status, 307);
   });
 });
+
+describe('the MCP Server Card (D182)', () => {
+  it('is readable from any origin, as SEP-1649 asks', async () => {
+    const ASSETS = {
+      fetch: async () =>
+        new Response('{}', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    };
+    const card = await worker.fetch(
+      new Request('https://vibld.com/.well-known/mcp/server-card.json'),
+      { ...ENV, ASSETS },
+    );
+    assert.equal(card.headers.get('access-control-allow-origin'), '*');
+    assert.equal(card.headers.get('access-control-allow-methods'), 'GET');
+    assert.equal(card.headers.get('content-type'), 'application/json');
+    const page = await worker.fetch(new Request('https://vibld.com/'), {
+      ...ENV,
+      ASSETS,
+    });
+    assert.equal(page.headers.get('access-control-allow-origin'), null);
+  });
+});

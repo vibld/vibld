@@ -52,6 +52,12 @@ export interface Principal {
    * admin check must not silently treat "no claim" as "no restriction".
    */
   policyIdentity: string;
+  /**
+   * An assistant acting for this account through `/mcp` (D182). It has no
+   * verified email, so it can claim no invite; the invite gate admits it
+   * only to an account that already redeemed one (`decideAccessFor`).
+   */
+  viaAssistant?: true;
 }
 
 export interface PrincipalDenied {
@@ -157,11 +163,45 @@ function bearerToken(request: Request): string | undefined {
   return header.startsWith('Bearer ') ? header.slice(7).trim() : undefined;
 }
 
+/**
+ * Requests the Worker makes to itself on somebody's behalf, and whom for.
+ *
+ * The MCP endpoint (`mcp-server.ts`, docs/decisions.md D182) verifies an
+ * OAuth access token, then serves each tool by calling the builder's own
+ * routes as that person, so a build started from an assistant passes every
+ * check one started in the builder does: the invite gate, the plan, the
+ * ledger, the rate limits. Keyed on the Request object itself, which only
+ * code inside this Worker can hold: nothing a caller sends can put an entry
+ * here, so this is not a header or a token anybody can forge.
+ *
+ * Only the identity is taken from here. The ban and the deletion below are
+ * still checked, on every request, as they are for a session.
+ */
+const actingFor = new WeakMap<Request, Principal>();
+
+export function actAs(request: Request, principal: Principal): Request {
+  actingFor.set(request, principal);
+  return request;
+}
+
+/**
+ * Keeps an internal request's identity across a copy the router makes of it
+ * (`withClientAddress`), which is a new Request object.
+ */
+export function carryActing(from: Request, to: Request): Request {
+  const principal = actingFor.get(from);
+  if (principal && from !== to) actingFor.set(to, principal);
+  return to;
+}
+
 export async function resolvePrincipal(
   request: Request,
   env: PrincipalEnv,
   options: ResolveOptions = {},
 ): Promise<PrincipalDenied | PrincipalGranted> {
+  const acting = actingFor.get(request);
+  if (acting) return checkedAccount(acting, env, options);
+
   const mode = signInMode(env);
   if (!mode) {
     return {
@@ -182,8 +222,14 @@ export async function resolvePrincipal(
         ? await accessPrincipal(request, env)
         : await clerkPrincipal(request, env);
   if (identified.denied) return identified;
-  const principal = identified.principal;
+  return checkedAccount(identified.principal, env, options);
+}
 
+async function checkedAccount(
+  principal: Principal,
+  env: PrincipalEnv,
+  options: ResolveOptions,
+): Promise<PrincipalDenied | PrincipalGranted> {
   // Here rather than in each route, so that no route can be the one that
   // forgets: every authenticated request comes through this function, and
   // the promise made to somebody who asked to be deleted is that nothing
@@ -258,6 +304,13 @@ async function clerkPrincipal(
     const issuer = env.CLERK_FRONTEND_API_URL!;
     const keys = await fetchClerkKeys(issuer);
     const claims = await verifyClerkJwt(token, { keys, issuer });
+    // A session token, and nothing else Clerk signs with the same keys.
+    // Once OAuth applications are on (D182), Clerk also signs OAuth access
+    // tokens and ID tokens for other clients with this issuer and these
+    // keys. Those carry no session id, and must not open the builder's
+    // API: an assistant's token reaches it only through `/mcp`, which
+    // checks it with Clerk and acts within what the tools allow.
+    if (!claims.sid) return verificationFailed();
     const verifiedEmail =
       claims.email && claims.emailVerified === true ? claims.email : undefined;
     return {

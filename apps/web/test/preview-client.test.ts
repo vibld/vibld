@@ -198,6 +198,21 @@ describe('previewStatus', () => {
     );
   });
 
+  it('carries the revision a preview is still starting (D74)', async () => {
+    for (const status of ['installing', 'starting'] as const) {
+      const { binding } = fakeBinding(() =>
+        jsonResponse({ status, revision: 'rev-4' }),
+      );
+      assert.deepEqual(
+        await previewStatus(
+          { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+          'user_abc',
+        ),
+        { status, revision: 'rev-4' },
+      );
+    }
+  });
+
   it('gets the status endpoint with the userId in the query string', async () => {
     const { binding, calls } = fakeBinding(() =>
       jsonResponse({ status: 'ready-to-start' }),

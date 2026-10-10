@@ -12,6 +12,8 @@ import { DEFAULT_PROJECT_NAME, sleep } from '@vibld/core';
 import type { RunRefusal } from '@vibld/core';
 
 import {
+  actAs,
+  carryActing,
   signInConfigured,
   signInMode,
   resolvePrincipal,
@@ -20,6 +22,18 @@ import {
 } from './principal.ts';
 import { handleOwnerSession, ownerIdentity } from './owner-auth.ts';
 import { withClientAddress } from './client-address.ts';
+import { verifyMcpToken } from './mcp-auth.ts';
+import type { McpCaller } from './mcp-auth.ts';
+import {
+  MCP_METADATA_PATH,
+  handleMcpMessage,
+  mcpUnauthorized,
+  protectedResourceMetadata,
+  readBuildStart,
+} from './mcp-server.ts';
+import type { McpDeps } from './mcp-server.ts';
+import { McpBuildStore } from './mcp-store.ts';
+import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
 import { accountDirectoryFor } from './account-directory.ts';
 import {
   handleAccountImport,
@@ -461,6 +475,26 @@ export interface Env
    * count against the address (docs/decisions.md, 2026-09-28).
    */
   SHARE_PREVIEW_BURST?: RateLimit;
+  /**
+   * `/mcp` (D182). Every message, per account once its token is verified:
+   * an assistant can loop where a person clicks.
+   */
+  MCP_BURST?: RateLimit;
+  /**
+   * `/mcp` before identity, per address, so a flood of tokens that are not
+   * valid costs Clerk lookups only so fast. Looser than `IP_BURST`, because
+   * an assistant's requests come from its provider's servers, which many
+   * people share.
+   */
+  MCP_IP_BURST?: RateLimit;
+  /** Builds started from `/mcp`, per account: one at a time, near enough. */
+  MCP_BUILD_BURST?: RateLimit;
+  /**
+   * Builds one account may start from assistants in any 24 hours (D182).
+   * Unset means `DEFAULT_MCP_DAILY_BUILDS`. Builds started in the builder
+   * are not counted.
+   */
+  VIBLD_MCP_DAILY_BUILDS?: string;
   /**
    * The domain published sites are served under, for the address a
    * project's view shows. apps/publish's own `PUBLISH_HOSTNAME`, which is
@@ -3731,13 +3765,219 @@ export default {
   },
 };
 
+/**
+ * Builds one account may start from assistants in 24 hours, unless
+ * `VIBLD_MCP_DAILY_BUILDS` says otherwise (D182). Each is still charged to
+ * the plan and stopped by the ledger like any build; this bounds how many
+ * an assistant stuck in a loop can start before somebody notices.
+ */
+const DEFAULT_MCP_DAILY_BUILDS = 20;
+
+/** How long `/mcp` waits for `/api/plan` to name the build it started. */
+const MCP_BUILD_START_MS = 45_000;
+
+function mcpAvailable(env: Env): boolean {
+  return (
+    signInMode(env) === 'clerk' &&
+    Boolean(env.CLERK_FRONTEND_API_URL) &&
+    // Optional for signing in, but the only way `/mcp` checks a token:
+    // without it, a client that finished discovery would get only 503s.
+    Boolean(env.CLERK_SECRET_KEY) &&
+    Boolean(env.DB && env.PROJECT_CONTENT)
+  );
+}
+
+/**
+ * `/.well-known/oauth-protected-resource/mcp` (RFC 9728): where an MCP
+ * client learns that Clerk signs people in for `/mcp`.
+ */
+function handleMcpMetadata(request: Request, env: Env): Response {
+  if (!mcpAvailable(env)) return json({ error: 'Not found.' }, 404);
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return json({ error: 'Use GET.' }, 405);
+  }
+  return new Response(
+    JSON.stringify(
+      protectedResourceMetadata(
+        new URL(request.url).origin,
+        env.CLERK_FRONTEND_API_URL!,
+      ),
+    ),
+    {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'public, max-age=3600',
+        'access-control-allow-origin': '*',
+      },
+    },
+  );
+}
+
+async function handleMcp(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  // Clerk is what issues the tokens, so a copy signed in some other way
+  // (D123) has no MCP server.
+  if (!mcpAvailable(env)) return json({ error: 'Not found.' }, 404);
+  if (request.method !== 'POST') {
+    // No stream for the server to open: it sends nothing unasked, and keeps
+    // no session to end.
+    return new Response(JSON.stringify({ error: 'Use POST.' }), {
+      status: 405,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        allow: 'POST',
+      },
+    });
+  }
+  const size = checkBodySize(request.headers);
+  if (!size.ok) return json({ error: size.error }, size.status);
+
+  if (env.MCP_IP_BURST) {
+    try {
+      const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+      const result = await env.MCP_IP_BURST.limit({ key: `mcp-ip:${ip}` });
+      if (!result.success) {
+        return json({ error: 'Too many requests from this address.' }, 429);
+      }
+    } catch (error) {
+      console.error('MCP address limiter unavailable', error);
+    }
+  }
+
+  const origin = new URL(request.url).origin;
+  const verified = await verifyMcpToken(request, env, `${origin}/mcp`);
+  if (!verified.ok) {
+    if (verified.reason !== 'unavailable') {
+      return mcpUnauthorized(origin, verified.reason);
+    }
+    const unavailable = json(
+      { error: 'Sign-in could not be checked. Try again shortly.' },
+      503,
+    );
+    if (verified.retryAfter !== undefined) {
+      unavailable.headers.set('Retry-After', String(verified.retryAfter));
+    }
+    return unavailable;
+  }
+  const { caller } = verified;
+
+  if (env.MCP_BURST) {
+    try {
+      const result = await env.MCP_BURST.limit({
+        key: `mcp:${caller.principal.userId}`,
+      });
+      if (!result.success) {
+        return json(
+          { error: 'Too many requests. Wait a minute, then try again.' },
+          429,
+        );
+      }
+    } catch (error) {
+      console.error('MCP limiter unavailable', error);
+    }
+  }
+
+  return handleMcpMessage(request, mcpDeps(origin, env, ctx, caller));
+}
+
+/**
+ * What `/mcp`'s tools are lent: this router, called as the person.
+ *
+ * Each call is a new Request marked with `actAs`, so `resolvePrincipal`
+ * answers with the person the token was verified for, and still checks a
+ * ban and a pending deletion as it does for a session. Its address is the
+ * account rather than the assistant's server, so the per-address limits
+ * inside count this person's calls, not those of everybody that provider
+ * serves.
+ */
+function mcpDeps(
+  origin: string,
+  env: Env,
+  ctx: ExecutionContext,
+  caller: McpCaller,
+): McpDeps {
+  const userId = caller.principal.userId;
+  const internal = (method: string, path: string, body?: unknown) => {
+    const headers = new Headers({ 'CF-Connecting-IP': `mcp:${userId}` });
+    // Behind a server's proxy, `withClientAddress` rewrites the address
+    // from this header (D141); set it too, or every account's calls would
+    // share the one `unknown` bucket.
+    const proxyHeader = env.VIBLD_CLIENT_IP_HEADER?.trim();
+    if (proxyHeader) headers.set(proxyHeader, `mcp:${userId}`);
+    if (body !== undefined) headers.set('content-type', 'application/json');
+    return actAs(
+      new Request(new URL(path, origin), {
+        method,
+        headers,
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      }),
+      caller.principal,
+    );
+  };
+  const builds = new McpBuildStore(env.DB!);
+  const limit = Number(env.VIBLD_MCP_DAILY_BUILDS);
+  const dailyBuildLimit =
+    Number.isInteger(limit) && limit >= 0 ? limit : DEFAULT_MCP_DAILY_BUILDS;
+  return {
+    caller,
+    appOrigin: origin,
+    siteOrigin: 'https://vibld.com',
+    templates: DESIGN_TEMPLATE_INDEX,
+    dailyBuildLimit,
+    api: async (method, path, body) => {
+      const response = await route(internal(method, path, body), env, ctx);
+      let parsed: unknown = null;
+      try {
+        parsed = await response.json();
+      } catch {
+        parsed = null;
+      }
+      return { status: response.status, body: parsed };
+    },
+    startBuild: async (body) =>
+      readBuildStart(
+        await route(internal('POST', '/api/plan', body), env, ctx),
+        MCP_BUILD_START_MS,
+      ),
+    reserveBuild: async () => {
+      const placeholder = `reserved:${crypto.randomUUID()}`;
+      const now = Date.now();
+      const taken = await builds.reserve({
+        placeholder,
+        userId,
+        clientId: caller.clientId,
+        since: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+        startedAt: new Date(now).toISOString(),
+        limit: dailyBuildLimit,
+      });
+      return taken ? placeholder : null;
+    },
+    confirmBuild: (place, runId, projectId) =>
+      builds.confirm(place, runId, projectId),
+    releaseBuild: (place) => builds.release(place),
+    buildBurstAllowed: async () => {
+      if (!env.MCP_BUILD_BURST) return true;
+      try {
+        return (await env.MCP_BUILD_BURST.limit({ key: `mcp-build:${userId}` }))
+          .success;
+      } catch (error) {
+        console.error('MCP build limiter unavailable', error);
+        return true;
+      }
+    },
+  };
+}
+
 async function route(
   incoming: Request,
   env: Env,
   ctx: ExecutionContext,
 ): Promise<Response> {
   // Behind a server's proxy, the address every limit below is keyed on.
-  const request = withClientAddress(incoming, env);
+  const request = carryActing(incoming, withClientAddress(incoming, env));
   // A project's routes carry its id, so they are named by pattern
   // (`/api/projects/:id`) before anything compares against them. Every
   // other path is its own name and comes through unchanged.
@@ -3754,6 +3994,11 @@ async function route(
       audit: (entry) => appendAudit(env.DB!, entry),
     });
   }
+  // `/mcp` and its metadata (D182), ahead of the gate: an assistant's
+  // token is not a session and the gate cannot read it. Each tool calls
+  // back into this router as the person, and is gated there.
+  if (pathname === '/mcp') return handleMcp(request, env, ctx);
+  if (pathname === MCP_METADATA_PATH) return handleMcpMetadata(request, env);
   env = await withPanelKeys(env);
 
   /*

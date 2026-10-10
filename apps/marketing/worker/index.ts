@@ -150,7 +150,10 @@ async function route(request: Request, env: Env): Promise<Response> {
       request.method,
       hashedAssetHeaders(
         url.pathname,
-        fontHeaders(url.pathname, await env.ASSETS.fetch(request)),
+        discoveryHeaders(
+          url.pathname,
+          fontHeaders(url.pathname, await env.ASSETS.fetch(request)),
+        ),
       ),
     );
     return env.VIBLD_NOINDEX === '1' || isLayerDemo(url.pathname)
@@ -210,6 +213,26 @@ export function fontHeaders(pathname: string, response: Response): Response {
   const headers = new Headers(response.headers);
   headers.set('content-type', 'font/woff2');
   headers.set('cache-control', 'public, max-age=31536000, immutable');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+/**
+ * The MCP Server Card (D182), readable from any origin: SEP-1649 asks for
+ * these headers so a browser-based client elsewhere can discover `/mcp`.
+ */
+export function discoveryHeaders(
+  pathname: string,
+  response: Response,
+): Response {
+  if (pathname !== '/.well-known/mcp/server-card.json') return response;
+  const headers = new Headers(response.headers);
+  headers.set('access-control-allow-origin', '*');
+  headers.set('access-control-allow-methods', 'GET');
+  headers.set('access-control-allow-headers', 'Content-Type');
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,

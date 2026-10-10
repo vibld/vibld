@@ -425,6 +425,18 @@ paying accounts until midnight UTC.
   (https://contentsignals.org/). The value is `CONTENT_SIGNAL` in
   `apps/marketing/scripts/postbuild.ts` and one line in
   `apps/web/public/robots.txt`.
+- **D182. vibld has an MCP server (Chris, 2026-10-09: decision card D182,
+  "Full MCP").** `https://app.vibld.com/mcp`, Streamable HTTP, in the
+  builder's own Worker, so assistants such as Claude and Cursor can search
+  templates, start builds, follow them and open previews for a signed-in
+  person, billed to that person's own plan and credit. Sign-in is OAuth
+  through Clerk; people sign in and approve each assistant, and no account is
+  made by an agent (D180). Each tool calls the builder's own routes as the
+  person, so every existing gate, price and limit applies; on top, at most 20
+  assistant builds per account a day and 2 a minute. Builder routes now
+  refuse Clerk-signed tokens that are not sessions. Server Card at
+  `https://vibld.com/.well-known/mcp/server-card.json`. Design, limits and
+  phases: `docs/mcp-server.md`.
 - **D187. CI pulls Docker Hub images through a mirror (Chris, 2026-10-09:
   "Add mirror").** The Docker and eval-build jobs pull each Docker Hub image
   they use from mirror.gcr.io and tag it with its Docker Hub name, after

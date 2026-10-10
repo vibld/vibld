@@ -71,6 +71,19 @@ export class AccessStore {
     return result.meta.changes > 0;
   }
 
+  /** Whether this account holds an invite it redeemed and still has. */
+  async redeemedBy(userId: string): Promise<boolean> {
+    const row = await this.#db
+      .prepare(
+        `SELECT 1 AS found FROM access_invites
+          WHERE redeemed_by_user_id = ?1 AND revoked_at IS NULL
+          LIMIT 1`,
+      )
+      .bind(userId)
+      .first<{ found: number }>();
+    return row !== null;
+  }
+
   /**
    * Add an invite, or return the one that already exists.
    *

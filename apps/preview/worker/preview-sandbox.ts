@@ -180,6 +180,11 @@ interface PreviewState {
    * cleared when one stops part way, since the sandbox then serves neither.
    */
   revision?: string;
+  /**
+   * The revision a live update is installing, while it does (D74). Not
+   * `revision`, which stays the one served until the install ends.
+   */
+  updatingTo?: string;
 }
 
 const STORAGE_KEY = 'vibld:preview';
@@ -220,6 +225,8 @@ export interface PreviewStatus {
   typecheckFailure?: string;
   /** The revision being served, when one is known (D74). */
   revision?: string;
+  /** The revision a live update is installing, while it does (D74). */
+  updatingTo?: string;
 }
 
 /**
@@ -543,7 +550,11 @@ export class PreviewSandbox extends Sandbox<Env> {
     // this update's `installing` without it (`settleLostProvision`).
     this.updating = true;
     try {
-      await this.writeState({ ...state, phase: 'installing' });
+      await this.writeState({
+        ...state,
+        phase: 'installing',
+        updatingTo: revision,
+      });
     } catch (error) {
       this.updating = false;
       throw error;
@@ -1889,6 +1900,7 @@ export class PreviewSandbox extends Sandbox<Env> {
         ? { typecheckFailure: state.typecheckFailure }
         : {}),
       ...(state.revision ? { revision: state.revision } : {}),
+      ...(state.updatingTo ? { updatingTo: state.updatingTo } : {}),
     };
   }
 

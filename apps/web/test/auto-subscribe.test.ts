@@ -829,6 +829,7 @@ describe('POST /api/billing/auto-subscribe', () => {
       JSON.stringify({
         sub: OWNER,
         iss: ISSUER,
+        sid: 'sess_test',
         exp: now + 3600,
         iat: now - 10,
       }),

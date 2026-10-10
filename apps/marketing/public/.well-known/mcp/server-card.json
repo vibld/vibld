@@ -1,0 +1,33 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json",
+  "version": "1.0",
+  "protocolVersion": "2025-11-25",
+  "serverInfo": {
+    "name": "vibld",
+    "title": "vibld",
+    "version": "0.1.0"
+  },
+  "description": "Build websites and web apps from a description with vibld: search the template catalog, start a build on your own vibld account, follow it, and open a live preview.",
+  "websiteUrl": "https://vibld.com",
+  "documentationUrl": "https://vibld.com/docs",
+  "iconUrl": "https://vibld.com/icon-512.png",
+  "transport": {
+    "type": "streamable-http",
+    "endpoint": "https://app.vibld.com/mcp"
+  },
+  "capabilities": {
+    "tools": { "listChanged": false }
+  },
+  "authentication": {
+    "required": true,
+    "schemes": ["oauth2"],
+    "protectedResourceMetadata": "https://app.vibld.com/.well-known/oauth-protected-resource/mcp"
+  },
+  "tools": [
+    "search_templates",
+    "list_projects",
+    "start_build",
+    "get_build_status",
+    "get_preview_url"
+  ]
+}

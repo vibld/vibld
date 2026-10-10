@@ -1385,6 +1385,8 @@ describe('the purge', () => {
       'billing_auto_subscribe.user_id',
       'billing_unsettled_topups.user_id',
       'user_bans.user_id',
+      // D182: deleted in `deleteAccountRows`.
+      'mcp_builds.user_id',
       'admin_audit_log.target_user_id',
     ]);
     const tables =
