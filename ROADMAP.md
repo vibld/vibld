@@ -63,7 +63,7 @@ Status: shipped: projects that keep their whole conversation and settings, follo
 
 Ship to an approved Cloudflare target, with deployment status, logs, rollback and environment/secret handling behind an adapter. Published sites can use the owner's own domain as well as a `vibld-preview.dev` name. Verify an independent static-hosting path. GitHub branch and PR support is already part of M1; broader existing-repository workflows follow as scoped developer use cases.
 
-Status: shipped: one-step publishing of a project to its own `<slug>.vibld-preview.dev` site, and taking it down (`apps/publish`). Not built: the owner's own domain, rolling back to an earlier published version, and an independent static-hosting path.
+Status: shipped: one-step publishing of a project to its own `<slug>.vibld-preview.dev` site, and taking it down (`apps/publish`). Not built: the owner's own domain, rolling back to an earlier published version, and an independent static-hosting path. Next: custom domains (D189) and SEO for published sites (D194). Backlog: cookieless analytics (D195) and invite-only publishing (D196).
 
 ## M4: One full-stack integration
 
@@ -76,9 +76,13 @@ The capabilities generated projects most often need follow on the same rules, ea
 - Payments in generated apps, starting with Stripe Checkout
 - Content collections, such as a blog, that someone who does not write code can edit
 
+Before the first integration: secure key entry, where the owner pastes a third-party key through a one-time link and the model sees only its variable's name (D193). The built-in backend stays as planned here (D197).
+
 ## M5: Visual iteration
 
 Element selection, source mapping, text/style changes and responsive inspection. Changes continue to modify portable source code and use the validated patch workflow.
+
+Status: shipped: Select and Annotate on the live preview, located to a file and line and sent as part of the message (D188), and Desktop, Tablet and Phone widths (D192). Not built: direct text and style edits.
 
 ## M6: Start from anything
 

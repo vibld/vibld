@@ -12,7 +12,10 @@ import {
   isAdminArea,
   isAdminPath,
 } from './admin/route.ts';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
+import { withPicks } from '@vibld/core';
+import { MAX_PROMPT_CHARS } from '@vibld/ai/limits';
+import type { LocatedPick } from '@vibld/core';
 import { navigate, usePathname } from './admin/use-pathname.ts';
 import { useFocusOnChange } from './admin/use-focus-on-change.ts';
 import { Mark, WORDMARK } from './components/Mark.tsx';
@@ -96,6 +99,35 @@ function PendingShareIntent({ children }: { children: ReactNode }) {
 
 function Builder() {
   const { session, state } = useBuilderSession();
+  // What was pointed at in the live preview (D188), waiting to go with the
+  // next message. Here because the preview and the composer are siblings.
+  // Each pick's file and line were found in the revision it was made on,
+  // so a pick goes when the project changes, or when its revision is no
+  // longer the checkpoint or the build being checked (a restore from
+  // History, a build that failed or was canceled). A pick made on a
+  // build's code while it was checked stays when that build is accepted.
+  const [pending, setPending] = useState<
+    { pick: LocatedPick; revision: string | null }[]
+  >([]);
+  const [picksProject, setPicksProject] = useState(state.projectId);
+  const acceptedRevision = state.acceptedSnapshot?.revision ?? null;
+  const earlyRevision = state.early?.revision ?? null;
+  const revisionsKey = `${acceptedRevision ?? ''}:${earlyRevision ?? ''}`;
+  const isCurrent = (revision: string | null) =>
+    revision !== null &&
+    (revision === acceptedRevision || revision === earlyRevision);
+  const [picksRevisions, setPicksRevisions] = useState(revisionsKey);
+  if (picksProject !== state.projectId) {
+    setPicksProject(state.projectId);
+    setPicksRevisions(revisionsKey);
+    setPending([]);
+  } else if (picksRevisions !== revisionsKey) {
+    setPicksRevisions(revisionsKey);
+    setPending((current) =>
+      current.filter((entry) => isCurrent(entry.revision)),
+    );
+  }
+  const picks = pending.map((entry) => entry.pick);
   const usage = state.budget.used;
   // Which of the two views this is. The session above it stays mounted
   // across the change, which is the whole reason this is a state and not a
@@ -300,10 +332,20 @@ function Builder() {
             />
             <PromptPanel
               state={state}
+              picks={picks}
+              onRemovePick={(index) =>
+                setPending((current) => current.filter((_, at) => at !== index))
+              }
               onSubmit={(prompt, mode, style, referenceUrl) => {
                 // Through the conversation: the agent decides whether this
                 // is a question to answer or a change to build.
-                void session.send(prompt, mode, style, referenceUrl);
+                void session.send(
+                  withPicks(prompt, picks, MAX_PROMPT_CHARS),
+                  mode,
+                  style,
+                  referenceUrl,
+                );
+                setPending([]);
               }}
               onExplore={(prompt, style, referenceUrl) => {
                 void session.explore(prompt, style, referenceUrl);
@@ -357,6 +399,13 @@ function Builder() {
         */}
         <Workspace
           state={state}
+          onPick={(pick, revision) => {
+            // A page still showing an older revision (a live update not yet
+            // in, a change that failed to bundle) points at code no longer
+            // being built on, so its picks are not kept.
+            if (!isCurrent(revision)) return;
+            setPending((current) => [...current, { pick, revision }].slice(-5));
+          }}
           hidden={onPage}
           onCheckpointRestored={(projectId, snapshot) =>
             session.adoptCheckpoint(projectId, snapshot)

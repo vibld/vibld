@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, RefObject } from 'react';
+import type { PreviewPick } from '@vibld/core';
 import type { BuilderState, DraftPreview } from '../generation/session.ts';
 import { buildPreviewDocument } from '../generation/preview.ts';
 import {
@@ -15,6 +17,8 @@ import {
   DraftPreview as DraftView,
 } from './DraftPreview.tsx';
 import { BuildCheckBadge } from './BuildCheckBadge.tsx';
+import { usePreviewInspector } from '../generation/use-preview-inspector.ts';
+import type { PreviewInspector } from '../generation/use-preview-inspector.ts';
 import { LifecycleBar } from './LifecycleBar.tsx';
 import { ProgressMeter } from './ProgressMeter.tsx';
 
@@ -53,9 +57,16 @@ export function PreviewPanel({
   state,
   sandbox,
   draft = null,
+  onPick,
 }: {
   state: BuilderState;
   sandbox: PreviewSandbox;
+  /**
+   * Something pointed at in the live preview (D188), for the composer to
+   * attach to the next message. Without it, Select and Annotate are not
+   * offered.
+   */
+  onPick?: (pick: PreviewPick) => void;
   /**
    * The sketch to show while a first build runs (docs/decisions.md,
    * 2026-09-28, the draft preview), or null. Passed rather than read from
@@ -71,6 +82,29 @@ export function PreviewPanel({
   }, [state.acceptedBrief, state.acceptedSnapshot]);
 
   const inBrowser = sandbox.mode === 'browser';
+  // The live frame, either kind, and the inspector talking to it (D188).
+  const liveFrame = useRef<HTMLIFrameElement | null>(null);
+  const live = sandbox.status?.status === 'ready';
+  const pageKey = !live
+    ? null
+    : sandbox.page
+      ? `page:${sandbox.page.key}`
+      : `url:${sandbox.status?.status === 'ready' ? sandbox.status.url : ''}`;
+  const inspector = usePreviewInspector(liveFrame, pageKey, onPick);
+  const [device, setDevice] = useState<DeviceId>('desktop');
+  const frameWidth = DEVICES.find((entry) => entry.id === device)?.width;
+  // The frame is border-box with a 1px border each side, so the page
+  // inside gets exactly the device's width (768 meets `min-width: 768px`).
+  // It never shrinks to fit: a narrow pane scrolls sideways instead, and
+  // `safe center` keeps the left edge reachable when it does.
+  const frameStyle = frameWidth
+    ? {
+        width: `calc(${frameWidth}px + 2px)`,
+        maxWidth: 'none',
+        flexShrink: 0,
+        alignSelf: 'safe center',
+      }
+    : undefined;
   const statusMessage = describeStatus(sandbox.status, sandbox.mode);
   const running = sandbox.status !== null && sandbox.status.status !== 'failed';
   // The code on screen: a build's own while it is being checked (D69, shown
@@ -114,7 +148,7 @@ export function PreviewPanel({
     sandbox.status?.status !== 'failed';
 
   return (
-    <div className="preview">
+    <div className={`preview${frameWidth ? ' preview--device' : ''}`}>
       <BuildCheckBadge check={state.check} />
 
       {/*
@@ -150,13 +184,34 @@ export function PreviewPanel({
           <ProgressMeter progress={state.progress} announce={false} />
         </DraftView>
       ) : sandbox.status?.status === 'ready' && sandbox.page ? (
-        <BrowserFrame key={sandbox.page.key} page={sandbox.page} />
+        <>
+          <PreviewToolbar
+            inspector={inspector}
+            device={device}
+            onDevice={setDevice}
+          />
+          <BrowserFrame
+            key={sandbox.page.key}
+            page={sandbox.page}
+            frame={liveFrame}
+            style={frameStyle}
+          />
+        </>
       ) : sandbox.status?.status === 'ready' ? (
-        <iframe
-          className="preview__frame"
-          title="Sandbox preview of the generated application"
-          src={sandbox.status.url}
-        />
+        <>
+          <PreviewToolbar
+            inspector={inspector}
+            device={device}
+            onDevice={setDevice}
+          />
+          <iframe
+            ref={liveFrame}
+            style={frameStyle}
+            className="preview__frame"
+            title="Sandbox preview of the generated application"
+            src={sandbox.status.url}
+          />
+        </>
       ) : draftAfterBuild ? (
         <DraftView draft={draft} label={DRAFT_BUILT_LABEL}>
           {running ? (
@@ -377,8 +432,15 @@ export function PreviewPanel({
  * message once it has loaded, and reports what the app throws, which is
  * said below the frame: the frame itself has no console anybody sees.
  */
-function BrowserFrame({ page }: { page: BrowserPreviewPage }) {
-  const frame = useRef<HTMLIFrameElement | null>(null);
+function BrowserFrame({
+  page,
+  frame,
+  style,
+}: {
+  page: BrowserPreviewPage;
+  frame: RefObject<HTMLIFrameElement | null>;
+  style?: CSSProperties;
+}) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -410,12 +472,13 @@ function BrowserFrame({ page }: { page: BrowserPreviewPage }) {
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [page]);
+  }, [page, frame]);
 
   return (
     <>
       <iframe
         ref={frame}
+        style={style}
         className="preview__frame"
         title="In-browser preview of the generated application"
         srcDoc={page.document}
@@ -427,6 +490,92 @@ function BrowserFrame({ page }: { page: BrowserPreviewPage }) {
         </p>
       ) : null}
     </>
+  );
+}
+
+/**
+ * The widths the live preview can be looked at in (D192). The phone and
+ * tablet widths are the common small-screen sizes a build's DESIGN.md
+ * breakpoints are written around; Desktop is the pane's own width.
+ */
+const DEVICES = [
+  { id: 'desktop', label: 'Desktop', width: undefined },
+  { id: 'tablet', label: 'Tablet', width: 768 },
+  { id: 'phone', label: 'Phone', width: 390 },
+] as const;
+
+type DeviceId = (typeof DEVICES)[number]['id'];
+
+/**
+ * Above the live frame: the width to look at it in (D192), then Select and
+ * Annotate (D188), which attach what is pointed at to the next message
+ * with the file and line that write it. Those two are shown only once the
+ * page says its inspector is running.
+ */
+function PreviewToolbar({
+  inspector,
+  device,
+  onDevice,
+}: {
+  inspector: PreviewInspector;
+  device: DeviceId;
+  onDevice: (device: DeviceId) => void;
+}) {
+  const { ready, mode, setMode } = inspector;
+  return (
+    <div className="preview__inspect">
+      <div className="preview__devices" role="group" aria-label="Preview width">
+        {DEVICES.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            className={`chip${device === entry.id ? ' chip--on' : ''}`}
+            aria-pressed={device === entry.id}
+            onClick={() => onDevice(entry.id)}
+            title={
+              entry.width
+                ? `${entry.width} pixels wide`
+                : 'The full width of this pane'
+            }
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+      {ready ? (
+        <div
+          className="preview__devices"
+          role="group"
+          aria-label="Point at the preview"
+        >
+          <button
+            type="button"
+            className={`chip${mode === 'select' ? ' chip--on' : ''}`}
+            aria-pressed={mode === 'select'}
+            onClick={() => setMode(mode === 'select' ? null : 'select')}
+            title="Click an element in the preview to attach it to your next message"
+          >
+            Select
+          </button>
+          <button
+            type="button"
+            className={`chip${mode === 'annotate' ? ' chip--on' : ''}`}
+            aria-pressed={mode === 'annotate'}
+            onClick={() => setMode(mode === 'annotate' ? null : 'annotate')}
+            title="Drag a box around part of the preview to attach what is inside it"
+          >
+            Annotate
+          </button>
+        </div>
+      ) : null}
+      {mode ? (
+        <span className="preview__inspect-hint" role="status">
+          {mode === 'select'
+            ? 'Click an element in the preview. Esc to stop.'
+            : 'Drag a box around what you mean. Esc to stop.'}
+        </span>
+      ) : null}
+    </div>
   );
 }
 

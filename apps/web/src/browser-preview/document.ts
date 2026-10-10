@@ -1,3 +1,4 @@
+import { INSPECTOR_SCRIPT } from '@vibld/core';
 import type { ImportMap } from './import-map.ts';
 
 /**
@@ -420,6 +421,10 @@ export function previewDocument(input: PreviewDocumentInput): string {
       workers: input.workers ?? [],
     })}</script>`,
     `<script>${BOOTSTRAP}</script>`,
+    // Select and Annotate (D188). Inline here: this page's policy is the
+    // frame's sandbox, and `withoutEntryScripts` drops a project's own CSP
+    // meta tag.
+    `<script>${INSPECTOR_SCRIPT}</script>`,
   ].join('\n');
 
   const page = withoutEntryScripts(input.indexHtml);

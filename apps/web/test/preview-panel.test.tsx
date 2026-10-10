@@ -10,6 +10,8 @@ import type {
 } from '../src/generation/preview-client.ts';
 import type { PreviewSandbox } from '../src/generation/use-preview-sandbox.ts';
 import { PreviewPanel } from '../src/components/PreviewPanel.tsx';
+import { INSPECT_MESSAGE } from '@vibld/core';
+import type { PreviewPick } from '@vibld/core';
 
 /**
  * The preview, as it is actually wired.
@@ -447,6 +449,82 @@ describe('the preview in this browser (D125)', () => {
       );
     });
     assert.match(view.text(), /The app reported an error: x is not defined/);
+    view.unmount();
+  });
+});
+
+describe('Select and Annotate on the live preview (D188)', () => {
+  async function mountPicking(picks: PreviewPick[]) {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    let root: Root;
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <PreviewPanel
+          state={stateWith('r1')}
+          sandbox={sandboxWith(READY, 'r1')}
+          onPick={(pick) => picks.push(pick)}
+        />,
+      );
+    });
+    const frame = container.querySelector('iframe');
+    assert.ok(frame);
+    return {
+      container,
+      async fromPage(
+        data: Record<string, unknown>,
+        source = frame.contentWindow,
+      ) {
+        await act(async () => {
+          const event = new window.MessageEvent('message', {
+            data: { source: INSPECT_MESSAGE.fromPage, ...data },
+          });
+          // Set after construction: the DOM here refuses a cross-origin
+          // frame's window as an init field, as a browser never has to.
+          Object.defineProperty(event, 'source', { value: source });
+          window.dispatchEvent(event);
+        });
+      },
+      buttons: () =>
+        [...container.querySelectorAll('button')].map(
+          (button) => button.textContent,
+        ),
+      unmount() {
+        act(() => root.unmount());
+        container.remove();
+      },
+    };
+  }
+
+  it('offers nothing until the page says its inspector is running', async () => {
+    const view = await mountPicking([]);
+    assert.ok(!view.buttons().includes('Select'));
+    await view.fromPage({ kind: 'ready' });
+    assert.ok(view.buttons().includes('Select'));
+    assert.ok(view.buttons().includes('Annotate'));
+    view.unmount();
+  });
+
+  it('passes on what the page picked, and nothing from anywhere else', async () => {
+    const picks: PreviewPick[] = [];
+    const view = await mountPicking(picks);
+    const selected = {
+      kind: 'selected',
+      elements: [{ tag: 'h1', text: 'Hello', components: ['Hero'] }],
+    };
+    await view.fromPage(selected, window);
+    assert.equal(picks.length, 0);
+    await view.fromPage(selected);
+    assert.equal(picks.length, 1);
+    assert.equal(picks[0]?.kind, 'select');
+    assert.equal(picks[0]?.elements[0]?.tag, 'h1');
+    view.unmount();
+  });
+
+  it('is not offered where nothing would take the pick', async () => {
+    const view = await mount(stateWith('r1'), sandboxWith(READY, 'r1'));
+    assert.ok(!view.button(/^Select$/));
     view.unmount();
   });
 });

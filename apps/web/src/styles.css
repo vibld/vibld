@@ -446,6 +446,11 @@ body {
   height: 100%;
 }
 
+/* A device width wider than the pane scrolls rather than shrinks (D192). */
+.preview--device {
+  overflow-x: auto;
+}
+
 .preview__notice {
   margin: 0;
   font-size: 0.8125rem;
@@ -480,6 +485,47 @@ body {
 .preview__expiry {
   font-size: 0.8125rem;
   color: var(--muted);
+}
+
+/* Select and Annotate (D188), above the live frame. */
+.preview__inspect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.preview__devices {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.preview__inspect-hint {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+/* A pick waiting in the composer, to go with the next message. */
+.prompt__picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.prompt__pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 100%;
+}
+
+.prompt__pick-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /*

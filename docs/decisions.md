@@ -467,6 +467,54 @@ paying accounts until midnight UTC.
   they use from mirror.gcr.io and tag it with its Docker Hub name, after
   Docker Hub's unauthenticated pull limit failed both before they ran
   (internal PR 399).
+- **D188. Select and Annotate on the live preview (Chris, 2026-10-10:
+  decision card D188, from the Floot review).** Above a running preview,
+  Select outlines what is under the pointer and attaches the element clicked
+  to the next message; Annotate attaches the elements inside a box dragged
+  over the page. Each pick is located in the project's own files and
+  written into the message as plain text (`Selected in the preview:` and a
+  line per element with its file and line), so the conversation shows
+  everything the model is told and providers need no image input. The
+  page's half is `INSPECTOR_SCRIPT` in `packages/core/src/preview-inspect.ts`,
+  served on the preview's own origin by apps/preview and inlined into the
+  in-browser preview; nothing is written into the project, so exports,
+  pushes and published sites never carry it. Drawing on a screenshot for
+  the model to look at would need image input across providers and is not
+  part of this.
+- **D189. Custom domains for published sites, built next (Chris,
+  2026-10-10).** Roadmap M3; Cloudflare for SaaS custom hostnames on the
+  publish Worker, for paid plans.
+- **D190. Editing-level MCP tools, built next (Chris, 2026-10-10).** File
+  reads and writes, typecheck, screenshots, logs and checkpoints on `/mcp`,
+  so a person's own assistant can edit a vibld project. After D185; how it
+  is charged is D201.
+- **D191. Example state screens: backlog (Chris, 2026-10-10).** Loading,
+  empty and error versions of a page, switchable in the preview.
+- **D192. Device widths in the live preview (Chris, 2026-10-10).** Desktop,
+  Tablet (768 px) and Phone (390 px), shipped with D188.
+- **D193. Secure key entry for generated apps' services: backlog, as the
+  first step of M4 (Chris, 2026-10-10).** The owner pastes a third-party key
+  through a one-time link and the model sees only the variable's name.
+- **D194. SEO for published sites, built next (Chris, 2026-10-10).**
+  Prerendering, a sitemap, robots.txt and Open Graph tags for published
+  sites.
+- **D195. Cookieless analytics for published sites: backlog (Chris,
+  2026-10-10).**
+- **D196. Invite-only publishing: backlog (Chris, 2026-10-10).**
+- **D197. A built-in backend for generated apps: backlog, M4 as planned
+  (Chris, 2026-10-10).** Supabase first, behind exportable adapters.
+- **D198. Queuing messages sent during a build: backlog (Chris,
+  2026-10-10).**
+- **D199. Native app wrappers: backlog (Chris, 2026-10-10).** Native mobile
+  stays deferred.
+- **D200. Floot's pitfalls are guidance, not rules (Chris, 2026-10-10: "Note
+  only").** Free export, no proprietary runtime imports in generated code,
+  separate preview and live data, and no silent teardown of a published
+  site are noted in the Floot review, not adopted as decisions.
+- **D201. Editing over MCP is limited by plan, not metered (Chris,
+  2026-10-10: "Plan caps only").** The person's own assistant pays for its
+  tokens; vibld's editing tools (D190) are free within per-plan daily call
+  caps, with no new billing.
 
 ### Checkpoint history, 2026-10-03
 

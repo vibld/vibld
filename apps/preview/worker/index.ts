@@ -4,6 +4,12 @@ import {
   proxyToSandbox,
 } from '@cloudflare/sandbox';
 import { previewMediaRoute } from './media-route.ts';
+import {
+  forBrowser,
+  inspectorResponse,
+  isInspectorRequest,
+  toSandbox,
+} from './inspect-route.ts';
 import { isAuthorizedInternalCaller } from './internal-auth.ts';
 import { PreviewFleet } from './preview-fleet.ts';
 import { PreviewSandbox } from './preview-sandbox.ts';
@@ -513,7 +519,11 @@ export default {
       const served = await sandbox.serveMedia(media.port, media.token, request);
       if (served) return served;
     }
-    const proxied = await proxyToSandbox(request, env);
-    return proxied ?? json({ error: 'Not found.' }, 404);
+    // Select and Annotate (D188): the inspector on the preview's own
+    // origin, and a tag loading it on each page (inspect-route.ts).
+    if (isInspectorRequest(url)) return inspectorResponse();
+    const proxied = await proxyToSandbox(toSandbox(request), env);
+    if (!proxied) return json({ error: 'Not found.' }, 404);
+    return forBrowser(request, proxied);
   },
 };

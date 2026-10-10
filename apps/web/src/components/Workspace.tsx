@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import type { ProjectSnapshot } from '@vibld/core';
+import { locatePicks } from '@vibld/core';
+import type { LocatedPick, ProjectSnapshot } from '@vibld/core';
 import type { BuilderState, DraftPreview } from '../generation/session.ts';
 import {
   showingChecked as isShowingChecked,
@@ -38,8 +39,15 @@ export function Workspace({
   hidden = false,
   onCheckpointRestored,
   onCheckpointRestoring,
+  onPick,
 }: {
   state: BuilderState;
+  /**
+   * Something pointed at in the live preview (D188), located in the code
+   * the preview is running, for the composer to attach.
+   */
+  /** A pick, located in the files of `revision`, the one it was made on. */
+  onPick?: (pick: LocatedPick, revision: string | null) => void;
   /**
    * A checkpoint restored from the History tab (D152), for the session to
    * hold as the accepted one, so the preview and the next build follow it.
@@ -110,6 +118,34 @@ export function Workspace({
   const wantsUpdate = shouldUpdateLive(sandbox, code, projectId);
   const codeRef = useRef(code);
   codeRef.current = code;
+  // What a pick is located in (D188): the revision the preview is actually
+  // serving. A live update starts before the frame has the new files, and
+  // a pick made in that gap is from the old page, so it is located in the
+  // old files, or in none rather than the wrong ones.
+  // In the browser, a change that fails to bundle leaves the old page up
+  // while `ranRevision` moves on, so the page's own revision is the one
+  // its status reports.
+  const servedRevision =
+    sandbox.mode === 'browser'
+      ? sandbox.status?.status === 'ready'
+        ? (sandbox.status.revision ?? null)
+        : null
+      : sandbox.ranRevision;
+  const served = useRef<typeof code>(null);
+  for (const candidate of [state.early, state.acceptedSnapshot, code]) {
+    if (candidate && candidate.revision === servedRevision) {
+      served.current = candidate;
+    }
+  }
+  // While an update is going in (written, then typechecked) the page may
+  // already show the new code or still the old: neither is known, so a
+  // pick made then is not located and not kept.
+  const ranRevision = useRef(servedRevision);
+  ranRevision.current = sandbox.updating ? null : servedRevision;
+  const servedFiles = () =>
+    served.current && served.current.revision === ranRevision.current
+      ? served.current.files
+      : [];
   useEffect(() => {
     const next = codeRef.current;
     if (wantsUpdate && next) {
@@ -246,7 +282,20 @@ export function Workspace({
         tabIndex={0}
       >
         {activeTab === 'preview' ? (
-          <PreviewPanel state={state} sandbox={sandbox} draft={draft} />
+          <PreviewPanel
+            state={state}
+            sandbox={sandbox}
+            draft={draft}
+            onPick={
+              onPick
+                ? (pick) =>
+                    onPick(
+                      locatePicks(pick, servedFiles()),
+                      ranRevision.current,
+                    )
+                : undefined
+            }
+          />
         ) : null}
 
         {activeTab === 'code' ? (

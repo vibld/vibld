@@ -73,7 +73,8 @@ describe('the preview page', () => {
   });
 
   it('carries the code as data that cannot close its own script element', () => {
-    assert.equal((page.match(/<\/script>/g) ?? []).length, 3);
+    // The import map, the payload, the bootstrap and the inspector (D188).
+    assert.equal((page.match(/<\/script>/g) ?? []).length, 4);
     const payload = payloadOf(page);
     assert.equal(
       payload.js,

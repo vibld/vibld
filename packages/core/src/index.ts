@@ -132,3 +132,20 @@ export type {
   TranscriptTurn,
 } from './project.ts';
 export { isLocalHost, subdomainOrigin } from './site-host.ts';
+export {
+  describeElement,
+  INSPECT_MESSAGE,
+  INSPECTOR_PATH,
+  INSPECTOR_SCRIPT,
+  locatePick,
+  locatePicks,
+  readPick,
+  withPicks,
+} from './preview-inspect.ts';
+export type {
+  InspectMode,
+  LocatedPick,
+  PickedElement,
+  PickLocation,
+  PreviewPick,
+} from './preview-inspect.ts';

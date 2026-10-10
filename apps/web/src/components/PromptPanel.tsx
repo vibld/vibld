@@ -1,3 +1,5 @@
+import { describeElement } from '@vibld/core';
+import type { LocatedPick } from '@vibld/core';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { StyleColorEdits } from '@vibld/ai/style-gallery';
 import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
@@ -111,6 +113,13 @@ export interface PromptPanelProps {
    * same place offers a new project instead, which leaves this one intact.
    */
   resetLabel?: string;
+  /**
+   * What was pointed at in the live preview (D188), sent with the next
+   * message. Shown above the message box, each one removable, so nothing
+   * goes to the model that the sender cannot see.
+   */
+  picks?: LocatedPick[];
+  onRemovePick?: (index: number) => void;
 }
 
 /**
@@ -138,6 +147,8 @@ export function PromptPanel({
   onReset,
   onCancel,
   onCancelExplore,
+  picks = [],
+  onRemovePick,
   onModelChange,
   knowledge,
   onKnowledgeChange,
@@ -529,6 +540,33 @@ export function PromptPanel({
         </div>
       )}
 
+      {picks.length > 0 ? (
+        <ul className="prompt__picks" aria-label="From the preview">
+          {picks.map((pick, index) => (
+            <li key={index}>
+              <span className="chip prompt__pick">
+                <span
+                  className="prompt__pick-label"
+                  title={pick.elements.map(describeElement).join('\n')}
+                >
+                  {pickLabel(pick)}
+                </span>
+                {onRemovePick ? (
+                  <button
+                    type="button"
+                    className="linkbutton"
+                    aria-label={`Remove ${pickLabel(pick)}`}
+                    onClick={() => onRemovePick(index)}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
       <textarea
         id={promptId}
         className="prompt__input prompt__message"
@@ -679,4 +717,17 @@ export function PromptPanel({
       </div>
     </form>
   );
+}
+
+/** A pick on its chip: what it is and where, in a few words. */
+export function pickLabel(pick: LocatedPick): string {
+  const [first] = pick.elements;
+  const where = pick.locations.find((location) => location !== null);
+  const what =
+    pick.kind === 'annotate'
+      ? `${pick.elements.length} marked`
+      : first
+        ? `<${first.tag}>${first.components[0] ? ` in ${first.components[0]}` : ''}`
+        : 'Selection';
+  return where ? `${what} · ${where.path}:${where.line}` : what;
 }
