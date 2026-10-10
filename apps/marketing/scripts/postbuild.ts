@@ -35,6 +35,8 @@ import {
   routeFor,
 } from '../app/site.ts';
 import { USE_CASES } from '../app/use-cases.ts';
+import { markdownPath } from '../worker/markdown.ts';
+import { toMarkdown } from './markdown.ts';
 import { zip } from './zip.ts';
 
 const CLIENT = join(import.meta.dirname, '..', 'build', 'client');
@@ -501,6 +503,34 @@ function exampleArchives(): void {
   }
 }
 
+/**
+ * Every prerendered page as Markdown, beside it at `<path>.md`, for the
+ * Worker to serve to an agent that asks with `Accept: text/markdown`.
+ * Runs after `relocate404`, so the 404 page is not one of them.
+ */
+function markdownPages(): void {
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((entry) => {
+      const path = join(dir, entry);
+      if (statSync(path).isDirectory()) return walk(path);
+      return entry === 'index.html' ? [path] : [];
+    });
+  let written = 0;
+  for (const file of walk(CLIENT)) {
+    const pathname = `/${relative(CLIENT, dirname(file)).split(sep).join('/')}`;
+    // A layer's reference page demonstrates a made-up product (D101); the
+    // Worker keeps it out of search, and it is not a page about vibld.
+    if (pathname === '/layers' || pathname.startsWith('/layers/')) continue;
+    const markdown = toMarkdown(readFileSync(file, 'utf8'), absolute(pathname));
+    if (markdown === null) continue;
+    const target = join(CLIENT, markdownPath(pathname).slice(1));
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, markdown, 'utf8');
+    written++;
+  }
+  console.log(`  wrote ${written} Markdown pages`);
+}
+
 console.log('postbuild:');
 write('robots.txt', robots());
 write('sitemap.xml', sitemap());
@@ -508,4 +538,5 @@ write('llms.txt', llms());
 write('llms-full.txt', llmsFull());
 relocate404();
 removeSpaFallback();
+markdownPages();
 exampleArchives();

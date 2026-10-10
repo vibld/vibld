@@ -1208,6 +1208,39 @@ describe('structured data a search engine or an assistant reads', () => {
 });
 
 describe('what AI crawlers are told', () => {
+  it('writes every page in the sitemap as Markdown, and no layer demo', () => {
+    const sitemap = readFileSync(join(CLIENT, 'sitemap.xml'), 'utf8');
+    const urls = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map(
+      (match) => match[1]!,
+    );
+    assert.ok(urls.length > 100);
+    for (const url of urls) {
+      const path = new URL(url).pathname;
+      const file = join(
+        CLIENT,
+        path === '/' ? 'index.md' : `${path.slice(1)}.md`,
+      );
+      assert.ok(existsSync(file), `no Markdown for ${path}`);
+      assert.match(
+        readFileSync(file, 'utf8'),
+        new RegExp(
+          `^---\\n[\\s\\S]*?\\nurl: "${url.replace(/[.?]/g, '\\$&')}"\\n---\\n\\n\\S`,
+        ),
+        `front matter of ${path}`,
+      );
+    }
+    assert.ok(!existsSync(join(CLIENT, 'layers.md')));
+    assert.equal(
+      readdirSync(join(CLIENT, 'layers')).filter((name) => name.endsWith('.md'))
+        .length,
+      0,
+    );
+    const pricing = readFileSync(join(CLIENT, 'pricing.md'), 'utf8');
+    assert.match(pricing, /^title: "Pricing \| vibld"$/m);
+    assert.match(pricing, /^- ## Build$/m);
+    assert.doesNotMatch(pricing, /<[a-z]/);
+  });
+
   it('names the AI crawlers in the same group as every other crawler', () => {
     const body = readFileSync(join(CLIENT, 'robots.txt'), 'utf8');
     // One group: a crawler obeys only the most specific group naming it, so

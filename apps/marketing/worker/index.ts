@@ -6,6 +6,7 @@ import {
   record,
 } from './analytics.ts';
 import { secured } from '@vibld/security-headers';
+import { markdownFor, varyByAccept } from './markdown.ts';
 import {
   handleRoadmapVote,
   handleRoadmapVotes,
@@ -146,13 +147,22 @@ async function route(request: Request, env: Env): Promise<Response> {
   // this site out of the index; production serves the same bytes without
   // that header.
   if (env.ASSETS) {
-    const response = permanentRedirect(
-      request.method,
-      hashedAssetHeaders(
-        url.pathname,
-        discoveryHeaders(
+    // An agent that asks for Markdown gets the page as Markdown (see
+    // worker/markdown.ts); everyone else gets the HTML, marked as varying by
+    // the same header.
+    const markdown = await markdownFor(request, env.ASSETS);
+    if (markdown) {
+      return env.VIBLD_NOINDEX === '1' ? noindex(markdown) : markdown;
+    }
+    const response = varyByAccept(
+      permanentRedirect(
+        request.method,
+        hashedAssetHeaders(
           url.pathname,
-          fontHeaders(url.pathname, await env.ASSETS.fetch(request)),
+          discoveryHeaders(
+            url.pathname,
+            fontHeaders(url.pathname, await env.ASSETS.fetch(request)),
+          ),
         ),
       ),
     );
