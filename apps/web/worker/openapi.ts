@@ -8765,6 +8765,7 @@ export const OPENAPI = {
           'settings',
           'share',
           'site',
+          'seo',
         ],
         properties: {
           id: {
@@ -8828,6 +8829,56 @@ export const OPENAPI = {
                 type: 'null',
               },
             ],
+          },
+          seo: {
+            $ref: '#/components/schemas/ProjectSeo',
+          },
+        },
+      },
+      ProjectSeo: {
+        type: 'object',
+        description:
+          "What search engines and link previews are told about the project's published site (D194). Null is not set: the site's own title, description and image stand. Read by the site as it is served, so a change shows without publishing again.",
+        required: ['title', 'description', 'image', 'indexing'],
+        properties: {
+          title: {
+            oneOf: [{ type: 'string', maxLength: 120 }, { type: 'null' }],
+            description: "Replaces the site's own title on its home page.",
+          },
+          description: {
+            oneOf: [{ type: 'string', maxLength: 320 }, { type: 'null' }],
+            description:
+              "Replaces the site's own description on its home page.",
+          },
+          image: {
+            oneOf: [{ type: 'string', maxLength: 2048 }, { type: 'null' }],
+            description:
+              'The preview image on every page: an https URL, or a path on the site such as /og.png.',
+          },
+          indexing: {
+            type: 'boolean',
+            description:
+              'False asks search engines not to index the site (D202): every response carries X-Robots-Tag noindex and no sitemap is served.',
+          },
+        },
+      },
+      ProjectSeoInput: {
+        type: 'object',
+        description:
+          'Field by field: absent is unchanged, null or empty clears. Text is kept on one line.',
+        properties: {
+          title: {
+            oneOf: [{ type: 'string', maxLength: 120 }, { type: 'null' }],
+          },
+          description: {
+            oneOf: [{ type: 'string', maxLength: 320 }, { type: 'null' }],
+          },
+          image: {
+            oneOf: [{ type: 'string', maxLength: 2048 }, { type: 'null' }],
+            description: 'An https URL, or a path on the site starting with /.',
+          },
+          indexing: {
+            type: 'boolean',
           },
         },
       },
@@ -9016,6 +9067,9 @@ export const OPENAPI = {
           },
           settings: {
             $ref: '#/components/schemas/ProjectSettingsInput',
+          },
+          seo: {
+            $ref: '#/components/schemas/ProjectSeoInput',
           },
           transcript: {
             type: 'array',

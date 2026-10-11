@@ -1385,6 +1385,43 @@ body {
   width: 3.5rem;
 }
 
+/* What search engines and link previews say about the site (D194). */
+.site-seo {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+}
+
+.site-seo summary {
+  cursor: pointer;
+}
+
+.site-seo[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.site-seo__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.site-seo input[type='text'],
+.site-seo textarea {
+  width: 100%;
+  font: inherit;
+}
+
+.site-seo__check,
+.site-seo__actions {
+  margin: 0;
+}
+
 /* The one decision in the builder a stranger can see the result of
  * (ADR-0013). It is drawn in the caution tone rather than the error one,
  * because nothing has gone wrong: something is about to become public. */

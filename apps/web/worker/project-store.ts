@@ -89,6 +89,22 @@ export interface ProjectRecord {
   share: ProjectShare;
   /** The project's published site, or null for one never published. */
   site: ProjectSite | null;
+  /** What search engines and link previews are told about it (D194). */
+  seo: ProjectSeo;
+}
+
+/**
+ * The owner's own words for search engines and link previews
+ * (`0056_project_seo.sql`), read by apps/publish at serve time. Null is
+ * "not set", where the site's own `<title>`, description and preview
+ * image stand. `indexing` false is the owner's opt-out (D202).
+ */
+export interface ProjectSeo {
+  title: string | null;
+  description: string | null;
+  /** An https URL, or a path on the site such as `/og.png`. */
+  image: string | null;
+  indexing: boolean;
 }
 
 /**
@@ -145,6 +161,10 @@ interface ProjectRow {
   site_unpublished_at: string | null;
   site_held_at: string | null;
   site_generation: string | null;
+  seo_title: string | null;
+  seo_description: string | null;
+  seo_image: string | null;
+  seo_noindex: number;
 }
 
 /**
@@ -164,7 +184,8 @@ const SELECT = `SELECT p.id, p.user_id, p.name, p.archived_at, p.created_at,
        p.model, p.knowledge, p.style_dna, p.style_gallery,
        p.style_gallery_colors, p.transcript_key,
        p.transcript_turns, p.version, p.version_writer, p.share_token,
-       p.shared_at, p.share_held_at,
+       p.shared_at, p.share_held_at, p.seo_title, p.seo_description,
+       p.seo_image, p.seo_noindex,
        g.accepted_revision,
        MAX(p.updated_at, COALESCE(g.updated_at, p.updated_at)) AS edited_at,
        s.slug AS site_slug, s.unpublished_at AS site_unpublished_at,
@@ -238,6 +259,12 @@ function recordOf(row: ProjectRow): ProjectRecord {
       heldAt: row.share_held_at,
     },
     site: siteOf(row),
+    seo: {
+      title: row.seo_title,
+      description: row.seo_description,
+      image: row.seo_image,
+      indexing: row.seo_noindex === 0,
+    },
   };
 }
 
@@ -474,6 +501,37 @@ export class ProjectStore {
           WHERE id = ?1 AND user_id = ?2`,
       )
       .bind(id, userId, name, now)
+      .run();
+  }
+
+  /**
+   * Save what the owner tells search engines and link previews (D194).
+   * Only the fields given change. Not versioned, as a rename is not: it
+   * overwrites nothing another tab saved but the same field.
+   */
+  async saveSeo(
+    userId: string,
+    id: string,
+    seo: Partial<ProjectSeo>,
+    now: string,
+  ): Promise<void> {
+    const columns: [string, string | number | null][] = [];
+    if (seo.title !== undefined) columns.push(['seo_title', seo.title]);
+    if (seo.description !== undefined) {
+      columns.push(['seo_description', seo.description]);
+    }
+    if (seo.image !== undefined) columns.push(['seo_image', seo.image]);
+    if (seo.indexing !== undefined) {
+      columns.push(['seo_noindex', seo.indexing ? 0 : 1]);
+    }
+    if (columns.length === 0) return;
+    const sets = columns.map(([column], index) => `${column} = ?${index + 4}`);
+    await this.#db
+      .prepare(
+        `UPDATE projects SET updated_at = ?3, ${sets.join(', ')}
+          WHERE id = ?1 AND user_id = ?2`,
+      )
+      .bind(id, userId, now, ...columns.map(([, value]) => value))
       .run();
   }
 

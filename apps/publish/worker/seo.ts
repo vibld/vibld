@@ -14,6 +14,26 @@
  * Pure functions. `index.ts` decides when they apply.
  */
 
+/**
+ * What the site's owner tells search engines and link previews, set in
+ * the builder (`0056_project_seo.sql`). An absent field leaves the page's
+ * own; `indexing` false is the owner's opt-out (D202).
+ */
+export interface SiteSeo {
+  title?: string;
+  description?: string;
+  /** An https URL, or a path on the site such as `/og.png`. */
+  image?: string;
+  indexing: boolean;
+}
+
+/** The owner's fields as `injectHead` applies them, the image made absolute. */
+export interface HeadOverrides {
+  title?: string;
+  description?: string;
+  image?: string;
+}
+
 /** `&`, `<`, `>` and `"` for an attribute value or element text. */
 function escapeHtml(value: string): string {
   return value
@@ -49,23 +69,68 @@ function headOf(html: string): { start: number; end: number } | undefined {
   return { start, end: start + close };
 }
 
+/** One tag's attributes, lower-cased names. */
+function attributesOf(source: string): Map<string, string> {
+  const attributes = new Map<string, string>();
+  const attributePattern =
+    /([a-zA-Z:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
+  for (const attribute of source.matchAll(attributePattern)) {
+    attributes.set(
+      attribute[1].toLowerCase(),
+      attribute[2] ?? attribute[3] ?? attribute[4] ?? '',
+    );
+  }
+  return attributes;
+}
+
 /** Each `<meta>` and `<link>` tag's attributes, lower-cased names. */
 function tags(head: string, name: 'meta' | 'link'): Map<string, string>[] {
-  const found: Map<string, string>[] = [];
   const tagPattern = new RegExp(`<${name}\\b([^>]*)>`, 'gi');
-  for (const tag of head.matchAll(tagPattern)) {
-    const attributes = new Map<string, string>();
-    const attributePattern =
-      /([a-zA-Z:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
-    for (const attribute of tag[1].matchAll(attributePattern)) {
-      attributes.set(
-        attribute[1].toLowerCase(),
-        attribute[2] ?? attribute[3] ?? attribute[4] ?? '',
-      );
-    }
-    found.push(attributes);
+  return [...head.matchAll(tagPattern)].map((tag) => attributesOf(tag[1]));
+}
+
+/**
+ * The head without the `<meta>` tags whose `name` or `property` `drop`
+ * says to, so an owner's field replaces what the page said rather than
+ * sitting beside it.
+ */
+function withoutMetas(head: string, drop: (key: string) => boolean): string {
+  return head.replace(/<meta\b([^>]*)>/gi, (tag, source: string) => {
+    const attributes = attributesOf(source);
+    const key = (
+      attributes.get('property') ??
+      attributes.get('name') ??
+      ''
+    ).toLowerCase();
+    return drop(key) ? '' : tag;
+  });
+}
+
+/**
+ * The page's head with what the owner set taking the place of what the
+ * page said: its `<title>` and description, their Open Graph and Twitter
+ * copies, and every preview image tag.
+ */
+function overridden(head: string, owner: HeadOverrides): string {
+  let result = head;
+  if (owner.title !== undefined) {
+    result = result.replace(/<title\b[^>]*>[\s\S]*?<\/title\s*>/gi, '');
   }
-  return found;
+  return withoutMetas(
+    result,
+    (key) =>
+      (owner.title !== undefined &&
+        (key === 'og:title' || key === 'twitter:title')) ||
+      (owner.description !== undefined &&
+        (key === 'description' ||
+          key === 'og:description' ||
+          key === 'twitter:description')) ||
+      // The card size follows the image, so the page's own card goes too.
+      (owner.image !== undefined &&
+        (key.startsWith('og:image') ||
+          key.startsWith('twitter:image') ||
+          key === 'twitter:card')),
+  );
 }
 
 /**
@@ -112,13 +177,19 @@ export function pagePath(file: string, has: (path: string) => boolean): string {
  * did not already have, added at the end of its `<head>`.
  *
  * The preview text is the page's own `<title>` and meta description, so
- * nothing is said about a site that its owner did not write. A page with no
+ * nothing is said about a site that its owner did not write, unless the
+ * owner set their own (`owner`), which replaces the page's. A page with no
  * `<head>` is returned as it is.
  */
-export function injectHead(html: string, canonical: string): string {
+export function injectHead(
+  html: string,
+  canonical: string,
+  owner: HeadOverrides = {},
+): string {
   const head = headOf(html);
   if (!head) return html;
-  const inside = html.slice(head.start, head.end);
+  const original = html.slice(head.start, head.end);
+  const inside = overridden(original, owner);
   const metas = tags(inside, 'meta');
   const links = tags(inside, 'link');
 
@@ -129,9 +200,19 @@ export function injectHead(html: string, canonical: string): string {
       .find((meta) => meta.get(key)?.toLowerCase() === value)
       ?.get('content');
 
+  // Values already encoded for an attribute: the owner's are plain text,
+  // the page's are HTML source (`copied`).
   const titleMatch = /<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(inside);
-  const title = titleMatch ? copied(titleMatch[1]) : '';
-  const description = copied(content('name', 'description') ?? '');
+  const title =
+    owner.title !== undefined
+      ? escapeHtml(owner.title)
+      : titleMatch
+        ? copied(titleMatch[1])
+        : '';
+  const description =
+    owner.description !== undefined
+      ? escapeHtml(owner.description)
+      : copied(content('name', 'description') ?? '');
   // A page that names its own canonical address keeps it, and its Open
   // Graph URL says the same thing rather than this Worker's.
   const ownCanonical = links
@@ -139,10 +220,18 @@ export function injectHead(html: string, canonical: string): string {
     ?.get('href');
 
   const added: string[] = [];
+  if (owner.title !== undefined) added.push(`<title>${title}</title>`);
+  if (owner.description !== undefined) {
+    added.push(`<meta name="description" content="${description}">`);
+  }
+  if (owner.image !== undefined) {
+    added.push(
+      `<meta property="og:image" content="${escapeHtml(owner.image)}">`,
+    );
+  }
   if (ownCanonical === undefined) {
     added.push(`<link rel="canonical" href="${escapeHtml(canonical)}">`);
   }
-  // Values already encoded for an attribute.
   const og: [string, string][] = [
     ['og:type', 'website'],
     [
@@ -160,17 +249,34 @@ export function injectHead(html: string, canonical: string): string {
   if (!has('name', 'twitter:card')) {
     added.push(
       `<meta name="twitter:card" content="${
-        has('property', 'og:image') ? 'summary_large_image' : 'summary'
+        owner.image !== undefined || has('property', 'og:image')
+          ? 'summary_large_image'
+          : 'summary'
       }">`,
     );
   }
-  if (added.length === 0) return html;
-  return `${html.slice(0, head.end)}${added.join('')}${html.slice(head.end)}`;
+  if (added.length === 0 && inside === original) return html;
+  return `${html.slice(0, head.start)}${inside}${added.join('')}${html.slice(head.end)}`;
 }
 
-/** Every crawler welcome, and where the sitemap is (D202). */
-export function robotsTxt(origin: string): string {
-  return `User-agent: *\nAllow: /\n\nSitemap: ${origin}/sitemap.xml\n`;
+/**
+ * Every crawler welcome, and where the sitemap is (D202). A site whose
+ * owner turned indexing off names no sitemap but still lets crawlers in:
+ * a page they cannot fetch is one they never see the `noindex` of, and a
+ * blocked address can still be listed from links to it.
+ */
+export function robotsTxt(origin: string, indexing = true): string {
+  return indexing
+    ? `User-agent: *\nAllow: /\n\nSitemap: ${origin}/sitemap.xml\n`
+    : 'User-agent: *\nAllow: /\n';
+}
+
+/**
+ * The owner's preview image as an absolute address: a path on the site is
+ * taken on the address the site is canonical at.
+ */
+export function imageUrl(origin: string, image: string): string {
+  return image.startsWith('/') ? `${origin}${image}` : image;
 }
 
 /**

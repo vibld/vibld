@@ -10,6 +10,7 @@ import type { ProjectSummary } from '../projects/projects-client.ts';
 import { connectFlow, shipShouldOpen } from '../github/connect-flow.ts';
 import { ExportButton } from './ExportButton.tsx';
 import { PublishButton } from './PublishButton.tsx';
+import { SiteSeo } from './SiteSeo.tsx';
 import { GitHubPushButton } from './GitHubPushButton.tsx';
 import { ProjectRepository } from './GitHubPanel.tsx';
 
@@ -138,6 +139,13 @@ export function ShipMenu({
                 projectId={project?.id ?? null}
                 site={project?.site ?? null}
               />
+              {project ? (
+                <SiteSeo
+                  key={project.id}
+                  projectId={project.id}
+                  seo={project.seo}
+                />
+              ) : null}
             </section>
             <section
               className="ship__section"

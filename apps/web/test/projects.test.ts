@@ -579,6 +579,72 @@ describe('what a project remembers', () => {
     assert.equal(blank.status, 400);
   });
 
+  it('saves what search engines are told about the site, field by field (D194)', async () => {
+    const w = world();
+    const made = await create(w, ALICE);
+    const url = `/api/projects/${made.id}`;
+    const fresh = await w.call(ALICE, 'GET', url);
+    assert.deepEqual(fresh.body.project.seo, {
+      title: null,
+      description: null,
+      image: null,
+      indexing: true,
+    });
+    const saved = await w.call(ALICE, 'PATCH', url, {
+      seo: {
+        title: '  Corner\nbakery ',
+        description: 'Bread',
+        image: '/og.png',
+        indexing: false,
+      },
+    });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.body.project.seo, {
+      title: 'Corner bakery',
+      description: 'Bread',
+      image: '/og.png',
+      indexing: false,
+    });
+    // Absent is unchanged; null and empty clear.
+    const cleared = await w.call(ALICE, 'PATCH', url, {
+      seo: { title: null, image: '' },
+    });
+    assert.deepEqual(cleared.body.project.seo, {
+      title: null,
+      description: 'Bread',
+      image: null,
+      indexing: false,
+    });
+    // Another account's project is not found, and nothing is written.
+    const other = await w.call(BOB, 'PATCH', url, { seo: { title: 'Mine' } });
+    assert.equal(other.status, 404);
+  });
+
+  it('refuses SEO fields that could not be served as they are', async () => {
+    const w = world();
+    const made = await create(w, ALICE);
+    const url = `/api/projects/${made.id}`;
+    for (const seo of [
+      { title: 'x'.repeat(121) },
+      { description: 'x'.repeat(321) },
+      { image: 'http://example.com/a.png' },
+      { image: '//example.com/a.png' },
+      { image: 'javascript:alert(1)' },
+      { image: 'https://user:pass@example.com/a.png' },
+      { image: '/a b.png' },
+      { indexing: 'no' },
+      { title: 5 },
+      'yes',
+    ]) {
+      const refused = await w.call(ALICE, 'PATCH', url, { seo });
+      assert.equal(refused.status, 400, JSON.stringify(seo));
+    }
+    const ok = await w.call(ALICE, 'PATCH', url, {
+      seo: { image: 'https://cdn.example.com/og.png' },
+    });
+    assert.equal(ok.body.project.seo.image, 'https://cdn.example.com/og.png');
+  });
+
   it('orders the list by when each project was last opened', async () => {
     const w = world();
     const a = await create(w, ALICE, { name: 'A' });

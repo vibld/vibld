@@ -20,9 +20,11 @@ import {
   injectHead,
   pagePath,
   robotsTxt,
+  imageUrl,
   shadowsOf,
   sitemapXml,
 } from './seo.ts';
+import type { HeadOverrides } from './seo.ts';
 import { isPreviewShaped, isValidSlug } from './slug.ts';
 import type { PublishD1Database, PublishR2Bucket } from './types.ts';
 
@@ -370,18 +372,58 @@ async function handlePublished(
   pathname: string,
   request: Request,
 ): Promise<Response> {
-  const navigation = isNavigation(request.headers);
   const store = new PublishStore(env.DB, env.PROJECT_CONTENT);
   const resolved = await store.resolveSlug(slug);
   if (!resolved) {
     return new Response('Not found.', { status: 404 });
   }
+  const response = await serveResolved(
+    env,
+    store,
+    slug,
+    resolved,
+    pathname,
+    request,
+  );
+  // The owner turned indexing off (D202): every response says so, pages,
+  // files and fallbacks alike, which is what search engines act on.
+  if (resolved.seo.indexing) return response;
+  const marked = new Response(response.body, response);
+  marked.headers.set('x-robots-tag', 'noindex');
+  return marked;
+}
+
+async function serveResolved(
+  env: Env,
+  store: PublishStore,
+  slug: string,
+  resolved: NonNullable<Awaited<ReturnType<PublishStore['resolveSlug']>>>,
+  pathname: string,
+  request: Request,
+): Promise<Response> {
+  const navigation = isNavigation(request.headers);
   // Where search engines should index the site (D194): the owner's own
   // domain once it serves, else the site's address here. Both keep serving;
   // the pages say which one is canonical rather than redirecting (D203).
   const origin = resolved.customHostname
     ? `https://${resolved.customHostname}`
     : subdomainOrigin(slug, env.PUBLISH_HOSTNAME ?? 'vibld-preview.dev');
+  // The owner's own words (D194). The preview image is the site's, on every
+  // page. The title and description describe the site, so they replace the
+  // page's own only on its home page, which is also the shell every route
+  // of a single-page app is served by; a site's other HTML pages keep
+  // theirs.
+  const { seo } = resolved;
+  const image: HeadOverrides = seo.image
+    ? { image: imageUrl(origin, seo.image) }
+    : {};
+  const home: HeadOverrides = {
+    ...image,
+    ...(seo.title ? { title: seo.title } : {}),
+    ...(seo.description ? { description: seo.description } : {}),
+  };
+  const overridesFor = (path: string): HeadOverrides =>
+    path === 'index.html' || path === '__spa-fallback.html' ? home : image;
   const page = (
     content: string,
     path: string,
@@ -391,7 +433,7 @@ async function handlePublished(
     const type = contentTypeFor(path);
     const body =
       canonical && type.startsWith('text/html')
-        ? injectHead(content, canonical)
+        ? injectHead(content, canonical, overridesFor(path))
         : content;
     return new Response(body, { status, headers: { 'content-type': type } });
   };
@@ -422,11 +464,13 @@ async function handlePublished(
   }
   // A site that ships its own robots.txt or sitemap.xml was answered above.
   if (pathname === '/robots.txt') {
-    return new Response(robotsTxt(origin), {
+    return new Response(robotsTxt(origin, seo.indexing), {
       headers: { 'content-type': contentTypeFor('robots.txt') },
     });
   }
   if (pathname === '/sitemap.xml') {
+    // No sitemap for a site its owner asked search engines not to index.
+    if (!seo.indexing) return new Response('Not found.', { status: 404 });
     const paths = await store.listPaths(slug, resolved.generation);
     return new Response(sitemapXml(origin, paths), {
       headers: { 'content-type': contentTypeFor('sitemap.xml') },

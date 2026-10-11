@@ -17,6 +17,7 @@
  */
 
 import type { ProjectFile } from '@vibld/core';
+import type { SiteSeo } from './seo.ts';
 import type {
   PublishD1Database,
   PublishD1Statement,
@@ -216,15 +217,20 @@ export class PublishStore {
          * (`slugForHostname`): the address its pages name as canonical.
          */
         customHostname?: string;
+        /** What the owner tells search engines and link previews. */
+        seo: SiteSeo;
       }
     | undefined
   > {
     const row = await this.#db
       .prepare(
-        `SELECT s.project_id, s.user_id, s.generation, d.hostname
+        `SELECT s.project_id, s.user_id, s.generation, d.hostname,
+                p.seo_title, p.seo_description, p.seo_image,
+                COALESCE(p.seo_noindex, 0) AS seo_noindex
            FROM published_projects AS s
            LEFT JOIN custom_domains AS d
              ON d.project_id = s.project_id AND d.served_at IS NOT NULL
+           LEFT JOIN projects AS p ON p.id = s.project_id
          WHERE s.slug = ?1 AND s.unpublished_at IS NULL AND s.held_at IS NULL
            AND s.generation IS NOT NULL`,
       )
@@ -232,6 +238,10 @@ export class PublishStore {
       .first<
         Pick<PublishedProjectRow, 'project_id' | 'user_id' | 'generation'> & {
           hostname: string | null;
+          seo_title: string | null;
+          seo_description: string | null;
+          seo_image: string | null;
+          seo_noindex: number;
         }
       >();
     // `generation IS NOT NULL` is not belt and braces. A slug is claimed
@@ -244,6 +254,14 @@ export class PublishStore {
           userId: row.user_id,
           generation: row.generation,
           ...(row.hostname ? { customHostname: row.hostname } : {}),
+          seo: {
+            ...(row.seo_title ? { title: row.seo_title } : {}),
+            ...(row.seo_description
+              ? { description: row.seo_description }
+              : {}),
+            ...(row.seo_image ? { image: row.seo_image } : {}),
+            indexing: row.seo_noindex === 0,
+          },
         }
       : undefined;
   }

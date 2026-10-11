@@ -521,8 +521,10 @@ paying accounts until midnight UTC.
   link and Open Graph and Twitter card tags, added at serve time by
   `apps/publish/worker/seo.ts` to every published site that does not ship
   its own. Sites are indexable and the canonical address is the owner's
-  own domain once it serves, with no redirect (D202, D203). Next: owner
-  SEO fields with the indexing opt-out, then prerendering for bots (D204).
+  own domain once it serves, with no redirect (D202, D203). Then the
+  owner's own title, description and preview image, and the indexing
+  opt-out, under "Search and link previews" in the Ship menu
+  (`0056_project_seo.sql`). Next: prerendering for bots (D204).
 - **D195. Cookieless analytics for published sites: backlog (Chris,
   2026-10-10).**
 - **D196. Invite-only publishing: backlog (Chris, 2026-10-10).**

@@ -61,6 +61,21 @@ export interface ProjectSummary {
   share?: ProjectShare;
   /** The project's published site, or null for one never published. */
   site?: ProjectSite | null;
+  /**
+   * What search engines and link previews are told about its site (D194).
+   * Absent from an older Worker, which reads as nothing set.
+   */
+  seo?: ProjectSeo;
+}
+
+/** Null is "not set": the site's own title, description and image stand. */
+export interface ProjectSeo {
+  title: string | null;
+  description: string | null;
+  /** An https URL, or a path on the site such as `/og.png`. */
+  image: string | null;
+  /** False is the owner's opt-out from search engines (D202). */
+  indexing: boolean;
 }
 
 export interface ProjectShare {
@@ -117,6 +132,7 @@ export interface ProjectPatch {
   archived?: boolean;
   settings?: Partial<ProjectSettings>;
   transcript?: TranscriptTurn[];
+  seo?: Partial<ProjectSeo>;
 }
 
 export type ProjectFailure =

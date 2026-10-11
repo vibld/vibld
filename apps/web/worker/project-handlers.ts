@@ -30,6 +30,7 @@ import type { PrincipalDenied, PrincipalGranted } from './principal.ts';
 import { ProjectStore, mayReplace } from './project-store.ts';
 import type {
   ProjectRecord,
+  ProjectSeo,
   ProjectSettings,
   SaveGuard,
 } from './project-store.ts';
@@ -57,7 +58,9 @@ import { newShareToken, shareUrl } from './share-link.ts';
  *                                          conversation, its accepted code
  *                                          and any build still running in it
  *     PATCH  /api/projects/:id             rename, archive or unarchive, save
- *                                          settings and conversation
+ *                                          settings and conversation, and
+ *                                          what search engines are told
+ *                                          about its site (D194)
  *     DELETE /api/projects/:id             delete it, code, site and all
  *     POST   /api/projects/:id/duplicate   copy it (held to the limit)
  *     POST   /api/projects/:id/share       turn its share link on
@@ -241,6 +244,7 @@ export function projectView(project: ProjectRecord, links?: ProjectLinks) {
           url: `${subdomainOrigin(project.site.slug, hostname)}/`,
         }
       : null,
+    seo: project.seo,
   };
 }
 
@@ -331,8 +335,104 @@ interface ProjectPatch {
   archived?: boolean;
   settings?: Partial<ProjectSettings>;
   transcript?: TranscriptTurn[];
+  seo?: Partial<ProjectSeo>;
   /** Absent from a builder older than versions, whose save always wins. */
   guard?: SaveGuard;
+}
+
+/**
+ * Bounds on the owner's SEO fields (D194). Search engines show about 60
+ * characters of a title and 160 of a description; these leave room
+ * beyond that without letting a field become a page.
+ */
+export const SEO_TITLE_MAX = 120;
+export const SEO_DESCRIPTION_MAX = 320;
+const SEO_IMAGE_MAX = 2048;
+
+/** Plain text on one line: whitespace runs, newlines included, become one space. */
+function seoText(
+  value: unknown,
+  field: string,
+  max: number,
+): GuardResult<string | null> {
+  if (value === null) return { ok: true, value: null };
+  if (typeof value !== 'string') {
+    return fail(400, `"seo.${field}" must be text or null.`);
+  }
+  // Control characters have no place in a title, and would end up in the
+  // page's <head>.
+  const text = value.replace(/[\u0000-\u001f\u007f\s]+/g, ' ').trim();
+  if (text.length > max) {
+    return fail(400, `"seo.${field}" is longer than ${max} characters.`);
+  }
+  return { ok: true, value: text === '' ? null : text };
+}
+
+/**
+ * The preview image: an https URL, or a path on the site itself such as
+ * `/og.png`, which apps/publish makes absolute on whichever address
+ * serves the site.
+ */
+function seoImage(value: unknown): GuardResult<string | null> {
+  if (value === null) return { ok: true, value: null };
+  if (typeof value !== 'string') {
+    return fail(400, '"seo.image" must be text or null.');
+  }
+  const image = value.trim();
+  if (image === '') return { ok: true, value: null };
+  const refused = fail(
+    400,
+    '"seo.image" must be an https:// address or a path on the site, such as /og.png.',
+  );
+  if (image.length > SEO_IMAGE_MAX || /[\s"<>\\]/.test(image)) return refused;
+  if (image.startsWith('/')) {
+    return image.startsWith('//') ? refused : { ok: true, value: image };
+  }
+  let url: URL;
+  try {
+    url = new URL(image);
+  } catch {
+    return refused;
+  }
+  if (url.protocol !== 'https:' || url.username || url.password) return refused;
+  return { ok: true, value: url.href };
+}
+
+/** The owner's SEO fields, field by field: absent is unchanged, null clears. */
+export function parseProjectSeo(
+  value: unknown,
+): GuardResult<Partial<ProjectSeo>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return fail(400, '"seo" must be an object.');
+  }
+  const raw = value as Record<string, unknown>;
+  const seo: Partial<ProjectSeo> = {};
+  if ('title' in raw) {
+    const title = seoText(raw.title, 'title', SEO_TITLE_MAX);
+    if (!title.ok) return title;
+    seo.title = title.value;
+  }
+  if ('description' in raw) {
+    const description = seoText(
+      raw.description,
+      'description',
+      SEO_DESCRIPTION_MAX,
+    );
+    if (!description.ok) return description;
+    seo.description = description.value;
+  }
+  if ('image' in raw) {
+    const image = seoImage(raw.image);
+    if (!image.ok) return image;
+    seo.image = image.value;
+  }
+  if ('indexing' in raw) {
+    if (typeof raw.indexing !== 'boolean') {
+      return fail(400, '"seo.indexing" must be true or false.');
+    }
+    seo.indexing = raw.indexing;
+  }
+  return { ok: true, value: seo };
 }
 
 /** A page's name for itself: a UUID, or anything as plain and as short. */
@@ -368,6 +468,11 @@ export function parseProjectPatch(body: unknown): GuardResult<ProjectPatch> {
       return fail(413, 'This conversation is too long to save.');
     }
     patch.transcript = transcript.turns;
+  }
+  if ('seo' in raw) {
+    const seo = parseProjectSeo(raw.seo);
+    if (!seo.ok) return seo;
+    patch.seo = seo.value;
   }
   if ('version' in raw) {
     if (!Number.isSafeInteger(raw.version) || (raw.version as number) < 0) {
@@ -908,6 +1013,9 @@ export async function handleProjects(
   }
   if (patch.value.name !== undefined) {
     await store.rename(userId, project.id, patch.value.name, at);
+  }
+  if (patch.value.seo !== undefined) {
+    await store.saveSeo(userId, project.id, patch.value.seo, at);
   }
   if (content) {
     const saved = await store.saveContent(

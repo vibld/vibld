@@ -338,6 +338,7 @@ describe('what a slug keeps', () => {
 
     assert.equal(await store.promote('acme', latest), true);
     assert.deepEqual(await store.resolveSlug('acme'), {
+      seo: { indexing: true },
       projectId: 'proj-1',
       userId: 'user-1',
       generation: latest,
@@ -752,6 +753,7 @@ describe('taking a published site down', () => {
     ]);
 
     assert.deepEqual(await store.resolveSlug('acme'), {
+      seo: { indexing: true },
       projectId: 'proj-1',
       userId: 'user-1',
       generation: back,
@@ -811,6 +813,7 @@ describe('taking a published site down', () => {
 
     assert.deepEqual(bucket.keys(), [`published/acme-two/${two}/index.html`]);
     assert.deepEqual(await store.resolveSlug('acme-two'), {
+      seo: { indexing: true },
       projectId: 'proj-2',
       userId: 'user-2',
       generation: two,
@@ -891,6 +894,7 @@ describe('taking a published site down', () => {
       { path: 'index.html', content: '<h1>back</h1>' },
     ]);
     assert.deepEqual(await store.resolveSlug('acme'), {
+      seo: { indexing: true },
       projectId: 'proj-1',
       userId: 'user-1',
       generation: back,
@@ -1038,6 +1042,7 @@ describe('holding a site an operator did not publish', () => {
 
     const [revision] = await store.revisions('acme');
     assert.deepEqual(await store.resolveSlug('acme'), {
+      seo: { indexing: true },
       projectId: 'proj-1',
       userId: 'user-1',
       generation: revision,
@@ -1394,6 +1399,7 @@ describe('holding a site an operator did not publish', () => {
     await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
 
     assert.deepEqual(await store.resolveSlug('acme-two'), {
+      seo: { indexing: true },
       projectId: 'proj-2',
       userId: 'user-2',
       generation: two,

@@ -726,6 +726,88 @@ describe('apps/publish Worker: public serving', () => {
       assert.doesNotMatch(xml, /404|app\.js/);
     });
 
+    async function ownerSeo(
+      env: Env,
+      fields: Record<string, string | number>,
+    ): Promise<void> {
+      const db = env.DB as SqliteD1Database;
+      await db
+        .prepare(
+          `INSERT INTO projects
+             (id, user_id, name, created_at, updated_at, last_opened_at)
+           VALUES ('p1', 'u1', 'Acme', 'now', 'now', 'now')`,
+        )
+        .run();
+      for (const [column, value] of Object.entries(fields)) {
+        await db
+          .prepare(`UPDATE projects SET ${column} = ?1 WHERE id = 'p1'`)
+          .bind(value)
+          .run();
+      }
+    }
+
+    it("puts the owner's title and description on the home page and every route, and the image everywhere", async () => {
+      const env = await spaEnv([
+        { path: 'index.html', content: SHELL },
+        { path: 'about.html', content: SHELL },
+      ]);
+      await ownerSeo(env, {
+        seo_title: 'Acme Bakery',
+        seo_description: 'Bread daily',
+        seo_image: '/og.png',
+      });
+      const host = 'acme.vibld-preview.dev';
+      for (const path of ['/', '/menu']) {
+        const { body } = await html(env, host, path);
+        assert.match(body, /<title>Acme Bakery<\/title>/);
+        assert.doesNotMatch(body, /Acme &amp; Co|content="Bakery"/);
+        assert.match(body, /<meta name="description" content="Bread daily">/);
+        assert.match(
+          body,
+          /<meta property="og:image" content="https:\/\/acme\.vibld-preview\.dev\/og\.png">/,
+        );
+      }
+      const about = (await html(env, host, '/about')).body;
+      assert.match(about, /<title>Acme &amp; Co<\/title>/);
+      assert.match(
+        about,
+        /og:image" content="https:\/\/acme\.vibld-preview\.dev\/og\.png"/,
+      );
+    });
+
+    it('keeps a site its owner opted out of search out of it (D202)', async () => {
+      const env = await spaEnv();
+      await ownerSeo(env, { seo_noindex: 1 });
+      const host = 'acme.vibld-preview.dev';
+      const page = await worker.fetch(
+        publicRequest(host, '/', { accept: 'text/html' }),
+        env,
+      );
+      assert.equal(page.status, 200);
+      assert.equal(page.headers.get('x-robots-tag'), 'noindex');
+      const robots = await worker.fetch(
+        publicRequest(host, '/robots.txt'),
+        env,
+      );
+      assert.equal(robots.headers.get('x-robots-tag'), 'noindex');
+      assert.equal(await robots.text(), 'User-agent: *\nAllow: /\n');
+      const sitemap = await worker.fetch(
+        publicRequest(host, '/sitemap.xml'),
+        env,
+      );
+      assert.equal(sitemap.status, 404);
+    });
+
+    it('says nothing about indexing for a site left indexable', async () => {
+      const env = await spaEnv();
+      await ownerSeo(env, { seo_noindex: 0 });
+      const page = await worker.fetch(
+        publicRequest('acme.vibld-preview.dev', '/'),
+        env,
+      );
+      assert.equal(page.headers.get('x-robots-tag'), null);
+    });
+
     it("keeps the site's own robots.txt and sitemap.xml", async () => {
       const env = await spaEnv([
         { path: 'index.html', content: SHELL },

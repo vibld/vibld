@@ -206,6 +206,22 @@ apps/preview forwards it only once Cloudflare has activated the domain;
 apps/web clears it when Cloudflare reports the domain inactive, on the
 owner's domain settings or the nightly domain check.
 
+The owner can set their own words in the builder's Ship menu ("Search and
+link previews"), saved on the project (`0056_project_seo.sql`) and read
+here with the slug, so a change shows at once without publishing again:
+
+- A title and description replace the page's own `<title>`, description and
+  their Open Graph copies on the home page, which is also the shell every
+  client-side route is served by. The site's other HTML pages keep theirs.
+- A preview image (an https URL, or a path on the site made absolute on the
+  canonical address) replaces every `og:image` and `twitter:image` tag and
+  the Twitter card (made a large one) on every page served with 200. A
+  404 page is left as it is, as it is without owner fields.
+- Indexing is on by default (D202). Turned off, every response carries
+  `X-Robots-Tag: noindex`, `/robots.txt` names no sitemap (crawlers are
+  still let in, or they would never see the `noindex`), and `/sitemap.xml`
+  is a 404 unless the site ships its own.
+
 ## Why a separate package, not a folder in apps/web
 
 Same first reason apps/preview gives for the same question: a published

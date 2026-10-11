@@ -4,6 +4,7 @@ import {
   canonicalUrl,
   injectHead,
   pagePath,
+  imageUrl,
   robotsTxt,
   shadowsOf,
   sitemapXml,
@@ -112,7 +113,80 @@ describe('injectHead', () => {
   });
 });
 
+describe("injectHead with the owner's fields", () => {
+  const PAGE =
+    '<html><head><title>Old</title>' +
+    '<meta name="description" content="Old text">' +
+    '<meta property="og:title" content="Old">' +
+    '<meta property="og:image" content="https://x.test/old.png">' +
+    '<meta property="og:image:width" content="1200">' +
+    '<meta name="twitter:card" content="summary">' +
+    '</head><body></body></html>';
+
+  it("replaces the page's title, description and image, not adds beside them", () => {
+    const html = injectHead(PAGE, 'https://a.test/', {
+      title: 'Acme <Bakery> & "Co"',
+      description: 'Fresh bread',
+      image: 'https://a.test/og.png',
+    });
+    assert.equal(html.match(/<title>/g)?.length, 1);
+    assert.match(
+      html,
+      /<title>Acme &lt;Bakery&gt; &amp; &quot;Co&quot;<\/title>/,
+    );
+    assert.equal(html.match(/name="description"/g)?.length, 1);
+    assert.match(html, /<meta name="description" content="Fresh bread">/);
+    assert.match(
+      html,
+      /<meta property="og:title" content="Acme &lt;Bakery&gt; &amp; &quot;Co&quot;">/,
+    );
+    assert.match(
+      html,
+      /<meta property="og:description" content="Fresh bread">/,
+    );
+    assert.doesNotMatch(html, /old\.png|og:image:width|Old/);
+    assert.match(
+      html,
+      /<meta property="og:image" content="https:\/\/a\.test\/og\.png">/,
+    );
+    assert.match(
+      html,
+      /<meta name="twitter:card" content="summary_large_image">/,
+    );
+  });
+
+  it('leaves what the owner did not set as the page wrote it', () => {
+    const html = injectHead(PAGE, 'https://a.test/', {
+      image: 'https://a.test/og.png',
+    });
+    assert.match(html, /<title>Old<\/title>/);
+    assert.match(html, /<meta property="og:title" content="Old">/);
+    assert.match(html, /<meta property="og:description" content="Old text">/);
+    assert.doesNotMatch(html, /old\.png/);
+    assert.equal(html.match(/twitter:card/g)?.length, 1);
+    assert.match(
+      html,
+      /<meta name="twitter:card" content="summary_large_image">/,
+    );
+  });
+
+  it('makes a path on the site absolute on the canonical origin', () => {
+    assert.equal(
+      imageUrl('https://a.test', '/og.png'),
+      'https://a.test/og.png',
+    );
+    assert.equal(
+      imageUrl('https://a.test', 'https://cdn.test/x.png'),
+      'https://cdn.test/x.png',
+    );
+  });
+});
+
 describe('robotsTxt and sitemapXml', () => {
+  it('names no sitemap for a site its owner keeps out of search, and blocks nothing', () => {
+    assert.equal(robotsTxt(ORIGIN, false), 'User-agent: *\nAllow: /\n');
+  });
+
   it('welcomes crawlers and names the sitemap', () => {
     assert.equal(
       robotsTxt(ORIGIN),
