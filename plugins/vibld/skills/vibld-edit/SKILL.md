@@ -39,7 +39,11 @@ calls (Free 50, Build 500, Ship 2,000), reads as much as writes.
    for a different look.
 4. **Write whole files.** Each entry in `files` replaces the file at its
    path with the full new content. Pass the revision you read as
-   `baseRevision`.
+   `baseRevision`. For a risky change, or when the person wants to see it
+   first, call `write_files` with `dryRun: true`: nothing is written, and
+   the answer is a line diff of each file and a type check of the result
+   (call again with the same arguments while the preview starts). Then
+   write it without `dryRun`.
 5. **Check.** Run `check_types` after every write (call again until the
    preview is ready) and fix what the compiler reports. Then look at the
    page with `take_screenshot`, at phone width as well as desktop when the

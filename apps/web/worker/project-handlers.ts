@@ -73,7 +73,9 @@ import { newShareToken, shareUrl } from './share-link.ts';
  *                                          checkpoint's (D190)
  *     PUT    /api/projects/:id/files       write and delete files in the
  *                                          accepted code, with no build
- *                                          (D190)
+ *                                          (D190); with dryRun, checked
+ *                                          and answered, never accepted
+ *                                          (D212)
  *
  * Every route that names a project answers 404 for one that is not the
  * caller's, never 403: "that exists, and it is not yours" is a fact about
@@ -580,6 +582,12 @@ interface FileEdit {
   files: ProjectFile[];
   /** Taken out of the project; each must be in it. */
   remove: string[];
+  /**
+   * Check and answer as an edit would, but accept nothing (D212): the
+   * answer carries the code the edit would leave and the code it was made
+   * against, and no checkpoint is made.
+   */
+  dryRun: boolean;
 }
 
 /**
@@ -625,7 +633,18 @@ export function parseFileEdit(body: unknown): GuardResult<FileEdit> {
     if (named.has(path)) return fail(400, `"${path}" is named twice.`);
     named.add(path);
   }
-  return { ok: true, value: { base: raw.base, files: files.value, remove } };
+  if (raw.dryRun !== undefined && typeof raw.dryRun !== 'boolean') {
+    return fail(400, '"dryRun" must be true or false.');
+  }
+  return {
+    ok: true,
+    value: {
+      base: raw.base,
+      files: files.value,
+      remove,
+      dryRun: raw.dryRun === true,
+    },
+  };
 }
 
 /**
@@ -1285,6 +1304,23 @@ async function editFiles(
   if (!whole.ok) {
     return json({ error: `After this edit: ${whole.error}` }, whole.status);
   }
+  // A dry run (D212) stops here, after every check an edit makes but the
+  // ones only the write itself can make (a build started in between, a
+  // revision that collides). It answers with what the edit would leave and
+  // what it was made against, so the caller can show the difference. The
+  // draft's revision is a SHA-256 of its files with a `d`, never an `r`:
+  // a preview it is put on cannot pass for one of accepted code, or of
+  // another draft.
+  if (parsed.value.dryRun) {
+    return json({
+      dryRun: true,
+      snapshot: {
+        revision: await draftRevision(whole.value),
+        files: whole.value,
+      },
+      base: { revision: accepted.revision, files: accepted.files },
+    });
+  }
   // Nothing changed: what was asked for is already true, so it is answered
   // as done and nothing is written, as restoring the current checkpoint is.
   // Compared by content, since a revision is not always its files' hash (a
@@ -1323,4 +1359,15 @@ async function editFiles(
       files: result.snapshot.files,
     },
   });
+}
+
+/** A dry run's draft revision (D212): `d` and 32 hex digits of SHA-256. */
+async function draftRevision(files: ProjectFile[]): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(files)),
+  );
+  return `d${[...new Uint8Array(digest).slice(0, 16)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')}`;
 }

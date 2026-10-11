@@ -386,7 +386,7 @@ export const TOOLS = [
   {
     name: 'write_files',
     title: 'Write files',
-    description: `Write up to ${MAX_TOOL_FILES} files into a project's current code, and delete up to ${MAX_TOOL_FILES}, with no build. The change becomes the project's code at once, as a new revision and a checkpoint restore_checkpoint can undo. baseRevision is the revision the change was made against (from list_files or read_files): if the project has changed since, nothing is written and the error names the current revision to read again. Refused while a build runs. Costs no credit; counts toward the plan's daily editing calls. Run check_types afterwards.`,
+    description: `Write up to ${MAX_TOOL_FILES} files into a project's current code, and delete up to ${MAX_TOOL_FILES}, with no build. The change becomes the project's code at once, as a new revision and a checkpoint restore_checkpoint can undo. baseRevision is the revision the change was made against (from list_files or read_files): if the project has changed since, nothing is written and the error names the current revision to read again. Refused while a build runs. Costs no credit; counts toward the plan's daily editing calls. Run check_types afterwards. With dryRun true nothing is written: the answer is a line diff of each changed file and a type check of the changed code, run by moving the account's one preview onto it (call again with the same arguments while the preview starts); check_types or get_preview_url moves the preview back.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -421,6 +421,11 @@ export const TOOLS = [
           items: PATH_INPUT,
           maxItems: MAX_TOOL_FILES,
           description: 'Paths of files to delete. Each must be in the project.',
+        },
+        dryRun: {
+          type: 'boolean',
+          description:
+            'True to see the diff and type check of this change without writing it. Defaults to false.',
         },
       },
       required: ['projectId', 'baseRevision'],
@@ -1021,7 +1026,22 @@ async function ensurePreview(
       'This project has no finished build yet, so there is nothing to preview.',
     );
   }
-  const revision = snapshot.revision;
+  return previewOn(
+    { files: snapshot.files, revision: snapshot.revision },
+    deps,
+  );
+}
+
+/**
+ * The account's one preview, started on or moved to `code` if it is not
+ * already serving it: the project's accepted code, or a write_files dry
+ * run's draft.
+ */
+async function previewOn(
+  code: { files: unknown; revision: string },
+  deps: McpDeps,
+): Promise<Record<string, unknown>> {
+  const revision = code.revision;
 
   // An account has one preview. One already on this revision is answered
   // as it is. One on another revision is moved to this one (D74), or,
@@ -1038,7 +1058,7 @@ async function ensurePreview(
   if (status.status === 'installing' && status.updatingTo === revision) {
     return status;
   }
-  const body = { files: snapshot.files, revision };
+  const body = { files: code.files, revision };
   if (live && status.status === 'ready') {
     // `{ outcome, status? }` (D74): applied serves this revision now, and
     // installing is on its way to it. Busy or restart moves nothing.
@@ -1174,12 +1194,19 @@ async function runEditTool(
       if (files.length === 0 && remove.length === 0) {
         throw new ToolError('Name at least one file to write or delete.');
       }
+      const raw = args.dryRun;
+      if (raw !== undefined && typeof raw !== 'boolean') {
+        throw new ToolError('"dryRun" must be true or false.');
+      }
+      const dryRun = raw === true;
       await takeEditCall(name, projectId, deps);
       const answer = await deps.api('PUT', `/api/projects/${project}/files`, {
         base,
         files,
         ...(remove.length > 0 ? { delete: remove } : {}),
+        ...(dryRun ? { dryRun: true } : {}),
       });
+      if (dryRun) return dryRunAnswer(projectId, answer, deps);
       const snapshot = snapshotOf(answer, 'The files could not be written.');
       return {
         projectId,
@@ -1497,8 +1524,212 @@ function snapshotOf(answer: ApiAnswer, fallback: string): Code {
   };
 }
 
+/**
+ * write_files with dryRun: the files route checked the change and wrote
+ * nothing. Its draft is type-checked on the preview, and every file it
+ * adds, changes or deletes is shown as a line diff against the base.
+ */
+async function dryRunAnswer(
+  projectId: string,
+  answer: ApiAnswer,
+  deps: McpDeps,
+): Promise<unknown> {
+  const draft = snapshotOf(answer, 'The change could not be checked.');
+  const base = snapshotOf(
+    { ...answer, body: { snapshot: record(answer.body).base } },
+    'The change could not be checked.',
+  );
+  const before = new Map(base.files.map((file) => [file.path, file.content]));
+  const after = new Map(draft.files.map((file) => [file.path, file.content]));
+  const paths = [...new Set([...before.keys(), ...after.keys()])]
+    .filter((path) => before.get(path) !== after.get(path))
+    .sort();
+  let diff = paths
+    .map((path) => fileDiff(path, before.get(path), after.get(path)))
+    .join('');
+  if (diff.length > MAX_DIFF_CHARS) {
+    diff = `${diff.slice(0, MAX_DIFF_CHARS)}\n[cut at ${MAX_DIFF_CHARS} characters]\n`;
+  }
+  const checked = typecheckAnswer(await previewOn(draft, deps), {
+    fix: 'Change the files and call write_files with dryRun again, or write them without dryRun.',
+    again:
+      'The preview is starting so the change can be checked. Call write_files again with the same arguments in about 20 seconds.',
+  });
+  return {
+    projectId,
+    dryRun: true,
+    baseRevision: base.revision,
+    changed: paths,
+    diff,
+    ...checked,
+    ...(checked.typecheck === 'passed'
+      ? {
+          next: 'Nothing was written. Call write_files again without dryRun to write the change.',
+        }
+      : {}),
+  };
+}
+
+/** The most characters of diff one dry run answers with. */
+export const MAX_DIFF_CHARS = 100_000;
+
+/** Lines compared with a full LCS; a longer differing middle is one hunk. */
+const MAX_DIFF_CELLS = 4_000_000;
+
+/**
+ * One file's change as a unified diff with three lines of context, from
+ * `undefined` (added) or to `undefined` (deleted).
+ */
+export function fileDiff(
+  path: string,
+  before: string | undefined,
+  after: string | undefined,
+): string {
+  const a = before === undefined ? [] : splitLines(before);
+  const b = after === undefined ? [] : splitLines(after);
+  const header = `--- ${before === undefined ? '/dev/null' : diffName('a', path)}\n+++ ${
+    after === undefined ? '/dev/null' : diffName('b', path)
+  }\n`;
+  const ops = lineOps(a, b);
+  const context = 3;
+  let out = header;
+  let i = 0;
+  while (i < ops.length) {
+    if (ops[i].kind === ' ') {
+      i += 1;
+      continue;
+    }
+    // A hunk runs from `context` lines before a change to `context` lines
+    // after the last change closer than twice that to the next one.
+    let start = i;
+    while (start > 0 && i - start < context && ops[start - 1].kind === ' ') {
+      start -= 1;
+    }
+    let end = i;
+    let quiet = 0;
+    while (end < ops.length && quiet <= 2 * context) {
+      quiet = ops[end].kind === ' ' ? quiet + 1 : 0;
+      end += 1;
+    }
+    end -= Math.max(0, quiet - context);
+    const hunk = ops.slice(start, end);
+    const first = ops[start];
+    const oldCount = hunk.filter((op) => op.kind !== '+').length;
+    const newCount = hunk.filter((op) => op.kind !== '-').length;
+    out += `@@ -${oldCount === 0 ? first.a : first.a + 1},${oldCount} +${
+      newCount === 0 ? first.b : first.b + 1
+    },${newCount} @@\n`;
+    // Lines keep their newline, so a last line without one differs from
+    // the same line with one, and is marked as git marks it.
+    for (const op of hunk) {
+      out += op.line.endsWith('\n')
+        ? `${op.kind}${op.line}`
+        : `${op.kind}${op.line}\n\\ No newline at end of file\n`;
+    }
+    i = end;
+  }
+  return out;
+}
+
+/**
+ * A path as a diff header names it: as it is when it is plain printable
+ * ASCII, else quoted and escaped as a JSON string (as git C-quotes it), so
+ * a newline in a path cannot read as another header.
+ */
+function diffName(side: 'a' | 'b', path: string): string {
+  const name = `${side}/${path}`;
+  return /^[\x21-\x7e]+$/.test(name) && !/["\\]/.test(name)
+    ? name
+    : JSON.stringify(name);
+}
+
+/** Each line with its newline, if it has one. */
+function splitLines(text: string): string[] {
+  return text === '' ? [] : text.split(/(?<=\n)/);
+}
+
+interface LineOp {
+  kind: ' ' | '-' | '+';
+  line: string;
+  /** Lines of `a` and `b` before this one. */
+  a: number;
+  b: number;
+}
+
+/** The edit from `a` to `b`, line by line. */
+function lineOps(a: string[], b: string[]): LineOp[] {
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head += 1;
+  let tail = 0;
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  ) {
+    tail += 1;
+  }
+  const midA = a.slice(head, a.length - tail);
+  const midB = b.slice(head, b.length - tail);
+  const ops: LineOp[] = [];
+  for (let k = 0; k < head; k += 1) {
+    ops.push({ kind: ' ', line: a[k], a: k, b: k });
+  }
+  const push = (kind: LineOp['kind'], line: string, x: number, y: number) =>
+    ops.push({ kind, line, a: head + x, b: head + y });
+  if ((midA.length + 1) * (midB.length + 1) > MAX_DIFF_CELLS) {
+    midA.forEach((line, x) => push('-', line, x, 0));
+    midB.forEach((line, y) => push('+', line, midA.length, y));
+  } else {
+    // lcs[x][y]: the longest common run of midA from x and midB from y.
+    const width = midB.length + 1;
+    const lcs = new Uint32Array((midA.length + 1) * width);
+    for (let x = midA.length - 1; x >= 0; x -= 1) {
+      for (let y = midB.length - 1; y >= 0; y -= 1) {
+        lcs[x * width + y] =
+          midA[x] === midB[y]
+            ? lcs[(x + 1) * width + y + 1] + 1
+            : Math.max(lcs[(x + 1) * width + y], lcs[x * width + y + 1]);
+      }
+    }
+    let x = 0;
+    let y = 0;
+    while (x < midA.length || y < midB.length) {
+      if (x < midA.length && y < midB.length && midA[x] === midB[y]) {
+        push(' ', midA[x], x, y);
+        x += 1;
+        y += 1;
+      } else if (
+        y >= midB.length ||
+        (x < midA.length && lcs[(x + 1) * width + y] >= lcs[x * width + y + 1])
+      ) {
+        push('-', midA[x], x, y);
+        x += 1;
+      } else {
+        push('+', midB[y], x, y);
+        y += 1;
+      }
+    }
+  }
+  for (let k = 0; k < tail; k += 1) {
+    ops.push({
+      kind: ' ',
+      line: a[a.length - tail + k],
+      a: a.length - tail + k,
+      b: b.length - tail + k,
+    });
+  }
+  return ops;
+}
+
 /** A preview's status, read for its type check. */
-function typecheckAnswer(status: Record<string, unknown>) {
+function typecheckAnswer(
+  status: Record<string, unknown>,
+  hints: { fix: string; again: string } = {
+    fix: 'Fix what it reports with write_files, then call check_types again.',
+    again:
+      'The preview is starting so the code can be checked. Call check_types again in about 20 seconds.',
+  },
+): Record<string, unknown> {
   if (status.status === 'ready') {
     const failure =
       typeof status.typecheckFailure === 'string'
@@ -1513,7 +1744,7 @@ function typecheckAnswer(status: Record<string, unknown>) {
             failure.length > MAX_TYPECHECK_CHARS
               ? `${failure.slice(0, MAX_TYPECHECK_CHARS)}\n[cut at ${MAX_TYPECHECK_CHARS} characters]`
               : failure,
-          next: 'Fix what it reports with write_files, then call check_types again.',
+          next: hints.fix,
         };
   }
   if (status.status === 'failed') {
@@ -1528,7 +1759,7 @@ function typecheckAnswer(status: Record<string, unknown>) {
     ...(typeof status.position === 'number'
       ? { position: status.position }
       : {}),
-    next: 'The preview is starting so the code can be checked. Call check_types again in about 20 seconds.',
+    next: hints.again,
   };
 }
 

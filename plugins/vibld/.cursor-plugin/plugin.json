@@ -2,7 +2,7 @@
   "name": "vibld",
   "displayName": "vibld",
   "description": "Build and edit vibld websites and web apps from your coding agent: start a build, follow it, read and change the code, type-check it and see it in a browser.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "vibld",
     "email": "hello@vibld.com"

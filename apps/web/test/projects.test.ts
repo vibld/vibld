@@ -1523,6 +1523,40 @@ describe('editing files with no build (D190)', () => {
     assert.equal(await edits(w), 0);
   });
 
+  it('answers a dry run with the draft and its base, writing nothing (D212)', async () => {
+    const w = world();
+    const project = await built(w);
+    const path = `/api/projects/${project.id}/files`;
+    const before = await w.call(ALICE, 'GET', path);
+    const dry = await w.call(ALICE, 'PUT', path, {
+      base: 'r1',
+      files: [{ path: 'src/App.tsx', content: 'x' }],
+      dryRun: true,
+    });
+    assert.equal(dry.status, 200);
+    assert.equal(dry.body.dryRun, true);
+    assert.equal(dry.body.base.revision, 'r1');
+    assert.deepEqual(dry.body.base.files, before.body.snapshot.files);
+    assert.match(dry.body.snapshot.revision, /^d[0-9a-f]{32}$/);
+    assert.equal(
+      dry.body.snapshot.files.find(
+        (file: { path: string }) => file.path === 'src/App.tsx',
+      ).content,
+      'x',
+    );
+    assert.equal(await edits(w), 0);
+    const after = await w.call(ALICE, 'GET', path);
+    assert.deepEqual(after.body.snapshot, before.body.snapshot);
+
+    const malformed = await w.call(ALICE, 'PUT', path, {
+      base: 'r1',
+      files: [{ path: 'src/App.tsx', content: 'x' }],
+      dryRun: 'yes',
+    });
+    assert.equal(malformed.status, 400);
+    assert.match(malformed.body.error, /"dryRun" must be true or false/);
+  });
+
   it('reads the accepted code or a checkpoint, and nothing else', async () => {
     const w = world();
     const empty = await create(w, ALICE);

@@ -4877,7 +4877,7 @@ export const OPENAPI = {
         summary:
           "Write and delete files in a project's accepted code, with no build, and return the code accepted now.",
         description:
-          'Spends nothing and publishes nothing (D190). The change is accepted at once as a new revision, which the history lists as an `edit` checkpoint. The project it leaves is held to the limits a build or a preview is: at most 50 files and 160,000 characters of paths and content. An edit that changes nothing is answered as done without writing. Invite-gated. On this method the invite gate also applies: a signed-in caller who has not been invited gets 403 with `accessRefused: true` and `reason: "access-refused"`.',
+          'Spends nothing and publishes nothing (D190). The change is accepted at once as a new revision, which the history lists as an `edit` checkpoint. The project it leaves is held to the limits a build or a preview is: at most 50 files and 160,000 characters of paths and content. An edit that changes nothing is answered as done without writing. With `dryRun` the edit is checked the same way and answered, and nothing is accepted (D212). Invite-gated. On this method the invite gate also applies: a signed-in caller who has not been invited gets 403 with `accessRefused: true` and `reason: "access-refused"`.',
         tags: ['Projects'],
         security: [
           {
@@ -4897,18 +4897,19 @@ export const OPENAPI = {
         },
         responses: {
           '200': {
-            description: 'The code accepted now.',
+            description:
+              'The code accepted now, or on a dry run the code the edit would leave and the code it was made against.',
             content: {
               'application/json': {
                 schema: {
-                  $ref: '#/components/schemas/SnapshotEnvelope',
+                  $ref: '#/components/schemas/FileEditAnswer',
                 },
               },
             },
           },
           '400': {
             description:
-              'The body is not valid JSON, `base` is not a revision, a path is not relative and canonical, a path is named twice, a path to delete is not in the project, nothing is named, or the edit would leave no files.',
+              'The body is not valid JSON, `base` is not a revision, `dryRun` is not a boolean, a path is not relative and canonical, a path is named twice, a path to delete is not in the project, nothing is named, or the edit would leave no files.',
             content: {
               'application/json': {
                 schema: {
@@ -7798,6 +7799,30 @@ export const OPENAPI = {
               type: 'string',
               maxLength: 256,
             },
+          },
+          dryRun: {
+            type: 'boolean',
+            description:
+              'Check the edit and answer with the code it would leave and the code it was made against, accepting nothing and making no checkpoint (D212).',
+          },
+        },
+      },
+      FileEditAnswer: {
+        type: 'object',
+        required: ['snapshot'],
+        properties: {
+          snapshot: {
+            $ref: '#/components/schemas/ProjectSnapshot',
+          },
+          dryRun: {
+            type: 'boolean',
+            description:
+              'Present and true on a dry run: `snapshot` is the code the edit would leave, under a draft revision (`d` and 32 hex digits) that is never a stored one, and nothing was accepted.',
+          },
+          base: {
+            $ref: '#/components/schemas/ProjectSnapshot',
+            description:
+              'On a dry run, the accepted code the edit was made against.',
           },
         },
       },

@@ -72,6 +72,12 @@ number of calls set by the plan (D201).
   project, as a restore is. The project it leaves is held to the limits a
   build's base is (50 files, 160,000 characters), so it can still be built
   on.
+- **Dry runs (D212).** `write_files` with `dryRun: true` sends the same
+  `PUT` with `dryRun: true`, which runs every check above and writes
+  nothing: no revision, no checkpoint. It answers with the draft and the
+  base it was made against; the tool returns a unified line diff of each
+  changed file and the draft's type check, run by moving the account's
+  preview onto the draft. `check_types` and `get_preview_url` move it back.
 - **Plugin:** `plugins/vibld` packages this server with two skills for
   Claude Code, Codex and Cursor, and the repository is their marketplace
   (D207). Install steps are in `plugins/vibld/README.md`.
@@ -90,16 +96,16 @@ number of calls set by the plan (D201).
 
 The editing tools (D190), each counted against the plan's daily calls:
 
-| Tool                 | What it does                                                                                       |
-| -------------------- | -------------------------------------------------------------------------------------------------- |
-| `list_files`         | A project's current files, with their sizes and the revision they are at                           |
-| `read_files`         | Up to 20 files' contents, from the current code or a checkpoint; at most 100,000 characters a call |
-| `write_files`        | Writes up to 20 files and deletes up to 20 from the revision read; the result is a new checkpoint  |
-| `check_types`        | Starts or reuses the live preview of the current code and reports its type check                   |
-| `list_checkpoints`   | The project's checkpoints, newest first, and which is current                                      |
-| `restore_checkpoint` | Makes a checkpoint the current code again, from the revision the list showed                       |
-| `get_logs`           | The preview's state and type check, if it serves this code, and how the recent builds ended        |
-| `take_screenshot`    | Starts or reuses the live preview of the current code and returns one page of it as an image       |
+| Tool                 | What it does                                                                                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_files`         | A project's current files, with their sizes and the revision they are at                                                                                             |
+| `read_files`         | Up to 20 files' contents, from the current code or a checkpoint; at most 100,000 characters a call                                                                   |
+| `write_files`        | Writes up to 20 files and deletes up to 20 from the revision read; the result is a new checkpoint. With `dryRun`, writes nothing and returns the diff and type check |
+| `check_types`        | Starts or reuses the live preview of the current code and reports its type check                                                                                     |
+| `list_checkpoints`   | The project's checkpoints, newest first, and which is current                                                                                                        |
+| `restore_checkpoint` | Makes a checkpoint the current code again, from the revision the list showed                                                                                         |
+| `get_logs`           | The preview's state and type check, if it serves this code, and how the recent builds ended                                                                          |
+| `take_screenshot`    | Starts or reuses the live preview of the current code and returns one page of it as an image                                                                         |
 
 `start_build` makes a new project unless it is given one, so an assistant
 never builds over whatever the person last had open in the builder.

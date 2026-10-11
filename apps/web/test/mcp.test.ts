@@ -17,6 +17,7 @@ import {
   MCP_METADATA_PATH,
   SERVER_INFO,
   TOOLS,
+  fileDiff,
   handleMcpMessage,
   mcpUnauthorized,
   negotiateVersion,
@@ -1314,6 +1315,7 @@ describe('the editing tools (D190)', () => {
         'write_files',
         { projectId: PROJECT, baseRevision: 'r0000000a', delete: 'a.ts' },
       ],
+      ['write_files', { ...VALID.write_files, dryRun: 'yes' }],
       ['list_checkpoints', { projectId: PROJECT, limit: 0 }],
       ['restore_checkpoint', { projectId: PROJECT, revision: 'r0000000b' }],
       ['read_files', { projectId: PROJECT, paths: ['a'], offset: -1 }],
@@ -1521,6 +1523,146 @@ describe('the editing tools (D190)', () => {
       assert.equal(result.isError, true);
       assert.match(String(result.value.error), message);
     }
+  });
+
+  describe('a dry run (D212)', () => {
+    const answer = {
+      status: 200,
+      body: {
+        dryRun: true,
+        snapshot: {
+          revision: 'r0000000d',
+          files: [
+            { path: 'src/App.tsx', content: 'export default 2;\n' },
+            { path: 'src/new.ts', content: 'y\n' },
+          ],
+        },
+        base: {
+          revision: 'r0000000a',
+          files: [
+            { path: 'src/App.tsx', content: 'export default 1;\n' },
+            { path: 'index.html', content: '<div id="root"></div>\n' },
+          ],
+        },
+      },
+    } as ApiAnswer;
+    const args = {
+      projectId: PROJECT,
+      baseRevision: 'r0000000a',
+      files: [
+        { path: 'src/App.tsx', content: 'export default 2;\n' },
+        { path: 'src/new.ts', content: 'y\n' },
+      ],
+      delete: ['index.html'],
+      dryRun: true,
+    };
+
+    it('diffs the change and type-checks the draft on the preview, writing nothing', async () => {
+      const d = deps({
+        routes: {
+          [`PUT ${FILES}`]: answer,
+          'GET /api/preview': {
+            status: 200,
+            body: { status: 'ready', revision: 'r0000000a' },
+          },
+          'PATCH /api/preview': {
+            status: 200,
+            body: {
+              outcome: 'applied',
+              status: { status: 'ready', revision: 'r0000000d' },
+            },
+          },
+        },
+      });
+      const result = await callTool(d.value, 'write_files', args);
+      assert.equal(result.isError, false);
+      assert.deepEqual(d.calls[0], {
+        method: 'PUT',
+        path: FILES,
+        body: {
+          base: 'r0000000a',
+          files: args.files,
+          delete: ['index.html'],
+          dryRun: true,
+        },
+      });
+      assert.deepEqual(d.calls.at(-1), {
+        method: 'PATCH',
+        path: '/api/preview',
+        body: {
+          files: (answer.body as { snapshot: { files: unknown } }).snapshot
+            .files,
+          revision: 'r0000000d',
+        },
+      });
+      assert.equal(result.value.dryRun, true);
+      assert.equal(result.value.typecheck, 'passed');
+      assert.deepEqual(result.value.changed, [
+        'index.html',
+        'src/App.tsx',
+        'src/new.ts',
+      ]);
+      assert.equal(
+        result.value.diff,
+        [
+          '--- a/index.html',
+          '+++ /dev/null',
+          '@@ -1,1 +0,0 @@',
+          '-<div id="root"></div>',
+          '--- a/src/App.tsx',
+          '+++ b/src/App.tsx',
+          '@@ -1,1 +1,1 @@',
+          '-export default 1;',
+          '+export default 2;',
+          '--- /dev/null',
+          '+++ b/src/new.ts',
+          '@@ -0,0 +1,1 @@',
+          '+y',
+          '',
+        ].join('\n'),
+      );
+      assert.match(String(result.value.next), /without dryRun/);
+    });
+
+    it('asks to be called again while the preview starts, and passes on a failed check', async () => {
+      const d = deps({
+        routes: {
+          [`PUT ${FILES}`]: answer,
+          'GET /api/preview': {
+            status: 200,
+            body: { status: 'ready-to-start' },
+          },
+          'POST /api/preview': { status: 200, body: { status: 'installing' } },
+        },
+      });
+      const starting = await callTool(d.value, 'write_files', args);
+      assert.equal(starting.value.status, 'installing');
+      assert.match(
+        String(starting.value.next),
+        /Call write_files again with the same arguments/,
+      );
+
+      const failing = await callTool(
+        deps({
+          routes: {
+            [`PUT ${FILES}`]: answer,
+            'GET /api/preview': {
+              status: 200,
+              body: {
+                status: 'ready',
+                revision: 'r0000000d',
+                typecheckFailure: 'src/App.tsx(1,1): error TS2304',
+              },
+            },
+          },
+        }).value,
+        'write_files',
+        args,
+      );
+      assert.equal(failing.value.typecheck, 'failed');
+      assert.equal(failing.value.output, 'src/App.tsx(1,1): error TS2304');
+      assert.match(String(failing.value.next), /dryRun again/);
+    });
   });
 
   it("reads the preview's type check, starting the preview where it must", async () => {
@@ -1865,6 +2007,58 @@ describe('the editing tools (D190)', () => {
     for (const name of EDIT_TOOLS) {
       assert.ok(INSTRUCTIONS.includes(name), name);
     }
+  });
+});
+
+describe("a dry run's line diff", () => {
+  it('keeps three lines of context and splits distant changes into hunks', () => {
+    const before = Array.from({ length: 20 }, (_, i) => `l${i + 1}`).join('\n');
+    const after = before.replace('l2\n', 'L2\n').replace('l18', 'L18');
+    assert.equal(
+      fileDiff('a.ts', before, after),
+      [
+        '--- a/a.ts',
+        '+++ b/a.ts',
+        '@@ -1,5 +1,5 @@',
+        ' l1',
+        '-l2',
+        '+L2',
+        ' l3',
+        ' l4',
+        ' l5',
+        '@@ -15,6 +15,6 @@',
+        ' l15',
+        ' l16',
+        ' l17',
+        '-l18',
+        '+L18',
+        ' l19',
+        ' l20',
+        '\\ No newline at end of file',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('quotes a path a header could not carry as it is', () => {
+    assert.equal(
+      fileDiff('a\n+++ b/x.ts', undefined, 'y\n'),
+      '--- /dev/null\n+++ "b/a\\n+++ b/x.ts"\n@@ -0,0 +1,1 @@\n+y\n',
+    );
+  });
+
+  it('shows a change to the last newline alone', () => {
+    assert.equal(
+      fileDiff('a.ts', 'a\nb', 'a\nb\n'),
+      '--- a/a.ts\n+++ b/a.ts\n@@ -1,2 +1,2 @@\n a\n-b\n\\ No newline at end of file\n+b\n',
+    );
+  });
+
+  it('finds lines inserted in the middle rather than replacing the rest', () => {
+    assert.equal(
+      fileDiff('a.ts', 'a\nb\nc\n', 'a\nx\nb\nc\n'),
+      '--- a/a.ts\n+++ b/a.ts\n@@ -1,3 +1,4 @@\n a\n+x\n b\n c\n',
+    );
   });
 });
 
