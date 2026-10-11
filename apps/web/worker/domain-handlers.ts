@@ -203,6 +203,11 @@ export async function handleProjectDomain(
       if (rechecked.ok) state = rechecked;
       else console.error('custom hostname recheck failed', rechecked.error);
     }
+    // A domain that stopped working stops being the canonical address of
+    // the site's pages (D194), until a request reaches it again.
+    if (state.ok && state.value.status !== 'active') {
+      await domains.markUnserved(projectId, existing.cloudflareId);
+    }
     return json({
       configured: true,
       eligible,
@@ -377,7 +382,8 @@ export async function removeProjectDomain(
  * invocation's D1 queries, at most 1 + 3 a row, stay inside the Workers
  * Paid plan's 1,000 (this Worker sets `limits.cpu_ms`, which only that plan
  * has), and its Cloudflare calls, at most one a row, inside the
- * subrequest limit. Every row comes round again within (domains / 300)
+ * subrequest limit (the removal of a lapsed one, or the status of a kept
+ * one that serves). Every row comes round again within (domains / 300)
  * nights.
  */
 export const DOMAINS_CHECKED_PER_NIGHT = 300;
@@ -421,7 +427,20 @@ export async function sweepLapsedDomains(
   for (const row of await domains.dueForCheck(limit)) {
     outcome.checked += 1;
     if (!row.orphaned && (await deps.tierOf(row.userId)) !== 'free') {
-      await domains.markChecked(row.hostname, now);
+      // A kept domain the site's pages name as canonical (D194) is asked
+      // whether it still works, so one whose DNS lapsed stops being named
+      // even if its owner never opens the settings again. The same one
+      // Cloudflare call a row the removal below would make.
+      let unserved = false;
+      if (row.served) {
+        const state = await cloudflare.get(row.cloudflareId);
+        unserved = state.ok && state.value.status !== 'active';
+      }
+      await domains.markChecked(
+        row.hostname,
+        now,
+        unserved ? row.cloudflareId : undefined,
+      );
       continue;
     }
     const removed = await cloudflare.remove(row.cloudflareId);

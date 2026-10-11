@@ -588,6 +588,230 @@ describe('apps/publish Worker: public serving', () => {
     const response = await worker.fetch(publicRequest('example.com', '/'), env);
     assert.equal(response.status, 404);
   });
+
+  describe('what search engines and link previews read (D194)', () => {
+    const SHELL =
+      '<!doctype html><html><head><title>Acme &amp; Co</title>' +
+      '<meta name="description" content="Bakery"></head>' +
+      '<body><div id="root"></div></body></html>';
+
+    async function spaEnv(
+      files = [{ path: 'index.html', content: SHELL }],
+    ): Promise<Env> {
+      const env = newEnv();
+      await worker.fetch(
+        internalRequest('internal/publish', {
+          userId: 'u1',
+          projectId: 'p1',
+          slug: 'acme',
+          files,
+        }),
+        env,
+      );
+      return env;
+    }
+
+    async function connect(env: Env): Promise<void> {
+      await (env.DB as SqliteD1Database)
+        .prepare(
+          `INSERT INTO custom_domains
+             (hostname, project_id, user_id, cloudflare_id, created_at)
+           VALUES ('www.acme.com', 'p1', 'u1', 'ch1', '2026-10-10')`,
+        )
+        .run();
+    }
+
+    async function html(env: Env, host: string, path: string) {
+      const response = await worker.fetch(
+        publicRequest(host, path, { accept: 'text/html' }),
+        env,
+      );
+      return { status: response.status, body: await response.text() };
+    }
+
+    it('adds a canonical link and preview tags to a page', async () => {
+      const env = await spaEnv();
+      const { status, body } = await html(env, 'acme.vibld-preview.dev', '/');
+      assert.equal(status, 200);
+      assert.match(
+        body,
+        /<link rel="canonical" href="https:\/\/acme\.vibld-preview\.dev\/">/,
+      );
+      assert.match(body, /<meta property="og:title" content="Acme &amp; Co">/);
+      assert.match(body, /<meta property="og:description" content="Bakery">/);
+      assert.match(body, /<meta name="twitter:card" content="summary">/);
+      assert.ok(body.indexOf('og:title') < body.indexOf('</head>'));
+    });
+
+    it("names a client-side route by its own address, not the shell's", async () => {
+      const env = await spaEnv();
+      const { status, body } = await html(
+        env,
+        'acme.vibld-preview.dev',
+        '/menu?ref=x',
+      );
+      assert.equal(status, 200);
+      assert.match(body, /href="https:\/\/acme\.vibld-preview\.dev\/menu"/);
+    });
+
+    it('leaves a 404 page and non-HTML files as they are', async () => {
+      const env = await spaEnv([
+        { path: 'index.html', content: SHELL },
+        { path: '404.html', content: SHELL },
+        { path: 'app.js', content: '<head></head>' },
+      ]);
+      assert.equal(
+        (await html(env, 'acme.vibld-preview.dev', '/gone.html')).body,
+        SHELL,
+      );
+      assert.equal(
+        (await html(env, 'acme.vibld-preview.dev', '/app.js')).body,
+        '<head></head>',
+      );
+    });
+
+    it('names each page by the address that serves it', async () => {
+      const env = await spaEnv([
+        { path: 'index.html', content: SHELL },
+        { path: 'about.html', content: SHELL },
+        { path: 'about/index.html', content: SHELL },
+        { path: 'docs/index.html', content: SHELL },
+      ]);
+      const canonical = async (path: string) =>
+        /rel="canonical" href="([^"]*)"/.exec(
+          (await html(env, 'acme.vibld-preview.dev', path)).body,
+        )?.[1];
+      const site = 'https://acme.vibld-preview.dev';
+      assert.equal(await canonical('/about'), `${site}/about`);
+      assert.equal(await canonical('/about/'), `${site}/about`);
+      assert.equal(await canonical('/about.html'), `${site}/about`);
+      // A different page that /about does not reach keeps its own name.
+      assert.equal(
+        await canonical('/about/index.html'),
+        `${site}/about/index.html`,
+      );
+      assert.equal(await canonical('/docs/'), `${site}/docs`);
+      assert.equal(await canonical('/docs/index.html'), `${site}/docs`);
+      assert.equal(await canonical('/index.html'), `${site}/`);
+    });
+
+    it('serves robots.txt and a sitemap the site did not ship', async () => {
+      const env = await spaEnv([
+        { path: 'index.html', content: SHELL },
+        { path: 'about.html', content: SHELL },
+        { path: '404.html', content: SHELL },
+        { path: 'assets/app.js', content: '' },
+      ]);
+      const robots = await worker.fetch(
+        publicRequest('acme.vibld-preview.dev', '/robots.txt'),
+        env,
+      );
+      assert.equal(robots.status, 200);
+      assert.match(robots.headers.get('content-type') ?? '', /^text\/plain/);
+      assert.equal(
+        await robots.text(),
+        'User-agent: *\nAllow: /\n\nSitemap: https://acme.vibld-preview.dev/sitemap.xml\n',
+      );
+      const sitemap = await worker.fetch(
+        publicRequest('acme.vibld-preview.dev', '/sitemap.xml'),
+        env,
+      );
+      assert.equal(sitemap.status, 200);
+      const xml = await sitemap.text();
+      assert.match(xml, /<loc>https:\/\/acme\.vibld-preview\.dev\/<\/loc>/);
+      assert.match(
+        xml,
+        /<loc>https:\/\/acme\.vibld-preview\.dev\/about<\/loc>/,
+      );
+      assert.doesNotMatch(xml, /404|app\.js/);
+    });
+
+    it("keeps the site's own robots.txt and sitemap.xml", async () => {
+      const env = await spaEnv([
+        { path: 'index.html', content: SHELL },
+        { path: 'robots.txt', content: 'User-agent: *\nDisallow: /\n' },
+        { path: 'sitemap.xml', content: '<urlset/>' },
+      ]);
+      assert.equal(
+        await (
+          await worker.fetch(
+            publicRequest('acme.vibld-preview.dev', '/robots.txt'),
+            env,
+          )
+        ).text(),
+        'User-agent: *\nDisallow: /\n',
+      );
+      assert.equal(
+        await (
+          await worker.fetch(
+            publicRequest('acme.vibld-preview.dev', '/sitemap.xml'),
+            env,
+          )
+        ).text(),
+        '<urlset/>',
+      );
+    });
+
+    it('records serving only for the registration the request was served for', async () => {
+      const env = await spaEnv();
+      await connect(env);
+      const store = new PublishStore(env.DB, env.PROJECT_CONTENT);
+      // The hostname was reconnected (a new Cloudflare id) after the read.
+      const db = env.DB as SqliteD1Database;
+      const realPrepare = db.prepare.bind(db);
+      let swapped = false;
+      db.prepare = ((query: string) => {
+        if (!swapped && query.startsWith('UPDATE custom_domains')) {
+          swapped = true;
+          return {
+            bind: (...values: unknown[]) => ({
+              run: async () => {
+                await realPrepare(
+                  `UPDATE custom_domains SET cloudflare_id = 'ch2'`,
+                ).run();
+                return realPrepare(query)
+                  .bind(...values)
+                  .run();
+              },
+            }),
+          } as never;
+        }
+        return realPrepare(query);
+      }) as typeof db.prepare;
+      assert.equal(await store.slugForHostname('www.acme.com'), 'acme');
+      db.prepare = realPrepare;
+      const row = await db
+        .prepare(`SELECT served_at FROM custom_domains`)
+        .first<{ served_at: string | null }>();
+      assert.equal(row?.served_at, null);
+    });
+
+    it("names the owner's domain as canonical once a request reaches it (D203)", async () => {
+      const env = await spaEnv();
+      await connect(env);
+      // Connected but not yet serving: the domain may still be pending.
+      assert.match(
+        (await html(env, 'acme.vibld-preview.dev', '/')).body,
+        /href="https:\/\/acme\.vibld-preview\.dev\/"/,
+      );
+      const onDomain = await html(env, 'www.acme.com', '/');
+      assert.equal(onDomain.status, 200);
+      assert.match(onDomain.body, /href="https:\/\/www\.acme\.com\/"/);
+      // Both addresses keep serving; the preview one points at the domain.
+      const onPreview = await html(env, 'acme.vibld-preview.dev', '/menu');
+      assert.equal(onPreview.status, 200);
+      assert.match(onPreview.body, /href="https:\/\/www\.acme\.com\/menu"/);
+      assert.match(
+        await (
+          await worker.fetch(
+            publicRequest('acme.vibld-preview.dev', '/robots.txt'),
+            env,
+          )
+        ).text(),
+        /Sitemap: https:\/\/www\.acme\.com\/sitemap\.xml/,
+      );
+    });
+  });
 });
 
 /**

@@ -15,6 +15,14 @@ import {
   withMediaManifest,
 } from './media-serve.ts';
 import type { MediaBucket } from './media-serve.ts';
+import {
+  canonicalUrl,
+  injectHead,
+  pagePath,
+  robotsTxt,
+  shadowsOf,
+  sitemapXml,
+} from './seo.ts';
 import { isPreviewShaped, isValidSlug } from './slug.ts';
 import type { PublishD1Database, PublishR2Bucket } from './types.ts';
 
@@ -368,14 +376,61 @@ async function handlePublished(
   if (!resolved) {
     return new Response('Not found.', { status: 404 });
   }
+  // Where search engines should index the site (D194): the owner's own
+  // domain once it serves, else the site's address here. Both keep serving;
+  // the pages say which one is canonical rather than redirecting (D203).
+  const origin = resolved.customHostname
+    ? `https://${resolved.customHostname}`
+    : subdomainOrigin(slug, env.PUBLISH_HOSTNAME ?? 'vibld-preview.dev');
+  const page = (
+    content: string,
+    path: string,
+    canonical: string | undefined,
+    status: number = 200,
+  ): Response => {
+    const type = contentTypeFor(path);
+    const body =
+      canonical && type.startsWith('text/html')
+        ? injectHead(content, canonical)
+        : content;
+    return new Response(body, { status, headers: { 'content-type': type } });
+  };
 
-  for (const candidate of candidatePaths(pathname)) {
+  const candidates = candidatePaths(pathname);
+  for (const [index, candidate] of candidates.entries()) {
     const file = await store.getFile(slug, resolved.generation, candidate);
-    if (file) {
-      return new Response(file.content, {
-        headers: { 'content-type': contentTypeFor(candidate) },
-      });
+    if (!file) continue;
+    // A page is canonical at its own shortest address (`pagePath`). The
+    // candidates tried before this one are known not to exist; any other
+    // file that would take that address is asked for, which only happens
+    // when a page is requested by its full file name.
+    const missing = new Set(candidates.slice(0, index));
+    const present = new Set<string>();
+    if (contentTypeFor(candidate).startsWith('text/html')) {
+      for (const shadow of shadowsOf(candidate)) {
+        if (missing.has(shadow)) continue;
+        if (await store.getFile(slug, resolved.generation, shadow)) {
+          present.add(shadow);
+        }
+      }
     }
+    return page(
+      file.content,
+      candidate,
+      `${origin}${pagePath(candidate, (path) => present.has(path))}`,
+    );
+  }
+  // A site that ships its own robots.txt or sitemap.xml was answered above.
+  if (pathname === '/robots.txt') {
+    return new Response(robotsTxt(origin), {
+      headers: { 'content-type': contentTypeFor('robots.txt') },
+    });
+  }
+  if (pathname === '/sitemap.xml') {
+    const paths = await store.listPaths(slug, resolved.generation);
+    return new Response(sitemapXml(origin, paths), {
+      headers: { 'content-type': contentTypeFor('sitemap.xml') },
+    });
   }
   // The owner's uploaded media, after the site's own files (a project that
   // shipped its own file at that path wins) and before any fallback, so a
@@ -410,10 +465,13 @@ async function handlePublished(
   for (const fallback of fallbackPaths(pathname, navigation)) {
     const file = await store.getFile(slug, resolved.generation, fallback.path);
     if (file) {
-      return new Response(file.content, {
-        status: fallback.status,
-        headers: { 'content-type': contentTypeFor(fallback.path) },
-      });
+      // The shell stands in for a client-side route, named by the route.
+      return page(
+        file.content,
+        fallback.path,
+        fallback.status === 200 ? canonicalUrl(origin, pathname) : undefined,
+        fallback.status,
+      );
     }
   }
   return new Response('Not found.', { status: 404 });

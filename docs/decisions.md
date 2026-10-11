@@ -517,7 +517,12 @@ paying accounts until midnight UTC.
   through a one-time link and the model sees only the variable's name.
 - **D194. SEO for published sites, built next (Chris, 2026-10-10).**
   Prerendering, a sitemap, robots.txt and Open Graph tags for published
-  sites.
+  sites. Built first: robots.txt, a sitemap, a canonical
+  link and Open Graph and Twitter card tags, added at serve time by
+  `apps/publish/worker/seo.ts` to every published site that does not ship
+  its own. Sites are indexable and the canonical address is the owner's
+  own domain once it serves, with no redirect (D202, D203). Next: owner
+  SEO fields with the indexing opt-out, then prerendering for bots (D204).
 - **D195. Cookieless analytics for published sites: backlog (Chris,
   2026-10-10).**
 - **D196. Invite-only publishing: backlog (Chris, 2026-10-10).**
@@ -539,6 +544,17 @@ paying accounts until midnight UTC.
   (`apps/web/worker/entitlement.ts`), each settable under **Plans**
   (D134). The caps: "50 / 500 / 2000" (Chris, 2026-10-11), calls a day on
   Free, Build and Ship.
+- **D202. Published sites are indexable by default, and the owner can opt
+  out (Chris, 2026-10-11: "Yes, opt out").** Sites on vibld-preview.dev and
+  custom domains welcome crawlers; a per-site setting turns indexing off.
+- **D203. A custom domain is canonical by tag, not by redirect (Chris,
+  2026-10-11: "Canonical tag only").** The vibld-preview.dev address keeps
+  serving; its canonical link points at the custom domain once that domain
+  serves. No 301.
+- **D204. Prerender published pages for bots (Chris, 2026-10-11: "Render for
+  bots").** Crawlers and link unfurlers get HTML rendered by Cloudflare
+  Browser Rendering; people get the app as built. Built after the owner SEO
+  fields, one pull request at a time.
 
 ### Checkpoint history, 2026-10-03
 

@@ -550,6 +550,26 @@ describe('a published site on its own domain (D189)', () => {
     assert.equal(patches(), 2);
   });
 
+  it('stops naming a domain canonical once Cloudflare says it is not active (D194)', async () => {
+    const w = await world();
+    await w.prove(ALICE, 'www.bakery.com');
+    await w.call(ALICE, 'POST', 'project-a', { hostname: 'www.bakery.com' });
+    // What apps/publish records on the first request the domain serves.
+    await w.db
+      .prepare(
+        `UPDATE custom_domains SET served_at = '2026-10-11T00:00:00Z'
+          WHERE hostname = 'www.bakery.com'`,
+      )
+      .run();
+    assert.equal((await w.call(ALICE, 'GET', 'project-a')).status, 200);
+    const row = await w.db
+      .prepare(
+        `SELECT served_at FROM custom_domains WHERE hostname = 'www.bakery.com'`,
+      )
+      .first<{ served_at: string | null }>();
+    assert.equal(row?.served_at, null);
+  });
+
   it('disconnects a domain, here and at Cloudflare', async () => {
     const w = await world();
     await w.prove(ALICE, 'www.bakery.com');
@@ -636,6 +656,66 @@ describe('the nightly plan check (D189)', () => {
       [...w.cf.hostnames.values()].map((entry) => entry.hostname),
       ['www.bakery.com'],
     );
+  });
+
+  it('stops naming a kept domain canonical once Cloudflare says it is not active (D194)', async () => {
+    const w = await world();
+    await w.prove(ALICE, 'www.bakery.com');
+    await w.call(ALICE, 'POST', 'project-a', { hostname: 'www.bakery.com' });
+    await w.db
+      .prepare(
+        `UPDATE custom_domains SET served_at = '2026-10-11T00:00:00Z'
+          WHERE hostname = 'www.bakery.com'`,
+      )
+      .run();
+    const gets = () =>
+      w.cf.calls.filter((call) => call.method === 'GET').length;
+    const before = gets();
+    const swept = await sweepLapsedDomains(w.env, {
+      tierOf: async () => 'build',
+      fetchImpl: w.cf.fetch,
+    });
+    assert.deepEqual(swept, { checked: 1, removed: 0, failed: 0 });
+    assert.equal(gets(), before + 1);
+    const row = await w.db
+      .prepare(
+        `SELECT served_at, checked_at FROM custom_domains
+          WHERE hostname = 'www.bakery.com'`,
+      )
+      .first<{ served_at: string | null; checked_at: string | null }>();
+    assert.equal(row?.served_at, null);
+    assert.notEqual(row?.checked_at, null);
+    // A replacement registration on the same hostname keeps its own.
+    await w.db
+      .prepare(
+        `UPDATE custom_domains SET served_at = '2026-10-11T01:00:00Z'
+          WHERE hostname = 'www.bakery.com'`,
+      )
+      .run();
+    const store = new CustomDomainStore(w.db as unknown as D1Database);
+    await store.markChecked(
+      'www.bakery.com',
+      '2026-10-12T00:00:00Z',
+      'ch-an-older-one',
+    );
+    const kept = await w.db
+      .prepare(
+        `SELECT served_at FROM custom_domains WHERE hostname = 'www.bakery.com'`,
+      )
+      .first<{ served_at: string | null }>();
+    assert.equal(kept?.served_at, '2026-10-11T01:00:00Z');
+    await w.db
+      .prepare(
+        `UPDATE custom_domains SET served_at = NULL
+          WHERE hostname = 'www.bakery.com'`,
+      )
+      .run();
+    // A domain that does not serve is not asked about.
+    await sweepLapsedDomains(w.env, {
+      tierOf: async () => 'build',
+      fetchImpl: w.cf.fetch,
+    });
+    assert.equal(gets(), before + 1);
   });
 
   it('removes a domain whose project is gone, whatever the plan', async () => {

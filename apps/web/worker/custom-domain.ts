@@ -422,6 +422,23 @@ export class CustomDomainStore {
   }
 
   /**
+   * Forget that the domain serves, once Cloudflare says it no longer does
+   * (`0055_custom_domain_served.sql`), so the site's pages stop naming it as
+   * their canonical address. Only that row: a replacement connected since
+   * has its own.
+   */
+  async markUnserved(projectId: string, cloudflareId: string): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE custom_domains SET served_at = NULL
+          WHERE project_id = ?1 AND cloudflare_id = ?2
+            AND served_at IS NOT NULL`,
+      )
+      .bind(projectId, cloudflareId)
+      .run();
+  }
+
+  /**
    * The rows the nightly plan check should look at next: never checked
    * first, then the longest since. One query. `orphaned` is a row whose
    * project is gone, left by a deletion that could not remove it at
@@ -429,12 +446,13 @@ export class CustomDomainStore {
    */
   async dueForCheck(
     limit: number,
-  ): Promise<(CustomDomainRow & { orphaned: boolean })[]> {
+  ): Promise<(CustomDomainRow & { orphaned: boolean; served: boolean })[]> {
     const rows = await this.#db
       .prepare(
         `SELECT d.hostname, d.project_id, d.user_id, d.cloudflare_id,
                 NOT EXISTS (SELECT 1 FROM projects AS p
-                             WHERE p.id = d.project_id) AS orphaned
+                             WHERE p.id = d.project_id) AS orphaned,
+                d.served_at IS NOT NULL AS served
            FROM custom_domains AS d
           ORDER BY d.checked_at, d.hostname
           LIMIT ?1`,
@@ -446,6 +464,7 @@ export class CustomDomainStore {
         user_id: string;
         cloudflare_id: string;
         orphaned: number;
+        served: number;
       }>();
     return (rows.results ?? []).map((row) => ({
       hostname: row.hostname,
@@ -453,13 +472,31 @@ export class CustomDomainStore {
       userId: row.user_id,
       cloudflareId: row.cloudflare_id,
       orphaned: row.orphaned === 1,
+      served: row.served === 1,
     }));
   }
 
-  async markChecked(hostname: string, now: string): Promise<void> {
+  /**
+   * Checked now, and with `unservedId`, no longer serving either
+   * (`markUnserved`'s reason), in the same write so the nightly pass stays
+   * at three D1 queries a row. Only for the registration that id names: a
+   * replacement connected to the hostname since the row was read keeps its
+   * own `served_at`.
+   */
+  async markChecked(
+    hostname: string,
+    now: string,
+    unservedId?: string,
+  ): Promise<void> {
     await this.#db
-      .prepare('UPDATE custom_domains SET checked_at = ?2 WHERE hostname = ?1')
-      .bind(hostname, now)
+      .prepare(
+        `UPDATE custom_domains
+            SET checked_at = ?2,
+                served_at = CASE WHEN cloudflare_id = ?3 THEN NULL
+                                 ELSE served_at END
+          WHERE hostname = ?1`,
+      )
+      .bind(hostname, now, unservedId ?? null)
       .run();
   }
 }

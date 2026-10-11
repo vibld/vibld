@@ -158,16 +158,41 @@ export class PublishStore {
    * apps/web's `0053_custom_domains.sql`), or undefined for a hostname
    * nobody connected. Only the name: whether the site is up is
    * `resolveSlug`'s question, asked next, the same as for any slug.
+   *
+   * A request on the hostname also records that the domain serves
+   * (`0055_custom_domain_served.sql`), once: apps/preview forwards it only
+   * after Cloudflare has activated the domain, so the request is the proof,
+   * and from then on the site's pages name the domain as their canonical
+   * address (D194, D203).
    */
-  async slugForHostname(hostname: string): Promise<string | undefined> {
+  async slugForHostname(
+    hostname: string,
+    at = new Date(),
+  ): Promise<string | undefined> {
+    const name = hostname.toLowerCase();
     const row = await this.#db
       .prepare(
-        `SELECT s.slug FROM custom_domains AS d
+        `SELECT s.slug, d.served_at, d.cloudflare_id FROM custom_domains AS d
            JOIN published_projects AS s ON s.project_id = d.project_id
           WHERE d.hostname = ?1`,
       )
-      .bind(hostname.toLowerCase())
-      .first<{ slug: string }>();
+      .bind(name)
+      .first<{
+        slug: string;
+        served_at: string | null;
+        cloudflare_id: string;
+      }>();
+    if (row && row.served_at === null) {
+      // Only the registration this request was served for: one connected
+      // to the hostname since the read has not been reached yet.
+      await this.#db
+        .prepare(
+          `UPDATE custom_domains SET served_at = ?2
+            WHERE hostname = ?1 AND cloudflare_id = ?3 AND served_at IS NULL`,
+        )
+        .bind(name, at.toISOString(), row.cloudflare_id)
+        .run();
+    }
     return row?.slug;
   }
 
@@ -186,18 +211,28 @@ export class PublishStore {
         userId: string;
         /** The revision to read files from. */
         generation: string;
+        /**
+         * The owner's own domain, once a request has reached the site on it
+         * (`slugForHostname`): the address its pages name as canonical.
+         */
+        customHostname?: string;
       }
     | undefined
   > {
     const row = await this.#db
       .prepare(
-        `SELECT project_id, user_id, generation FROM published_projects
-         WHERE slug = ?1 AND unpublished_at IS NULL AND held_at IS NULL
-           AND generation IS NOT NULL`,
+        `SELECT s.project_id, s.user_id, s.generation, d.hostname
+           FROM published_projects AS s
+           LEFT JOIN custom_domains AS d
+             ON d.project_id = s.project_id AND d.served_at IS NOT NULL
+         WHERE s.slug = ?1 AND s.unpublished_at IS NULL AND s.held_at IS NULL
+           AND s.generation IS NOT NULL`,
       )
       .bind(slug)
       .first<
-        Pick<PublishedProjectRow, 'project_id' | 'user_id' | 'generation'>
+        Pick<PublishedProjectRow, 'project_id' | 'user_id' | 'generation'> & {
+          hostname: string | null;
+        }
       >();
     // `generation IS NOT NULL` is not belt and braces. A slug is claimed
     // before its first files are written, so between those two there is a
@@ -208,6 +243,7 @@ export class PublishStore {
           projectId: row.project_id,
           userId: row.user_id,
           generation: row.generation,
+          ...(row.hostname ? { customHostname: row.hostname } : {}),
         }
       : undefined;
   }
@@ -1035,5 +1071,25 @@ export class PublishStore {
     const object = await this.#bucket.get(objectKey(slug, generation, path));
     if (!object) return undefined;
     return { content: await object.text() };
+  }
+
+  /**
+   * The paths of every file in a revision, for the sitemap (`seo.ts`).
+   * Paged, as `unpublish` pages, and bounded: a sitemap holds at most
+   * 50,000 addresses, and a published site is far below that.
+   */
+  async listPaths(slug: string, generation: string): Promise<string[]> {
+    const prefix = generationPrefix(slug, generation);
+    const paths: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const listed = await this.#bucket.list({ prefix, cursor });
+      for (const object of listed.objects) {
+        paths.push(object.key.slice(prefix.length));
+      }
+      if (!listed.truncated || !listed.cursor) break;
+      cursor = listed.cursor;
+    }
+    return paths;
   }
 }

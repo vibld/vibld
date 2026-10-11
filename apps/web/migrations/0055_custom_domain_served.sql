@@ -1,0 +1,11 @@
+-- When a request first reached a published site on its owner's own domain
+-- (docs/decisions.md D194, D203).
+--
+-- apps/preview forwards a custom hostname to apps/publish only once
+-- Cloudflare has activated it, so the first request apps/publish sees on
+-- it is the proof that the domain works. From then on the site's pages
+-- name the domain as their canonical address, including on the
+-- vibld-preview.dev address, which keeps serving. apps/web clears it when
+-- Cloudflare reports the domain is no longer active, and the next request
+-- on the domain sets it again.
+ALTER TABLE custom_domains ADD COLUMN served_at TEXT;

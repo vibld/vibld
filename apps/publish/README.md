@@ -180,6 +180,32 @@ revision of a site you still have. An owner saying the work should not be
 here is a different request, and leaving two older copies behind would be
 answering it wrongly.
 
+## Search engines and link previews
+
+D194, filled in at serve time by `worker/seo.ts`, so every site already
+published gets it without being built again:
+
+- An HTML page served with 200 (a page, or the single-page app's shell for
+  a client-side route) gains, at the end of its `<head>`, a canonical link
+  and the Open Graph and Twitter card tags it does not already have. The
+  preview text is the page's own `<title>` and meta description. A tag the
+  page already carries is never added twice, and a page with no `<head>`
+  is left as it is.
+- `/robots.txt` allows every crawler and names the sitemap.
+- `/sitemap.xml` lists the revision's HTML pages, without `404.html` and
+  `__spa-fallback.html`; a single-page app lists its home page.
+- A site that ships its own `robots.txt` or `sitemap.xml` has it served
+  instead, since the site's own files are always tried first.
+
+The canonical address is `<slug>.vibld-preview.dev` until the owner's own
+domain (D189) serves, and the domain from then on, on both addresses: the
+preview address keeps serving rather than redirecting. "Serves" is
+recorded by the first request that reaches the site on the domain
+(`custom_domains.served_at`, `0055_custom_domain_served.sql`), since
+apps/preview forwards it only once Cloudflare has activated the domain;
+apps/web clears it when Cloudflare reports the domain inactive, on the
+owner's domain settings or the nightly domain check.
+
 ## Why a separate package, not a folder in apps/web
 
 Same first reason apps/preview gives for the same question: a published
