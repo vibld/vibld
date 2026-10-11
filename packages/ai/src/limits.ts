@@ -187,9 +187,11 @@ export const MAX_CHOSEN_MOCKUP_SECTION_CHARS = 28_500;
  * rules plus the style's build prompt, stands in for a preset's and took
  * the longest to about 46,700 (orchardlough). Raised to 50,000 when motion
  * matched to the subject and the art direction rule took it to about 48,000;
- * sample content (D177) takes it to about 49,150.
+ * sample content (D177) takes it to about 49,150. Raised to 57,500 for the
+ * 3D scenes (D205): the rules for writing a scene on the stage and one
+ * example scene, up to about 6,200 characters, take it to about 56,900.
  */
-export const MAX_BUILD_FIXED_PROMPT_CHARS = 50_000;
+export const MAX_BUILD_FIXED_PROMPT_CHARS = 57_500;
 
 /**
  * The longest reference URL a request may carry (internal PR 189 review).

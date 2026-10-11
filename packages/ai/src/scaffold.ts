@@ -1,10 +1,17 @@
 import type { ProjectFile } from '@vibld/core';
 
-import { backdropFiles, isBackdropPath } from './backdrops.ts';
+import {
+  backdropFiles,
+  importSpecifiers,
+  isBackdropPath,
+  isVibldWritten,
+} from './backdrops.ts';
+import { isScenePath, sceneFiles } from './scenes.ts';
 import { STYLE_TOKENS_MARKER, STYLE_TOKENS_PATH } from './style-gallery.ts';
 import {
   OPTIONAL_PACKAGES,
   STACK_PACKAGES,
+  TYPES_PACKAGES,
   stackDependencies,
 } from './stack.ts';
 
@@ -55,13 +62,36 @@ export { STYLE_TOKENS_MARKER, STYLE_TOKENS_PATH };
 
 /**
  * Whether Vibld writes the file at `path` rather than the model: a scaffold
- * file, an animated background (`backdrops.ts`), or a gallery style's
- * tokens.
+ * file, an animated background (`backdrops.ts`), a 3D scene (`scenes.ts`),
+ * or a gallery style's tokens. A background or scene path in `owned` (see
+ * `ownedTemplatePaths`) is the project's own file, and the model's.
  */
-export function isTemplatedPath(path: string): boolean {
+export function isTemplatedPath(
+  path: string,
+  owned: ReadonlySet<string> = NONE_OWNED,
+): boolean {
   return (
-    isScaffoldPath(path) || isBackdropPath(path) || path === STYLE_TOKENS_PATH
+    isScaffoldPath(path) ||
+    ((isBackdropPath(path) || isScenePath(path)) && !owned.has(path)) ||
+    path === STYLE_TOKENS_PATH
   );
+}
+
+const NONE_OWNED: ReadonlySet<string> = new Set();
+
+/**
+ * The background and scene paths where `files` holds a file of the
+ * project's own: one without `VIBLD_MARK`, written before Vibld reserved
+ * the path. Vibld neither drops nor replaces those.
+ */
+export function ownedTemplatePaths(files: readonly ProjectFile[]): string[] {
+  return files
+    .filter(
+      (file) =>
+        (isBackdropPath(file.path) || isScenePath(file.path)) &&
+        !isVibldWritten(file.content),
+    )
+    .map((file) => file.path);
 }
 
 /** A package beyond the stack, as an outline declares it. */
@@ -640,19 +670,123 @@ export function versionFor(
 
 /**
  * The packages beyond the stack that `files` import, with the version each
- * is declared at. A Vibld package is never added (ADR-0002): a file that
- * imports one fails its build, which is the right place to find out.
+ * is declared at, and the types package of any that ships without types
+ * (`TYPES_PACKAGES`). A Vibld package is never added (ADR-0002): a file
+ * that imports one fails its build, which is the right place to find out.
  */
 export function extraDependencies(
   files: readonly ProjectFile[],
   declared: readonly ExtraDependency[] = [],
 ): Record<string, string> {
   const extra: Record<string, string> = {};
-  for (const name of importedPackages(files)) {
+  // An outline's three from before three/webgpu existed cannot run the
+  // 3D stage; the default release can.
+  if (importsThreeWebgpu(files)) {
+    declared = declared.filter(
+      (dependency) =>
+        !(
+          (dependency.name === 'three' ||
+            dependency.name === TYPES_PACKAGES.three) &&
+          predatesWebgpu(dependency.version)
+        ),
+    );
+  }
+  for (const name of withTypesPackages(importedPackages(files))) {
     if (STACK_NAMES.has(name) || name.startsWith('@vibld/')) continue;
-    extra[name] = versionFor(name, declared);
+    const runtime = TYPED_BY[name];
+    extra[name] =
+      runtime !== undefined && extra[runtime] !== undefined
+        ? typesVersionFor(name, extra[runtime], declared)
+        : versionFor(name, declared);
   }
   return extra;
+}
+
+/** The range package.json already declares `name` at, if any. */
+function declaredRange(
+  pkg: Record<string, unknown>,
+  name: string,
+): string | undefined {
+  for (const field of [
+    'dependencies',
+    'devDependencies',
+    'peerDependencies',
+    'optionalDependencies',
+  ]) {
+    const group = pkg[field];
+    if (typeof group !== 'object' || group === null) continue;
+    const range = (group as Record<string, unknown>)[name];
+    if (typeof range === 'string') return range;
+  }
+  return undefined;
+}
+
+/** The package each types package in `TYPES_PACKAGES` describes. */
+const TYPED_BY: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(TYPES_PACKAGES).map(([runtime, types]) => [types, runtime]),
+);
+
+/**
+ * The range for a types package, matched to the range its runtime package
+ * is declared at: three and @types/three are released at matching 0.x
+ * versions, so types from another release check APIs the installed one
+ * does not have. The outline's own simple range wins; the default runtime
+ * range keeps the default types range; any other simple range gets the
+ * same major and minor (`~0.180.0` beside `^0.180.0`).
+ */
+function typesVersionFor(
+  types: string,
+  runtimeRange: string,
+  declared: readonly ExtraDependency[],
+): string {
+  const given = declared.find((dependency) => dependency.name === types);
+  if (given && isSimpleRange(given.version.trim())) return given.version.trim();
+  const runtime = TYPED_BY[types]!;
+  const defaultRange = (OPTIONAL_PACKAGES as Record<string, string>)[runtime];
+  const release = sameRelease(runtimeRange);
+  if (runtimeRange.trim() === defaultRange || release === null) {
+    return versionFor(types, declared);
+  }
+  return release;
+}
+
+/** `~M.m.0` for a simple range at release M.m, or null for any other. */
+function sameRelease(range: string): string | null {
+  const release = /^[\^~]?(\d+)\.(\d+)(?:\.\d+)?$/.exec(range.trim());
+  return release === null ? null : `~${release[1]}.${release[2]}.0`;
+}
+
+/**
+ * Whether `files` import three.js's WebGPU entry point, as the 3D stage
+ * does (D205). Releases before r167 do not have it.
+ */
+function importsThreeWebgpu(files: readonly ProjectFile[]): boolean {
+  return files.some((file) =>
+    importSpecifiers(file.content).includes('three/webgpu'),
+  );
+}
+
+/**
+ * Whether a three.js range may install a release before r167. Only a
+ * simple range at r167 or later, latest and * are known not to; anything
+ * else (0.166.x, >=0.160.0 <0.167.0, a tag) is treated as old.
+ */
+function predatesWebgpu(range: string): boolean {
+  const trimmed = range.trim();
+  if (trimmed === 'latest' || trimmed === '*') return false;
+  const release = /^[\^~]?0\.(\d+)(?:\.\d+)?$/.exec(trimmed);
+  return release === null || Number(release[1]) < 167;
+}
+
+/** `names`, each followed by its types package where it needs one. */
+function withTypesPackages(names: readonly string[]): string[] {
+  const all = new Set<string>();
+  for (const name of names) {
+    all.add(name);
+    const types = TYPES_PACKAGES[name];
+    if (types) all.add(types);
+  }
+  return [...all];
 }
 
 // ---------------------------------------------------------------------------
@@ -758,16 +892,82 @@ export function withImportedDependencies(
     dependencies: {} as Record<string, string>,
     devDependencies: {} as Record<string, string>,
   };
-  for (const name of importedPackages(files)) {
+  for (const name of withTypesPackages(importedPackages(files))) {
     if (present.has(name) || name.startsWith('@vibld/')) continue;
     if (stack.devDependencies[name] !== undefined) {
       missing.devDependencies[name] = stack.devDependencies[name];
-    } else {
-      missing.dependencies[name] =
-        stack.dependencies[name] ?? versionFor(name, declared);
+      continue;
     }
+    const runtime = TYPED_BY[name];
+    const runtimeRange =
+      runtime === undefined
+        ? undefined
+        : (declaredRange(pkg, runtime) ?? missing.dependencies[runtime]);
+    // A project that already declares the types gets the runtime of the
+    // same release, not the default one.
+    const types = TYPES_PACKAGES[name];
+    const typesRange =
+      types === undefined ? undefined : declaredRange(pkg, types);
+    const typed = typesRange === undefined ? null : sameRelease(typesRange);
+    missing.dependencies[name] =
+      stack.dependencies[name] ??
+      (runtimeRange !== undefined
+        ? typesVersionFor(name, runtimeRange, declared)
+        : (typed ?? versionFor(name, declared)));
   }
   let changed = false;
+  // A project on a three from before three/webgpu existed cannot run the
+  // 3D stage it now imports: three and its types move to the default
+  // release, where the project declares them.
+  if (importsThreeWebgpu(files)) {
+    for (const field of [
+      'dependencies',
+      'devDependencies',
+      'peerDependencies',
+      'optionalDependencies',
+    ]) {
+      const group = pkg[field];
+      if (typeof group !== 'object' || group === null) continue;
+      const ranges = group as Record<string, unknown>;
+      for (const name of ['three', TYPES_PACKAGES.three!]) {
+        const range = ranges[name];
+        if (typeof range === 'string' && predatesWebgpu(range)) {
+          ranges[name] = versionFor(name);
+          changed = true;
+        }
+      }
+    }
+    for (const name of Object.keys(missing.dependencies)) {
+      if (
+        (name === 'three' || name === TYPES_PACKAGES.three) &&
+        predatesWebgpu(missing.dependencies[name]!)
+      ) {
+        missing.dependencies[name] = versionFor(name);
+      }
+    }
+    // Types of another release than the runtime check APIs it does not
+    // have: declared types follow the runtime's release.
+    const types = TYPES_PACKAGES.three!;
+    const runtime = declaredRange(pkg, 'three') ?? missing.dependencies.three;
+    const declaredTypes = declaredRange(pkg, types);
+    if (runtime !== undefined && declaredTypes !== undefined) {
+      const wanted = typesVersionFor(types, runtime, declared);
+      if (sameRelease(wanted) !== sameRelease(declaredTypes)) {
+        for (const field of [
+          'dependencies',
+          'devDependencies',
+          'peerDependencies',
+          'optionalDependencies',
+        ]) {
+          const group = pkg[field] as Record<string, unknown> | undefined;
+          if (typeof group?.[types] === 'string') {
+            group[types] = wanted;
+            changed = true;
+          }
+        }
+      }
+    }
+  }
   for (const field of ['dependencies', 'devDependencies'] as const) {
     const adding = missing[field];
     if (Object.keys(adding).length === 0) continue;
@@ -860,7 +1060,8 @@ function withStyleTokens(
  * `files` with Vibld's own files in place.
  *
  * A new project gets every templated file, replacing any file at those
- * paths, and the animated backgrounds its files import (`backdropFiles`).
+ * paths, and the animated backgrounds and 3D scenes its files import
+ * (`backdropFiles`, `sceneFiles`).
  * A follow-up keeps the ones its project already has, so an edit made to
  * them since is not undone. Two things change in place: package.json
  * declares a package a file now imports, and index.html takes a new title
@@ -889,14 +1090,21 @@ function scaffolded(
         !isTemplatedPath(file.path) ||
         (file.path === STYLE_TOKENS_PATH && input.styleTokens !== undefined),
     );
-    const withBackdrops = [...own, ...backdropFiles(own)];
+    const withBackdrops = [...own, ...backdropFiles(own), ...sceneFiles(own)];
     return [...withBackdrops, ...scaffoldFiles(input, withBackdrops)];
   }
   const present = new Set(files.map((file) => file.path));
+  const effects = [...backdropFiles(files), ...sceneFiles(files)].filter(
+    (file) => !present.has(file.path),
+  );
+  // A package.json written here (the project lost its own) reads the
+  // backgrounds and scenes being added, which import three themselves.
   const added = [
-    ...scaffoldFiles(input, files),
-    ...backdropFiles(files),
-  ].filter((file) => !present.has(file.path));
+    ...scaffoldFiles(input, [...files, ...effects]).filter(
+      (file) => !present.has(file.path),
+    ),
+    ...effects,
+  ];
   // Read over the files it adds as well: a utils.ts written into a project
   // that lacked one imports clsx, which that project may not declare.
   const all = [...files, ...added];

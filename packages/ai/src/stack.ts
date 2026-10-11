@@ -88,11 +88,23 @@ export const STACK_PACKAGES: readonly StackPackage[] = [
 /**
  * Packages a project adds only for a component that needs one, named here so
  * the version is in one place too: shadcn/ui's Command (and so its combobox)
- * is built on cmdk rather than on Radix.
+ * is built on cmdk rather than on Radix, and the 3D scenes (`scenes.ts`,
+ * D205) on three, whose types are a package of their own.
  */
 export const OPTIONAL_PACKAGES = {
   cmdk: '^1.1.1',
+  three: '^0.186.0',
+  '@types/three': '^0.186.0',
 } as const;
+
+/**
+ * The types package a project needs beside a package that ships without
+ * types: `build` type-checks first (`PROJECT_SCRIPTS`), so a file that
+ * imports three without @types/three does not build.
+ */
+export const TYPES_PACKAGES: Readonly<Record<string, string>> = {
+  three: '@types/three',
+};
 
 /** The two blocks of a package.json, from `STACK_PACKAGES`. */
 export function stackDependencies(): {

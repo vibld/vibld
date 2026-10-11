@@ -558,6 +558,34 @@ paying accounts until midnight UTC.
   bots").** Crawlers and link unfurlers get HTML rendered by Cloudflare
   Browser Rendering; people get the app as built. Built after the owner SEO
   fields, one pull request at a time.
+- **D205. 3D scenes the model designs, on a stage Vibld writes (Chris,
+  2026-10-11: "Let's add them"; then "Go with whatever is the most
+  versatile and has the most variation. What I don't want is a small
+  template library of repeated designs.").** The model writes every
+  three.js scene itself, for the site it is building, on one templated
+  file, `src/components/scene/stage.tsx` (`packages/ai/src/scenes.ts`,
+  on the terms of the animated backgrounds, D75, D77). The stage loads
+  three.js by dynamic import after first paint, draws with WebGPU and
+  falls back to WebGL 2 (also when WebGPU throws on the first frame),
+  shows a CSS glow until it draws, caps the pixel ratio at 2, pauses off
+  screen, holds still under reduced motion, resolves the page's colors
+  inside its box and rebuilds when the theme changes them, and disposes
+  the scene. It exports `ThreeScene`, the `Stage`, `SceneHandle` and
+  `SceneProps` types, and helpers (`seeded`, `spherePoints`, `noise3`,
+  `mendSeams`). The model never plans, writes or edits it; it, three and
+  @types/three are added when a file imports it. Four scenes (Globe,
+  FloatingShapes, DotWave, LiquidOrb) are tested examples, not
+  components: the guidance shows one, the one a request names or else
+  one picked by the request's text, "to learn the API from, not to copy",
+  with rules that keep a freehand scene compiling under WebGPU (built-in
+  materials only, no GLSL, no transmission, no URL assets). Offered only
+  when a request asks for 3D or names a subject. A file that imports
+  three.js as a value is flagged by the canvas checks. A file at a
+  reserved background or stage path counts as Vibld's only when it
+  carries "Written by Vibld" (Chris, 2026-10-11, "Add a content
+  marker"); a project's own file there stays the model's. The guidance
+  raised the build's fixed-prompt reservation to 57,500 characters; a
+  Free account on the default model still needs $0.88 set aside.
 
 ### Checkpoint history, 2026-10-03
 

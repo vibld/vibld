@@ -278,23 +278,22 @@ if (ctx === null) throw new Error('no webgl');`),
     );
   });
 
-  it('leaves a 2D canvas drawn once alone, and never reads a templated file', () => {
+  it("leaves a 2D canvas drawn once alone, and never reads Vibld's templated file", () => {
     assert.deepEqual(
       canvasFindings(
         loop("const ctx = el.getContext('2d'); ctx.fillRect(0, 0, 1, 1);"),
       ),
       [],
     );
+    const loose =
+      'requestAnimationFrame(f); el.getContext("2d"); devicePixelRatio;';
+    const path = backdropPath(byId('aurora-mesh'));
     assert.deepEqual(
-      canvasFindings([
-        {
-          path: backdropPath(byId('aurora-mesh')),
-          content:
-            'requestAnimationFrame(f); el.getContext("2d"); devicePixelRatio;',
-        },
-      ]),
+      canvasFindings([{ path, content: '// Written by Vibld\n' + loose }]),
       [],
     );
+    // The project's own file at that path (no mark) is read like any other.
+    assert.ok(canvasFindings([{ path, content: loose }]).length > 0);
   });
 
   it('are warnings in checkDesign, never errors', () => {

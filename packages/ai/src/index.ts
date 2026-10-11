@@ -252,9 +252,25 @@ export {
   backdropPath,
   importedBackdrops,
   isBackdropPath,
+  isVibldWritten,
+  VIBLD_MARK,
   selectBackdrops,
 } from './backdrops.ts';
 export type { BackdropId, BackdropRecipe } from './backdrops.ts';
+export {
+  SCENE_DIR,
+  SCENE_EXAMPLES,
+  STAGE_IMPORT,
+  STAGE_PATH,
+  STAGE_SOURCE,
+  importsStage,
+  isScenePath,
+  sceneExample,
+  sceneFiles,
+  sceneGuidance,
+  selectScenes,
+} from './scenes.ts';
+export type { SceneExample } from './scenes.ts';
 export {
   DIAGRAM_CRAFT,
   DIAGRAM_TYPES,
@@ -462,6 +478,7 @@ export {
   importedPackages,
   isScaffoldPath,
   isTemplatedPath,
+  ownedTemplatePaths,
   STYLE_TOKENS_MARKER,
   STYLE_TOKENS_PATH,
   withStyleTokensImport,

@@ -30,6 +30,7 @@ import { styleDirection } from './style-presets.ts';
 import type { StylePresetId } from './style-presets.ts';
 import { patternGuidance } from './patterns.ts';
 import { backdropGuidance } from './backdrops.ts';
+import { sceneGuidance } from './scenes.ts';
 import { motionGuidance } from './motion.ts';
 import { surfaceGuidance } from './surfaces.ts';
 import { stockPhotoSection } from './stock-photos.ts';
@@ -872,6 +873,11 @@ Preserve anything the request does not ask you to change.`,
   // (D75, D77). Not suppressed by a preset: the request asked for it.
   const backdrops = backdropGuidance(request.prompt);
   if (backdrops) parts.push(backdrops);
+
+  // The 3D scenes are templated components on the same terms (D205),
+  // offered only when the request asks for 3D or names one.
+  const scenes = sceneGuidance(request.prompt);
+  if (scenes) parts.push(scenes);
 
   // A diagram is its own deliverable rather than a treatment of the page, so
   // it is not suppressed by a preset either. The craft rules are what stop

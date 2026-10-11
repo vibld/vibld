@@ -234,7 +234,7 @@ describe('what a build reserves for its own prompt text', () => {
     'mesh grain glass glassmorphism noise blob diagram flowchart architecture',
     'sequence timeline chart select combobox dialog popover security fintech',
     'health wellness education nonprofit game music photography travel',
-    'real estate legal crypto ai video hero cinematic editorial',
+    'real estate legal crypto ai video hero cinematic editorial 3d',
   ].join(' ');
 
   // A gallery style's guidance (D146) stands in for a preset's and is

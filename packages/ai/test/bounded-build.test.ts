@@ -524,6 +524,24 @@ describe('completing an outline', () => {
     assert.ok(paths.includes('src/App.tsx'));
   });
 
+  it("plans a background or scene path that holds the project's own file", () => {
+    const manifest = [
+      entry('src/components/scene/stage.tsx', 'small'),
+      entry('src/components/backdrop/aurora-mesh.tsx', 'small'),
+    ];
+    const plan = normaliseOutline(
+      { ...outline, manifest },
+      [
+        'src/components/scene/stage.tsx',
+        'src/components/backdrop/aurora-mesh.tsx',
+      ],
+      { owned: ['src/components/scene/stage.tsx'] },
+    );
+    const paths = plan.manifest.map((item) => item.path);
+    assert.ok(paths.includes('src/components/scene/stage.tsx'));
+    assert.ok(!paths.includes('src/components/backdrop/aurora-mesh.tsx'));
+  });
+
   it('takes the title, description and dependencies from the outline, or falls back', () => {
     const given = normaliseOutline(
       {
@@ -1239,6 +1257,43 @@ describe('a follow-up, as a patch', () => {
     )!;
     assert.ok(appStep.prompt.includes('return <Home />'));
     assert.ok(!appStep.prompt.includes('export const Blog'));
+  });
+
+  it("edits the project's own file at the 3D stage path, never Vibld's at a background path", async () => {
+    const aurora = BACKDROPS.find((recipe) => recipe.id === 'aurora-mesh')!;
+    const ownGlobe = 'export const Globe = () => <div>my globe</div>;';
+    const withOwn = {
+      ...base,
+      files: [
+        ...base.files,
+        { path: 'src/components/scene/stage.tsx', content: ownGlobe },
+        { path: backdropPath(aurora), content: aurora.source },
+      ],
+    };
+    const client = createScriptedBuildClient({
+      summary: 'Recolored the globe.',
+      files: [
+        {
+          path: 'src/components/scene/stage.tsx',
+          content: 'export const Globe = () => <div>blue globe</div>;',
+          size: 'small',
+        },
+        {
+          path: backdropPath(aurora),
+          content: 'export const AuroraMesh = () => null;',
+          size: 'small',
+        },
+      ],
+    });
+    const plan = await new BoundedPlanProvider(client, {
+      model: MODEL,
+    }).generate({ prompt: 'Make the globe blue', base: withOwn });
+    const byPath = new Map(plan.files.map((item) => [item.path, item.content]));
+    assert.equal(
+      byPath.get('src/components/scene/stage.tsx'),
+      'export const Globe = () => <div>blue globe</div>;',
+    );
+    assert.equal(byPath.get(backdropPath(aurora)), aurora.source);
   });
 
   it('declares a package the change imports, and otherwise keeps package.json as it was', async () => {

@@ -66,6 +66,7 @@ import {
   fixedScaffoldFiles,
   isScaffoldPath,
   isTemplatedPath,
+  ownedTemplatePaths,
   isPackageName,
   scaffoldText,
   withScaffold,
@@ -586,9 +587,10 @@ export interface NormalisedOutline {
 export function normaliseOutline(
   outline: BuildOutline,
   basePaths: readonly string[],
-  options: { keepSpec?: boolean } = {},
+  options: { keepSpec?: boolean; owned?: readonly string[] } = {},
 ): NormalisedOutline {
   const existing = new Set(basePaths);
+  const owned = new Set(options.owned);
   const manifest: ManifestEntry[] = [];
   const planned = new Set<string>();
   for (const entry of outline.manifest) {
@@ -596,7 +598,7 @@ export function normaliseOutline(
     if (entry.path === DESIGN_MD_PATH && (outline.spec || options.keepSpec)) {
       continue;
     }
-    if (isTemplatedPath(entry.path)) continue;
+    if (isTemplatedPath(entry.path, owned)) continue;
     planned.add(entry.path);
     manifest.push({
       ...entry,
@@ -719,6 +721,12 @@ export interface OutlineValue {
   outline: BuildOutline;
   /** The paths of the project the outline was planned against. */
   basePaths: string[];
+  /**
+   * Those of `basePaths` at a background or scene path that hold the
+   * project's own file, not Vibld's (`ownedTemplatePaths`). Absent when
+   * there are none, and on outlines recorded before it existed.
+   */
+  ownedPaths?: string[];
   /**
    * The outline was asked for no spec, and `outline.spec` is the one the
    * project's DESIGN.md holds (`keepSpec`). Absent on every other outline.
@@ -925,7 +933,9 @@ ${keepSpec ? KEPT_SPEC_PATCH_INSTRUCTION : PATCH_INSTRUCTION}`);
       limits,
       (outline) => {
         const basePaths = (base?.files ?? []).map((file) => file.path);
-        if (!keepSpec) return { outline, basePaths };
+        const owned = ownedTemplatePaths(base?.files ?? []);
+        const ownedPaths = owned.length > 0 ? { ownedPaths: owned } : {};
+        if (!keepSpec) return { outline, basePaths, ...ownedPaths };
         // Whatever spec came back (JSON mode enforces no schema) is not
         // the one kept, and a repair renames nothing: a title or
         // description it wrote anyway is dropped too.
@@ -938,6 +948,7 @@ ${keepSpec ? KEPT_SPEC_PATCH_INSTRUCTION : PATCH_INSTRUCTION}`);
         return {
           outline: kept ? { ...rest, spec: kept } : rest,
           basePaths,
+          ...ownedPaths,
           keepSpec: true as const,
         };
       },
@@ -960,6 +971,7 @@ ${keepSpec ? KEPT_SPEC_PATCH_INSTRUCTION : PATCH_INSTRUCTION}`);
     }
     const { prefix, prompt } = groupPrompt(context, input, base);
     const wanted = new Set(input.entries.map((entry) => entry.path));
+    const owned = new Set(ownedTemplatePaths(base?.files ?? []));
     // A file step's own effort (D70), where one is set. An effort the call
     // was given still comes first, as it does for every call, and with
     // neither the limits pass through untouched, so `#call` falls back to
@@ -980,10 +992,11 @@ ${keepSpec ? KEPT_SPEC_PATCH_INSTRUCTION : PATCH_INSTRUCTION}`);
         // model found it needed. A file planned for another group is that
         // group's to write, DESIGN.md is never the model's when there is a
         // spec to render it from, and a templated file is never the
-        // model's at all (D71), nor is an animated background (D75).
+        // model's at all (D71), nor is an animated background (D75) or a
+        // 3D scene, unless the project's own file holds that path.
         reply.files.filter(
           (file) =>
-            !isTemplatedPath(file.path) &&
+            !isTemplatedPath(file.path, owned) &&
             (wanted.has(file.path) ||
               (!input.plan.manifest.some((entry) => entry.path === file.path) &&
                 !input.written.some((done) => done.path === file.path) &&
@@ -1730,7 +1743,10 @@ export async function runBoundedBuild(
   const plan = normaliseOutline(
     outlined.value.outline,
     outlined.value.basePaths,
-    { keepSpec: outlined.value.keepSpec === true },
+    {
+      keepSpec: outlined.value.keepSpec === true,
+      owned: outlined.value.ownedPaths,
+    },
   );
   const fileCount = plan.kept.length + plan.manifest.length;
   if (fileCount > MAX_PLANNED_FILES) {

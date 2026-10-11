@@ -1,4 +1,5 @@
-import { isBackdropPath } from './backdrops.ts';
+import { isBackdropPath, isVibldWritten } from './backdrops.ts';
+import { isScenePath } from './scenes.ts';
 import { blockTracker, compareLayers, oklchToRgb } from './contrast.ts';
 import { DESIGN_MD_PATH, readDesignSpec } from './design-spec.ts';
 import type { DesignSpec, MotionEntry } from './design-spec.ts';
@@ -4134,7 +4135,9 @@ function scriptedMotionAnswered(
  * (D75): the four things the animated backgrounds in `backdrops.ts` are
  * written to settle, and that a canvas or WebGL loop written from memory
  * tends to leave out. Those templated files are skipped: Vibld wrote them,
- * and a repair cannot change them.
+ * and a repair cannot change them. A project's own file at one of their
+ * paths (no `VIBLD_MARK`) is read like any other. A file that imports
+ * three.js as a value, not through the 3D stage (D205), is flagged too.
  *
  * Warnings, never errors. Each is a reading of one file, and a loop can be
  * paused or capped from another; a page with a heavy background still
@@ -4145,10 +4148,27 @@ export function canvasFindings(
 ): DesignFinding[] {
   const findings: DesignFinding[] = [];
   for (const file of files) {
-    if (!/\.[cm]?[jt]sx?$/.test(file.path) || isBackdropPath(file.path)) {
+    if (
+      !/\.[cm]?[jt]sx?$/.test(file.path) ||
+      ((isBackdropPath(file.path) || isScenePath(file.path)) &&
+        isVibldWritten(file.content))
+    ) {
       continue;
     }
     const code = file.content;
+    // A 3D scene builds on the stage (D205), which loads three.js after
+    // first paint and hands it to the scene as THREE.
+    if (
+      /^\s*import\s+(?!type\b)[^;]*?\bfrom\s*['"]three(?:\/[^'"]*)?['"]/m.test(
+        code,
+      )
+    ) {
+      findings.push({
+        severity: 'warning',
+        check: 'canvas',
+        detail: `${file.path} imports three.js as a value, which puts all of it in the first paint. Build the scene on ThreeScene from @/components/scene/stage, use the THREE it passes to build, and import three/webgpu with import type only.`,
+      });
+    }
     const draws = /\.getContext\s*\(/.test(code);
     const loops = /\brequestAnimationFrame\s*\(/.test(code);
     if (/\bdevicePixelRatio\b/.test(code)) {

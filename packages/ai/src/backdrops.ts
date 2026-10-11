@@ -977,7 +977,21 @@ export function isBackdropPath(path: string): boolean {
   return BACKDROP_PATHS.has(path);
 }
 
-function mentions(text: string, phrase: string): boolean {
+/**
+ * The words every backdrop and 3D scene source carries in its doc comment.
+ * A file at one of their paths is Vibld's only when it carries them; one
+ * without them is the project's own (a file written before the path was
+ * reserved), and stays the model's to edit.
+ */
+export const VIBLD_MARK = 'Written by Vibld';
+
+/** Whether `content` carries `VIBLD_MARK`. */
+export function isVibldWritten(content: string): boolean {
+  return content.includes(VIBLD_MARK);
+}
+
+/** Whether `text` names `phrase` as whole words (also read by `scenes.ts`). */
+export function mentions(text: string, phrase: string): boolean {
   const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp('(?:^|[^a-z0-9])' + escaped + '(?![a-z0-9])', 'i').test(
     text,
@@ -1047,7 +1061,7 @@ export function backdropGuidance(promptText: string): string | null {
 }
 
 /** Module specifiers a file imports, static and dynamic. */
-function specifiers(content: string): string[] {
+export function importSpecifiers(content: string): string[] {
   const found: string[] = [];
   for (const match of content.matchAll(
     /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)['"]([^'"]+)['"]/g,
@@ -1055,6 +1069,24 @@ function specifiers(content: string): string[] {
     found.push(match[1]!);
   }
   return found;
+}
+
+/**
+ * Where an import in the file at `from` points, as a project path when it
+ * can be told: `@/x` is `src/x`, and `./x` or `../x` is resolved against
+ * the importing file's folder. Anything else is returned as written.
+ */
+export function importTarget(from: string, specifier: string): string {
+  if (specifier.startsWith('@/')) return 'src/' + specifier.slice(2);
+  if (!specifier.startsWith('./') && !specifier.startsWith('../')) {
+    return specifier;
+  }
+  const parts = from.split('/').slice(0, -1);
+  for (const part of specifier.split('/')) {
+    if (part === '..') parts.pop();
+    else if (part !== '.' && part !== '') parts.push(part);
+  }
+  return parts.join('/');
 }
 
 /** The recipes the project's own files import, by alias or relative path. */
@@ -1065,9 +1097,9 @@ export function importedBackdrops(
   for (const file of files) {
     if (isBackdropPath(file.path)) continue;
     if (!/\.(tsx|ts|jsx|js)$/.test(file.path)) continue;
-    for (const specifier of specifiers(file.content)) {
+    for (const specifier of importSpecifiers(file.content)) {
       const match = /(?:^|\/)components\/backdrop\/([a-z-]+?)(?:\.tsx?)?$/.exec(
-        specifier,
+        importTarget(file.path, specifier),
       );
       if (match && BY_ID.has(match[1] as BackdropId)) {
         ids.add(match[1] as BackdropId);
