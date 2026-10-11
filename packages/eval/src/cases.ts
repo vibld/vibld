@@ -304,6 +304,94 @@ export function findCase(id: string): EvalCase | undefined {
 }
 
 /**
+ * The stub's use of every shadcn/ui component a build has written for it
+ * (D206), so CI compiles each template under the project's own tsconfig.
+ */
+const CONTROLS = `import { useState } from 'react';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+
+export function Controls() {
+  const [open, setOpen] = useState(false);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Controls</CardTitle>
+        <Badge variant="secondary">Stub</Badge>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <Label htmlFor="stub-email">Email</Label>
+        <Input id="stub-email" type="email" />
+        <Label htmlFor="stub-note">Note</Label>
+        <Textarea id="stub-note" />
+        <Select name="stub-size">
+          <SelectTrigger aria-label="Size"><SelectValue placeholder="Size" /></SelectTrigger>
+          <SelectContent><SelectItem value="m">Medium</SelectItem></SelectContent>
+        </Select>
+        <Separator />
+        <Tabs defaultValue="a">
+          <TabsList><TabsTrigger value="a">A</TabsTrigger></TabsList>
+          <TabsContent value="a">A</TabsContent>
+        </Tabs>
+        <Accordion type="single" collapsible>
+          <AccordionItem value="q">
+            <AccordionTrigger>Question</AccordionTrigger>
+            <AccordionContent>Answer</AccordionContent>
+          </AccordionItem>
+        </Accordion>
+        <Dialog>
+          <DialogTrigger asChild><Button variant="outline">Dialog</Button></DialogTrigger>
+          <DialogContent>
+            <DialogTitle>Dialog</DialogTitle>
+            <DialogDescription>A dialog.</DialogDescription>
+          </DialogContent>
+        </Dialog>
+        <Sheet>
+          <SheetTrigger asChild><Button variant="ghost">Menu</Button></SheetTrigger>
+          <SheetContent side="left"><SheetTitle>Menu</SheetTitle></SheetContent>
+        </Sheet>
+        <Popover>
+          <PopoverTrigger asChild><Button variant="secondary">Popover</Button></PopoverTrigger>
+          <PopoverContent>Details</PopoverContent>
+        </Popover>
+        <Tooltip>
+          <TooltipTrigger asChild><Button size="sm">Tooltip</Button></TooltipTrigger>
+          <TooltipContent>Help</TooltipContent>
+        </Tooltip>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild><Button variant="outline">Menu</Button></DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem onSelect={() => setOpen(true)}>Search</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <CommandDialog open={open} onOpenChange={setOpen}>
+          <CommandInput placeholder="Search" />
+          <CommandList>
+            <CommandEmpty>No results.</CommandEmpty>
+            <CommandGroup heading="Pages"><CommandItem>Home</CommandItem></CommandGroup>
+          </CommandList>
+        </CommandDialog>
+      </CardContent>
+    </Card>
+  );
+}
+`;
+
+/**
  * A deterministic stand-in for a model, used so CI can exercise the harness
  * without credentials or spend.
  *
@@ -367,6 +455,7 @@ import { AuroraMesh } from '@/components/backdrop/aurora-mesh';
 import { FlowLines } from '@/components/backdrop/flow-lines';
 import { GrainBlobs } from '@/components/backdrop/grain-blobs';
 import { ParticleField } from '@/components/backdrop/particle-field';
+import { Controls } from '@/components/Controls';
 import { cn } from '@/lib/utils';
 
 export default function App() {
@@ -388,11 +477,17 @@ export default function App() {
         <div className="relative isolate h-40 overflow-hidden">
           <FlowLines speed={0} />
         </div>
+        <Controls />
       </motion.main>
     </MotionConfig>
   );
 }
 `,
+    },
+    {
+      path: 'src/components/Controls.tsx',
+      // Every templated shadcn/ui component (D206), for the same reason.
+      content: CONTROLS,
     },
   ];
   const files = withScaffold(

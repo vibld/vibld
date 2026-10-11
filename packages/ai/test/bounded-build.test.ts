@@ -68,6 +68,7 @@ import {
   isScaffoldPath,
   scaffoldFiles,
 } from '../src/scaffold.ts';
+import { UI_COMPONENTS } from '../src/ui-components.ts';
 import { SPEC } from './fixtures/design-spec.ts';
 
 const MODEL = 'claude-opus-5-5';
@@ -108,17 +109,20 @@ function requiredFiles(): ScriptedFile[] {
  * ceiling.
  */
 function companySite(): ScriptedBuild {
+  // Ten shadcn/ui components, as it planned. The ones it had (button, card,
+  // sheet, dialog and so on) are written by the build since D206, so the
+  // ten here are ones a model still writes.
   const ui = [
-    'button',
-    'card',
-    'sheet',
-    'accordion',
-    'tabs',
-    'dialog',
-    'badge',
-    'input',
-    'textarea',
-    'tooltip',
+    'checkbox',
+    'switch',
+    'slider',
+    'avatar',
+    'radio-group',
+    'scroll-area',
+    'progress',
+    'toggle',
+    'hover-card',
+    'navigation-menu',
   ].map((name) =>
     file(`src/components/ui/${name}.tsx`, 10_000, 'medium', [
       'src/lib/utils.ts',
@@ -126,7 +130,7 @@ function companySite(): ScriptedBuild {
   );
   const shared = ['SiteLayout', 'Nav', 'Footer', 'GlassCard'].map((name) =>
     file(`src/components/${name}.tsx`, 10_000, 'medium', [
-      'src/components/ui/button.tsx',
+      'src/components/ui/avatar.tsx',
       'src/lib/motion.ts',
     ]),
   );
@@ -679,7 +683,7 @@ describe('a large request, as it failed on 2026-09-29', () => {
       requestedPaths(request.prompt).includes('src/pages/HomePage.tsx'),
     )!;
     assert.ok(pageStep.prompt.includes('// src/components/SiteLayout.tsx'));
-    assert.ok(!pageStep.prompt.includes('// src/components/ui/tabs.tsx'));
+    assert.ok(!pageStep.prompt.includes('// src/components/ui/switch.tsx'));
   });
 
   it('names the dependencies too large to send rather than sending them', async () => {
@@ -1064,8 +1068,9 @@ describe("Vibld's own files (D71)", () => {
         // What an outline written before D71 still plans: ignored.
         ...requiredFiles(),
         {
-          path: 'src/components/ui/command.tsx',
-          content: "import { Command } from 'cmdk';\nexport { Command };\n",
+          path: 'src/components/SearchBox.tsx',
+          content:
+            "import { Command } from 'cmdk';\nimport { Button } from '@/components/ui/button';\nexport { Command, Button };\n",
           size: 'small',
           dependsOn: ['src/lib/utils.ts'],
         },
@@ -1100,12 +1105,17 @@ describe("Vibld's own files (D71)", () => {
     );
     assert.match(byPath.get('README.md')!, /^# Crumb & Co\.\n/);
     assert.match(byPath.get('README.md')!, /src\/components\/ui\//);
+    // The component a file imports is written from its template (D206).
+    assert.equal(
+      byPath.get('src/components/ui/button.tsx'),
+      UI_COMPONENTS.find((item) => item.name === 'button')!.source,
+    );
   });
 
   it('shows a step the templated file a file it writes depends on', async () => {
     const { client } = await build(withCombobox());
     const step = client.requests.find((request) =>
-      requestedPaths(request.prompt).includes('src/components/ui/command.tsx'),
+      requestedPaths(request.prompt).includes('src/components/SearchBox.tsx'),
     )!;
     assert.ok(step.prompt.includes('export function cn('));
   });
@@ -1301,7 +1311,7 @@ describe('a follow-up, as a patch', () => {
       summary: 'Added a search box.',
       files: [
         {
-          path: 'src/components/ui/command.tsx',
+          path: 'src/components/SearchBox.tsx',
           content: "import { Command } from 'cmdk';\nexport { Command };\n",
           size: 'small',
         },
@@ -1993,11 +2003,11 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         summary: 'A site.',
         spec: SPEC,
         manifest: [
-          entry('src/components/ui/button.tsx'),
-          entry('src/components/ui/card.tsx'),
+          entry('src/components/ui/icon-button.tsx'),
+          entry('src/components/ui/stat-card.tsx'),
           // Declares only the card, as the outline that failed did.
           entry('src/components/SiteHeader.tsx', 'small', [
-            'src/components/ui/card.tsx',
+            'src/components/ui/stat-card.tsx',
           ]),
         ],
         delete: [],
@@ -2007,8 +2017,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const card =
       'function Card({ className, ...props }: React.ComponentProps<"div">) { return <div /> }\nexport { Card }\n';
     const written = [
-      { path: 'src/components/ui/button.tsx', content: plainButton },
-      { path: 'src/components/ui/card.tsx', content: card },
+      { path: 'src/components/ui/icon-button.tsx', content: plainButton },
+      { path: 'src/components/ui/stat-card.tsx', content: card },
     ];
     const header = plan.manifest.find(
       (item) => item.path === 'src/components/SiteHeader.tsx',
@@ -2021,14 +2031,14 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     // The button's API, which says it has no asChild; not its source.
     assert.match(
       prompt,
-      /src\/components\/ui\/button\.tsx: exports buttonVariants, ButtonProps, Button/,
+      /src\/components\/ui\/icon-button\.tsx: exports buttonVariants, ButtonProps, Button/,
     );
     assert.ok(!prompt.includes('React.forwardRef'));
     // The card is shown in full, so not listed a second time.
     assert.ok(prompt.includes(JSON.stringify(card).slice(1, 40)));
-    assert.doesNotMatch(prompt, /src\/components\/ui\/card\.tsx: exports/);
+    assert.doesNotMatch(prompt, /src\/components\/ui\/stat-card\.tsx: exports/);
     // Outside the cached prefix, which every step shares.
-    assert.ok(!prefix.includes('ui/button.tsx: exports'));
+    assert.ok(!prefix.includes('ui/icon-button.tsx: exports'));
 
     // A step writing the button itself is not told its old API.
     const buttonStep = groupPrompt(
@@ -2038,13 +2048,41 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         plan,
         entries: [
           plan.manifest.find(
-            (item) => item.path === 'src/components/ui/button.tsx',
+            (item) => item.path === 'src/components/ui/icon-button.tsx',
           )!,
         ],
         written,
       },
       undefined,
     );
-    assert.doesNotMatch(buttonStep.prompt, /ui\/button\.tsx: exports/);
+    assert.doesNotMatch(buttonStep.prompt, /ui\/icon-button\.tsx: exports/);
+  });
+
+  it('leaves out the components Vibld wrote, which the system prompt describes (D206)', () => {
+    const button = UI_COMPONENTS.find((item) => item.name === 'button')!;
+    const plan = normaliseOutline(
+      {
+        summary: 'A change.',
+        spec: SPEC,
+        manifest: [entry('src/components/SiteHeader.tsx')],
+        delete: [],
+      },
+      ['src/components/ui/button.tsx', 'src/components/ui/card.tsx'],
+    );
+    const header = plan.manifest[0]!;
+    const { prompt } = groupPrompt(
+      'context',
+      { prompt: 'p', plan, entries: [header], written: [] },
+      {
+        revision: 'r1',
+        files: [
+          { path: 'src/components/ui/button.tsx', content: button.source },
+          // The project's own, from before D206: still listed.
+          { path: 'src/components/ui/card.tsx', content: plainButton },
+        ],
+      },
+    );
+    assert.doesNotMatch(prompt, /ui\/button\.tsx: exports/);
+    assert.match(prompt, /ui\/card\.tsx: exports/);
   });
 });

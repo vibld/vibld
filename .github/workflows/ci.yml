@@ -259,8 +259,11 @@ jobs:
           echo "the Workers' ports are closed to $ip"
           # A client cannot pick its own address: wrong passwords, each with a
           # different forged CF-Connecting-IP, still run into the limit.
+          # IP_BURST allows 20 a minute in fixed windows, so a run that
+          # straddles a minute boundary can pass 40 before one is refused:
+          # 45 attempts are refused in either case.
           limited=no
-          for n in $(seq 1 30); do
+          for n in $(seq 1 45); do
             status=$(curl --silent --insecure $resolve --output /dev/null --write-out '%{http_code}' \
               --request POST https://build.vibld.test/api/owner/session \
               --header 'content-type: application/json' --header 'origin: https://build.vibld.test' \

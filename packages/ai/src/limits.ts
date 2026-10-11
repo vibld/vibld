@@ -190,6 +190,8 @@ export const MAX_CHOSEN_MOCKUP_SECTION_CHARS = 28_500;
  * sample content (D177) takes it to about 49,150. Raised to 57,500 for the
  * 3D scenes (D205): the rules for writing a scene on the stage and one
  * example scene, up to about 6,200 characters, take it to about 56,900.
+ * The templated shadcn/ui components (D206) took it back to about 56,100:
+ * their API is new text, but the instructions for writing them are gone.
  */
 export const MAX_BUILD_FIXED_PROMPT_CHARS = 57_500;
 

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { DesignSpecReadSchema, DesignSpecSchema } from './design-spec.ts';
 import { SCAFFOLD_SECTION } from './scaffold.ts';
 import { stackVersionLine } from './stack.ts';
+import { UI_API_SECTION, UI_FILES_SECTION } from './ui-components.ts';
 
 /**
  * Mirrors `GenerationPlan` from @vibld/core. Kept as its own schema rather
@@ -189,10 +190,29 @@ components, lucide-react icons and Motion for animation.
 ${stackVersionLine()}
   Import only these, and any package the plan's dependencies name.`;
 
-const STACK_RULES = `- Tailwind v4 is configured in CSS, through the @tailwindcss/vite plugin.
+/** STACK's rule for Tailwind, which every build follows. */
+const TAILWIND_RULE = `- Tailwind v4 is configured in CSS, through the @tailwindcss/vite plugin.
   There is no tailwind.config.js and no postcss.config.js. src/styles.css
   opens with any font @import url(...), then @import "tailwindcss"; then
-  @import "tw-animate-css";, then @custom-variant dark (&:is(.dark *));.
+  @import "tw-animate-css";, then @custom-variant dark (&:is(.dark *));.`;
+
+/** STACK's rules for icons and animation, which every build follows. */
+const ICON_AND_MOTION_RULES = `- Icons are lucide-react components imported by name (\`import { ArrowRight }
+  from 'lucide-react'\`), sized with size-4, size-5 and so on. Never an emoji,
+  and never a hand-drawn SVG for an icon Lucide has.
+- lucide-react ships no brand logos: there is no Github, Twitter, Linkedin,
+  Instagram, Facebook, Youtube, Slack or Figma export, and importing one
+  fails the build. For a brand, draw its logo as an inline SVG with an
+  aria-label, or use a generic Lucide icon (Globe, Mail, AtSign, Rss) beside
+  the brand's name.
+- Animation is Motion: \`import { motion } from 'motion/react'\` (the package
+  is motion, not framer-motion).`;
+
+/**
+ * STACK's rules for the single-response build, whose model writes every
+ * shadcn/ui component it uses: nothing is templated there.
+ */
+const PLAN_STACK_RULES = `${TAILWIND_RULE}
 - shadcn/ui components are source files you write into src/components/ui/,
   as shadcn writes them, on Radix: \`import { Dialog as DialogPrimitive } from
   'radix-ui'\`. Merge classes with cn() from src/lib/utils.ts (clsx plus
@@ -210,16 +230,21 @@ const STACK_RULES = `- Tailwind v4 is configured in CSS, through the @tailwindcs
   and the correct ARIA roles to work at all, and a hand-rolled version is
   broken for keyboard and screen-reader users in ways nobody testing with a
   mouse will notice.
-- Icons are lucide-react components imported by name (\`import { ArrowRight }
-  from 'lucide-react'\`), sized with size-4, size-5 and so on. Never an emoji,
-  and never a hand-drawn SVG for an icon Lucide has.
-- lucide-react ships no brand logos: there is no Github, Twitter, Linkedin,
-  Instagram, Facebook, Youtube, Slack or Figma export, and importing one
-  fails the build. For a brand, draw its logo as an inline SVG with an
-  aria-label, or use a generic Lucide icon (Globe, Mail, AtSign, Rss) beside
-  the brand's name.
-- Animation is Motion: \`import { motion } from 'motion/react'\` (the package
-  is motion, not framer-motion).`;
+${ICON_AND_MOTION_RULES}`;
+
+/**
+ * STACK's rules for a bounded build, where the sixteen components a site
+ * reaches for are written for it (D206, COMPONENTS WRITTEN FOR YOU) and
+ * only the rest are the model's to write.
+ */
+const BOUNDED_STACK_RULES = `${TAILWIND_RULE}
+- A shadcn/ui component you write (see COMPONENTS WRITTEN FOR YOU) wraps
+  the Radix primitive: \`import { Checkbox as CheckboxPrimitive } from
+  'radix-ui'\`, with cn() and class-variance-authority.
+  Every export of 'radix-ui' is a namespace of parts, never a component:
+  render CheckboxPrimitive.Root, never <Checkbox> or <Slot> from 'radix-ui',
+  which fails the type check (asChild is Slot.Root).
+${ICON_AND_MOTION_RULES}`;
 
 const PLAN_TYPESCRIPT_HEAD = `TYPESCRIPT
 You write this project's tsconfig.json, and the one npm create vite@latest
@@ -307,7 +332,7 @@ summary of the request.`;
 
 /** STACK, TYPESCRIPT and the files, for the single-response build. */
 const PLAN_RULES_BEFORE_SPEC = [
-  `${PLAN_STACK_HEAD}\n${STACK_RULES}`,
+  `${PLAN_STACK_HEAD}\n${PLAN_STACK_RULES}`,
   PLAN_TYPESCRIPT_HEAD,
   TYPESCRIPT_RULES,
   PLAN_REQUIRED_FILES,
@@ -316,14 +341,22 @@ const PLAN_RULES_BEFORE_SPEC = [
 /**
  * STACK, TYPESCRIPT and the files, for both steps of a bounded build: the
  * same rules for the code, with the configuration and the required files
- * replaced by what the templates hold (D71).
+ * replaced by what the templates hold (D71), and the shadcn/ui components
+ * that are templated too (D206): which there are, for the outline, and
+ * what each exports, for the steps that write the code.
  */
-const BOUNDED_RULES_BEFORE_SPEC = [
-  `${BOUNDED_STACK_HEAD}\n${STACK_RULES}`,
-  BOUNDED_TYPESCRIPT_HEAD,
-  TYPESCRIPT_RULES,
-  SCAFFOLD_SECTION,
-].join('\n\n');
+function boundedRulesBeforeSpec(components: string): string {
+  return [
+    `${BOUNDED_STACK_HEAD}\n${BOUNDED_STACK_RULES}`,
+    BOUNDED_TYPESCRIPT_HEAD,
+    TYPESCRIPT_RULES,
+    SCAFFOLD_SECTION,
+    components,
+  ].join('\n\n');
+}
+
+const OUTLINE_RULES_BEFORE_SPEC = boundedRulesBeforeSpec(UI_FILES_SECTION);
+const GROUP_RULES_BEFORE_SPEC = boundedRulesBeforeSpec(UI_API_SECTION);
 
 const PLAN_SPEC_SECTION = `SPEC
 Before any file, write the spec: the design this project is built to, as
@@ -653,8 +686,7 @@ the paths to delete, in that order, and no file content at all.
   page's purpose which route it serves, so files written separately agree.
 - Never list DESIGN.md: it is written for you from the spec.
 - dependencies: each package outside STACK that a planned file will import,
-  with the version range to declare (cmdk ^1.1.1 for a combobox). Usually
-  empty: the stack covers a site.
+  with the version range to declare. Usually empty: the stack covers a site.
 - delete: paths of existing files to remove. Empty for a new project.`;
 
 const OUTLINE_SIZE_SECTION = `SIZE
@@ -707,7 +739,7 @@ export const OUTLINE_SYSTEM_PROMPT = [
   PROMPT_HEAD,
   OUTLINE_OUTPUT_SECTION,
   OUTLINE_SIZE_SECTION,
-  BOUNDED_RULES_BEFORE_SPEC,
+  OUTLINE_RULES_BEFORE_SPEC,
   PLAN_SPEC_SECTION,
   RULES_AFTER_SPEC,
 ].join('\n\n');
@@ -729,8 +761,7 @@ fixed (see SPEC).
   about 250) or large (longer).
 - Never list DESIGN.md.
 - dependencies: each package outside STACK that a planned file will import,
-  with the version range to declare (cmdk ^1.1.1 for a combobox). Usually
-  empty.
+  with the version range to declare. Usually empty.
 - delete: paths of existing files to remove.`;
 
 const KEPT_SPEC_SECTION = `SPEC
@@ -757,7 +788,7 @@ export const KEPT_SPEC_OUTLINE_SYSTEM_PROMPT = [
   PROMPT_HEAD,
   KEPT_SPEC_OUTLINE_OUTPUT_SECTION,
   OUTLINE_SIZE_SECTION,
-  BOUNDED_RULES_BEFORE_SPEC,
+  OUTLINE_RULES_BEFORE_SPEC,
   KEPT_SPEC_SECTION,
   RULES_AFTER_SPEC,
 ].join('\n\n');
@@ -773,7 +804,7 @@ export const KEPT_SPEC_OUTLINE_SYSTEM_PROMPT = [
 export const GROUP_SYSTEM_PROMPT = [
   PROMPT_HEAD,
   GROUP_OUTPUT_SECTION,
-  BOUNDED_RULES_BEFORE_SPEC,
+  GROUP_RULES_BEFORE_SPEC,
   GROUP_SPEC_SECTION,
   RULES_AFTER_SPEC,
 ].join('\n\n');

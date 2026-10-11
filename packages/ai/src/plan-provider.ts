@@ -885,10 +885,10 @@ Preserve anything the request does not ask you to change.`,
   const diagram = diagramGuidance(request.prompt);
   if (diagram) parts.push(diagram);
 
-  // The controls STACK says are always a shadcn/ui component on Radix.
-  // Naming a component without its anatomy is how a model invents an API
-  // and ships a project that does not build, so the how travels with the
-  // rule.
+  // The controls that are always a shadcn/ui component on Radix, which
+  // the build writes (D206). How a page composes them, and what it gets
+  // wrong even with the component in hand, travels with the request that
+  // asks for one.
   const primitives = primitiveGuidance(request.prompt);
   if (primitives) parts.push(primitives);
 

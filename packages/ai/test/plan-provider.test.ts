@@ -732,8 +732,11 @@ describe('the rules the examples catalogue exposed', () => {
     // cells that did not build (D153), and the repair turn kept it.
     for (const prompt of [PLAN_SYSTEM_PROMPT, GROUP_SYSTEM_PROMPT]) {
       assert.match(prompt, /Every export of 'radix-ui' is a namespace/);
-      assert.match(prompt, /asChild \? Slot\.Root : 'button'/);
     }
+    assert.match(PLAN_SYSTEM_PROMPT, /asChild \? Slot\.Root : 'button'/);
+    // A bounded build's Button is templated (D206), on Slot.Root; the rule
+    // stays for the components the model still writes.
+    assert.match(GROUP_SYSTEM_PROMPT, /\(asChild is Slot\.Root\)/);
   });
 
   it('asks for a build that runs the type check', () => {

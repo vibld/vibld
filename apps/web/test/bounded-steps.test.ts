@@ -126,9 +126,16 @@ function companySite(): ScriptedBuild {
       ...REQUIRED_PROJECT_FILES.filter((path) => path !== 'src/App.tsx').map(
         (path) => file(path, 600),
       ),
-      ...['button', 'card', 'sheet', 'accordion', 'tabs', 'dialog'].map(
-        (name) => file(`src/components/ui/${name}.tsx`, 10_000, 'medium'),
-      ),
+      // Six shadcn/ui components a model still writes: the ones the trace
+      // had (button, card, sheet and so on) are templated since D206.
+      ...[
+        'checkbox',
+        'switch',
+        'slider',
+        'avatar',
+        'radio-group',
+        'scroll-area',
+      ].map((name) => file(`src/components/ui/${name}.tsx`, 10_000, 'medium')),
       file('src/components/SiteLayout.tsx', 10_000, 'medium'),
       ...pages,
       file(

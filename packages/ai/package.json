@@ -28,6 +28,7 @@
     "./backdrops": "./src/backdrops.ts",
     "./scenes": "./src/scenes.ts",
     "./showcase": "./src/showcase.ts",
+    "./ui-components": "./src/ui-components.ts",
     "./style-gallery": "./src/style-gallery.ts",
     "./style-gallery-index": "./src/style-gallery-index.ts"
   },

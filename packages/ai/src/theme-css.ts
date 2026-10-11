@@ -57,7 +57,11 @@ function colorLines(c: ColorTokens): string[] {
   ];
 }
 
-const COLOR_NAMES = [
+/**
+ * The color tokens every block here emits, as `@theme inline` maps them.
+ * The templated components (`ui-components.ts`) style with these only.
+ */
+export const COLOR_NAMES = [
   'primary',
   'primary-foreground',
   'secondary',

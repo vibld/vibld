@@ -1,5 +1,6 @@
 import { isBackdropPath, isVibldWritten } from './backdrops.ts';
 import { isScenePath } from './scenes.ts';
+import { isUiTemplatePath } from './ui-components.ts';
 import { blockTracker, compareLayers, oklchToRgb } from './contrast.ts';
 import { DESIGN_MD_PATH, readDesignSpec } from './design-spec.ts';
 import type { DesignSpec, MotionEntry } from './design-spec.ts';
@@ -4134,8 +4135,9 @@ function scriptedMotionAnswered(
  * The conventions a hand-written canvas animation keeps, read file by file
  * (D75): the four things the animated backgrounds in `backdrops.ts` are
  * written to settle, and that a canvas or WebGL loop written from memory
- * tends to leave out. Those templated files are skipped: Vibld wrote them,
- * and a repair cannot change them. A project's own file at one of their
+ * tends to leave out. Those templated files, and the shadcn/ui components
+ * Vibld writes (D206), are skipped: Vibld wrote them, and a repair cannot
+ * change them. A project's own file at one of their
  * paths (no `VIBLD_MARK`) is read like any other. A file that imports
  * three.js as a value, not through the 3D stage (D205), is flagged too.
  *
@@ -4150,7 +4152,9 @@ export function canvasFindings(
   for (const file of files) {
     if (
       !/\.[cm]?[jt]sx?$/.test(file.path) ||
-      ((isBackdropPath(file.path) || isScenePath(file.path)) &&
+      ((isBackdropPath(file.path) ||
+        isScenePath(file.path) ||
+        isUiTemplatePath(file.path)) &&
         isVibldWritten(file.content))
     ) {
       continue;
@@ -10143,7 +10147,21 @@ export function checkDesign(
   const spec = design ? readDesignSpec(design.content) : undefined;
 
   const findings = universalFindings(clean, css, source, files);
-  findings.push(...canvasFindings(clean));
+  // Read for the mark before its comment is stripped: `clean` has none.
+  const vibldWritten = new Set(
+    files
+      .filter(
+        (file) =>
+          (isBackdropPath(file.path) ||
+            isScenePath(file.path) ||
+            isUiTemplatePath(file.path)) &&
+          isVibldWritten(file.content),
+      )
+      .map((file) => file.path),
+  );
+  findings.push(
+    ...canvasFindings(clean.filter((file) => !vibldWritten.has(file.path))),
+  );
   if (options.mediaPaths) {
     findings.push(
       ...mediaFindings(options.mediaPaths, files, css + '\n' + source),

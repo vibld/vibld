@@ -586,6 +586,27 @@ paying accounts until midnight UTC.
   marker"); a project's own file there stays the model's. The guidance
   raised the build's fixed-prompt reservation to 57,500 characters; a
   Free account on the default model still needs $0.88 set aside.
+- **D206. Template the shadcn/ui components (Chris, 2026-10-11: "Template
+  them").** Sixteen are written by Vibld rather than by the model, each at
+  `src/components/ui/<name>.tsx` (`packages/ai/src/ui-components.ts`):
+  button, input, label, textarea, card, badge, separator, dialog, sheet,
+  tabs, accordion, select, popover, tooltip, dropdown-menu and command.
+  They are shadcn/ui's Tailwind v4 and React 19 components, with shadcn's
+  exports and props, on the unified `radix-ui` package (Command on cmdk),
+  styled only with the tokens a generated project defines and with
+  `motion-reduce:animate-none` beside every enter and exit animation. On
+  the terms of the stage (D205): a file is added when a project's file
+  imports it (no template imports another, so a project's own file at one
+  of these paths cannot break Vibld's), cmdk is declared when command.tsx
+  is added, and the model never plans, writes or edits them. A file at one of these paths counts
+  as Vibld's only when it carries "Written by Vibld" (D205's content
+  marker); a project's own file there, written before D206, stays the
+  model's. The outline is told which there are, and each file step what
+  each exports, from the same sources; any other shadcn/ui component is
+  still the model's to write. The obsolete instructions for writing these
+  were cut, so the longest fixed prompt text fell from about 56,900 to
+  about 56,100 characters: the reservation stays at 57,500 and the Free
+  floor is unchanged.
 
 ### Turbofy teardown, 2026-10-11
 

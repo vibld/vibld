@@ -272,6 +272,20 @@ export {
 } from './scenes.ts';
 export type { SceneExample } from './scenes.ts';
 export {
+  UI_API_SECTION,
+  UI_COMPONENTS,
+  UI_DIR,
+  UI_FILES_SECTION,
+  UI_IMPORT,
+  UI_TOKENS,
+  importedUiComponents,
+  isUiTemplatePath,
+  uiComponentFiles,
+  uiExports,
+  uiPath,
+} from './ui-components.ts';
+export type { UiComponent, UiComponentName } from './ui-components.ts';
+export {
   DIAGRAM_CRAFT,
   DIAGRAM_TYPES,
   diagramGuidance,

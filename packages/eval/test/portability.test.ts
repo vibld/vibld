@@ -636,7 +636,7 @@ describe('the generated stack', () => {
       files: [
         ...stub.filter((file) => file.path !== 'DESIGN.md'),
         {
-          path: 'src/components/ui/command.tsx',
+          path: 'src/components/SearchBox.tsx',
           content: "import { Command } from 'cmdk';\nexport { Command };\n",
         },
       ],

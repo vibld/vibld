@@ -7,24 +7,17 @@ import {
   primitiveGuidance,
   selectPrimitives,
 } from '../src/primitives.ts';
-import { PLAN_SYSTEM_PROMPT } from '../src/plan-schema.ts';
-import { OPTIONAL_PACKAGES } from '../src/stack.ts';
+import { GROUP_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT } from '../src/plan-schema.ts';
 import { MOTION_RECIPES } from '../src/motion.ts';
 import { buildUserPrompt } from '../src/plan-provider.ts';
+import { UI_COMPONENTS, uiExports } from '../src/ui-components.ts';
 
-/**
- * The namespaces `radix-ui` exports, read from its type declarations on
- * 2026-09-26 rather than recalled.
- */
-const RADIX = [
-  'Dialog',
-  'DropdownMenu',
-  'Select',
-  'Popover',
-  'Tooltip',
-  'Tabs',
-  'Accordion',
-];
+/** Every export of the templated components (D206). */
+const EXPORTS = new Set(UI_COMPONENTS.flatMap(uiExports));
+
+/** The components' names as a page writes them, the prefix of their parts. */
+const COMPONENT_WORD =
+  /\b(?:Accordion|Button|Command|Dialog|DropdownMenu|Popover|Select|Sheet|Tabs|Tooltip)[A-Za-z]*\b/g;
 
 const ALL =
   PRIMITIVE_BASICS + PRIMITIVE_RECIPES.map((r) => r.guidance).join(' ');
@@ -35,39 +28,38 @@ describe('the primitive catalogue', () => {
     assert.equal(new Set(ids).size, ids.length);
     for (const recipe of PRIMITIVE_RECIPES) {
       assert.ok(recipe.triggers.length > 0, recipe.id);
-      assert.ok(recipe.guidance.length > 150, recipe.id);
+      assert.ok(recipe.guidance.length > 120, recipe.id);
       for (const trigger of recipe.triggers) {
         assert.equal(trigger, trigger.toLowerCase(), trigger);
       }
     }
   });
 
-  it('names only primitives radix-ui really exports', () => {
-    // A wrong import here breaks the build of every generated project that
-    // hits it.
-    const named = [...ALL.matchAll(/\b([A-Z][A-Za-z]+) from 'radix-ui'/g)].map(
-      (match) => match[1]!,
-    );
-    assert.ok(named.length >= 5);
+  it('names only parts the templated components really export', () => {
+    // A part that does not exist is an import that fails the build of every
+    // generated project that hits it.
+    const named = [...ALL.matchAll(COMPONENT_WORD)].map((match) => match[0]);
+    assert.ok(named.length >= 20);
     for (const name of named) {
-      assert.ok(RADIX.includes(name), `${name} is not a verified export`);
+      assert.ok(EXPORTS.has(name), `${name} is not an export`);
     }
-    // The unified package, not the per-primitive scoped ones, and not the
-    // library the prompt used before (internal PR 74).
+    // No primitive is imported from a package: the components are.
+    assert.ok(!ALL.includes("from 'radix-ui'"));
     assert.ok(!/@radix-ui\//.test(ALL));
     assert.ok(!ALL.includes('@base-ui'));
   });
 
-  it('takes versions from stack.ts, and pins none of its own', () => {
-    assert.ok(ALL.includes(`cmdk@${OPTIONAL_PACKAGES.cmdk}`));
-    const versions = [...ALL.matchAll(/@\^?\d+\.\d+\.\d+/g)];
-    assert.equal(versions.length, 1);
+  it('pins no version: the components declare what they import', () => {
+    assert.equal([...ALL.matchAll(/@\^?\d+\.\d+/g)].length, 0);
   });
 
-  it('styles with the project and stops its own animation for reduced motion', () => {
-    assert.match(PRIMITIVE_BASICS, /cn\(\) from @\/lib\/utils/);
+  it('sends the model to the components, styled with the project', () => {
+    assert.match(PRIMITIVE_BASICS, /COMPONENTS\s+WRITTEN FOR YOU/);
+    assert.match(PRIMITIVE_BASICS, /@\/components\/ui\/<name>/);
     assert.match(PRIMITIVE_BASICS, /tokens/);
     assert.match(PRIMITIVE_BASICS, /motion-reduce:animate-none/);
+    // The section it points at is in every file step's prompt.
+    assert.match(GROUP_SYSTEM_PROMPT, /\nCOMPONENTS WRITTEN FOR YOU\n/);
   });
 
   it('recommends no library outside the stack', () => {
@@ -143,11 +135,11 @@ describe('primitiveGuidance', () => {
     assert.equal(primitiveGuidance('A pricing page'), null);
   });
 
-  it('carries the shared shape once, alongside the anatomy', () => {
+  it('carries the shared shape once, alongside the composition', () => {
     const guidance = primitiveGuidance('Add a modal and a tooltip');
     assert.ok(guidance);
-    assert.equal(guidance.match(/Keep shadcn's file/g)?.length, 1);
-    assert.match(guidance, /Portal > Overlay > Content/);
+    assert.equal(guidance.match(/never write its\s+file/g)?.length, 1);
+    assert.match(guidance, /DialogContent > DialogHeader > DialogTitle/);
     assert.match(guidance, /follow the request/i);
   });
 });
@@ -155,7 +147,7 @@ describe('primitiveGuidance', () => {
 describe('buildUserPrompt with a primitive', () => {
   it('appends it', () => {
     const composed = buildUserPrompt({ prompt: 'A dashboard with a dropdown' });
-    assert.match(composed, /dropdown-menu\.tsx/);
+    assert.match(composed, /DropdownMenuTrigger asChild/);
   });
 
   it('appends nothing for a page with no such control', () => {

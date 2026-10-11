@@ -8,6 +8,7 @@ import {
 } from './backdrops.ts';
 import { isScenePath, sceneFiles } from './scenes.ts';
 import { STYLE_TOKENS_MARKER, STYLE_TOKENS_PATH } from './style-gallery.ts';
+import { isUiTemplatePath, uiComponentFiles } from './ui-components.ts';
 import {
   OPTIONAL_PACKAGES,
   STACK_PACKAGES,
@@ -30,8 +31,8 @@ import {
  * packages its files import.
  *
  * What stays the model's: src/styles.css, src/App.tsx, src/lib/motion.ts,
- * pages and components, and the shadcn/ui primitives. No shadcn/ui source is
- * vendored here.
+ * pages and components, and any shadcn/ui component beyond the sixteen
+ * `ui-components.ts` writes (D206).
  *
  * The facts the model needs about these files (the alias, what main.tsx
  * imports, what utils.ts exports) are stated in `SCAFFOLD_SECTION`, which
@@ -63,7 +64,8 @@ export { STYLE_TOKENS_MARKER, STYLE_TOKENS_PATH };
 /**
  * Whether Vibld writes the file at `path` rather than the model: a scaffold
  * file, an animated background (`backdrops.ts`), a 3D scene (`scenes.ts`),
- * or a gallery style's tokens. A background or scene path in `owned` (see
+ * a shadcn/ui component (`ui-components.ts`, D206), or a gallery style's
+ * tokens. A background, scene or component path in `owned` (see
  * `ownedTemplatePaths`) is the project's own file, and the model's.
  */
 export function isTemplatedPath(
@@ -72,24 +74,28 @@ export function isTemplatedPath(
 ): boolean {
   return (
     isScaffoldPath(path) ||
-    ((isBackdropPath(path) || isScenePath(path)) && !owned.has(path)) ||
+    (isEffectOrComponentPath(path) && !owned.has(path)) ||
     path === STYLE_TOKENS_PATH
   );
+}
+
+/** A path Vibld writes only when a file imports it, and marks (`VIBLD_MARK`). */
+function isEffectOrComponentPath(path: string): boolean {
+  return isBackdropPath(path) || isScenePath(path) || isUiTemplatePath(path);
 }
 
 const NONE_OWNED: ReadonlySet<string> = new Set();
 
 /**
- * The background and scene paths where `files` holds a file of the
- * project's own: one without `VIBLD_MARK`, written before Vibld reserved
- * the path. Vibld neither drops nor replaces those.
+ * The background, scene and component paths where `files` holds a file of
+ * the project's own: one without `VIBLD_MARK`, written before Vibld
+ * reserved the path. Vibld neither drops nor replaces those.
  */
 export function ownedTemplatePaths(files: readonly ProjectFile[]): string[] {
   return files
     .filter(
       (file) =>
-        (isBackdropPath(file.path) || isScenePath(file.path)) &&
-        !isVibldWritten(file.content),
+        isEffectOrComponentPath(file.path) && !isVibldWritten(file.content),
     )
     .map((file) => file.path);
 }
@@ -1060,14 +1066,15 @@ function withStyleTokens(
  * `files` with Vibld's own files in place.
  *
  * A new project gets every templated file, replacing any file at those
- * paths, and the animated backgrounds and 3D scenes its files import
- * (`backdropFiles`, `sceneFiles`).
+ * paths, and the animated backgrounds, 3D scenes and shadcn/ui components
+ * its files import (`backdropFiles`, `sceneFiles`, `uiComponentFiles`).
  * A follow-up keeps the ones its project already has, so an edit made to
  * them since is not undone. Two things change in place: package.json
  * declares a package a file now imports, and index.html takes a new title
  * or description when the follow-up gave one (`retitle`,
  * `retitledIndexHtml`). A templated file the project lacks (one generated
- * before D71 may) is written, and so is a backdrop a file now imports.
+ * before D71 may) is written, and so is a backdrop, the stage or a
+ * component a file now imports.
  * A build with a gallery style writes its tokens file every time, and
  * src/styles.css imports it (D145).
  */
@@ -1090,15 +1097,23 @@ function scaffolded(
         !isTemplatedPath(file.path) ||
         (file.path === STYLE_TOKENS_PATH && input.styleTokens !== undefined),
     );
-    const withBackdrops = [...own, ...backdropFiles(own), ...sceneFiles(own)];
+    const withBackdrops = [
+      ...own,
+      ...backdropFiles(own),
+      ...sceneFiles(own),
+      ...uiComponentFiles(own),
+    ];
     return [...withBackdrops, ...scaffoldFiles(input, withBackdrops)];
   }
   const present = new Set(files.map((file) => file.path));
-  const effects = [...backdropFiles(files), ...sceneFiles(files)].filter(
-    (file) => !present.has(file.path),
-  );
+  const effects = [
+    ...backdropFiles(files),
+    ...sceneFiles(files),
+    ...uiComponentFiles(files),
+  ].filter((file) => !present.has(file.path));
   // A package.json written here (the project lost its own) reads the
-  // backgrounds and scenes being added, which import three themselves.
+  // backgrounds, scenes and components being added, which import three
+  // and cmdk themselves.
   const added = [
     ...scaffoldFiles(input, [...files, ...effects]).filter(
       (file) => !present.has(file.path),
