@@ -76,6 +76,8 @@
       "/.well-known/oauth-protected-resource/mcp",
       // Web Bot Auth's key directory (worker/web-bot-auth.ts).
       "/.well-known/http-message-signatures-directory",
+      // The ChatGPT directory's domain check (worker/openai-apps.ts, D220).
+      "/.well-known/openai-apps-challenge",
     ],
   },
 
@@ -100,6 +102,13 @@
     // vibld is before being asked to sign up (Chris, 2026-09-28). A copy
     // that leaves this unset sends them to its own address (D97).
     "VIBLD_REFERRAL_ORIGIN": "https://vibld.com",
+
+    // The token OpenAI's plugin portal checks at
+    // /.well-known/openai-apps-challenge before it connects the ChatGPT
+    // listing to /mcp (D220, worker/openai-apps.ts). Public by design. Kept
+    // here, not in the dashboard, because a deploy replaces dashboard
+    // variables; empty means the path is a 404.
+    "OPENAI_APPS_CHALLENGE": "",
 
     // Clerk's Frontend API URL -- a public identifier, not a secret. Used as
     // both the JWT issuer to match and the base for the JWKS fetch
@@ -375,6 +384,8 @@
   // apps/web/README.md's "Billing" section. Off-peak UTC time, arbitrarily;
   // nothing about the reconcile depends on when it runs. The second is the
   // custom domain plan check (D189, `sweepLapsedDomains`), on its own so
-  // its D1 queries are an invocation of their own.
-  "triggers": { "crons": ["17 9 * * *", "47 9 * * *"] },
+  // its D1 queries are an invocation of their own. The third clears
+  // assistants' editing-call records past their 24 hours (D201,
+  // `McpCallStore.sweep`).
+  "triggers": { "crons": ["17 9 * * *", "47 9 * * *", "*/15 * * * *"] },
 }

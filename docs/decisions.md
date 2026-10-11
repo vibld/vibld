@@ -607,6 +607,48 @@ paying accounts until midnight UTC.
   were cut, so the longest fixed prompt text fell from about 56,900 to
   about 56,100 characters: the reservation stays at 57,500 and the Free
   floor is unchanged.
+- **D217 to D230. From the Tessryx review (Chris, 2026-10-11, one card
+  each; findings in the project's `competitors/tessryx.md`).**
+- **D217. A "what would this change break" check on generated code: build
+  next.** An import, route and usage graph of each project lists what
+  depends on the files a change touches, for vibld's agent and as an MCP
+  tool, and says where a reference cannot be followed statically.
+- **D218. Content files with a generated editor: build next.** Copy,
+  prices, lists and images in JSON files with a JSON Schema beside them;
+  the builder draws a form from the schema, and a save validates, writes
+  the file and checkpoints, with no model run. Built on the text-editing
+  write path from the Turbofy review.
+- **D219. Rolling a published site back to an earlier published version:
+  build next.**
+- **D220. "Add to Claude" and a ChatGPT directory listing: build next.**
+  A link that opens Claude's connector dialog with vibld's MCP server
+  filled in, on vibld.com (`/docs/assistants`) and in the builder's
+  settings. The ChatGPT submission is prepared, and sent only once Chris
+  says so. Every `/mcp` tool sets all three of `readOnlyHint`,
+  `destructiveHint` and `openWorldHint`, which the directory requires, and
+  `/.well-known/openai-apps-challenge` serves the domain token from the
+  `OPENAI_APPS_CHALLENGE` variable. The Privacy Policy has an "AI
+  assistants" section in the wording Chris approved (2026-10-11, "Add as
+  drafted").
+- **D221. Moving a project to another account: backlog.**
+- **D222. MCP discovery before sign-in: build next.** With no token,
+  `/mcp` answers `initialize` and `tools/list` in the body of the same
+  401 that sends a client to sign in; every tool call still needs a token.
+- **D223. Patch-style edits and guides over MCP: backlog.**
+- **D224. A preflight check before publishing: backlog.**
+- **D225. A showcase with each prompt as typed, its live site and the
+  conversation: build next.**
+- **D226. An interactive "what breaks" explainer on vibld.com: backlog.**
+- **D227. Templates filled in from a setup form: skip.**
+- **D228. Scheduled data refresh for published sites: backlog.**
+- **D229. Sign-in for generated sites' visitors, with a different stable
+  ID per site and no cap on users: build next, scoped with the M4 work
+  and brought to Chris before it is built.**
+- **D230. Step-by-step traces of builds: skip.**
+- **D231. Publisher of the ChatGPT listing: Chris's verified personal
+  identity (Chris, 2026-10-11, 21:43Z, "My identity").** `developerName` in
+  the plugin manifest is the name on that verified identity. Submission
+  still waits for Chris's explicit go.
 
 ### Turbofy teardown, 2026-10-11
 
@@ -656,6 +698,34 @@ D215, D214, D209, D210, D211, D216.
   next").** Triggers, schedules and AI steps next to the app's data. Needs
   the generated-app backend (M4, D197) first; its scope goes to Chris
   before it is built.
+
+### M4 scope, 2026-10-11
+
+Scoped once for D229 (visitor sign-in) and D216 (automations) by the
+Tessryx and Turbofy reviews; the scope is in the project's
+`competitors/m4-scope.md`.
+
+- **D232. Where a generated app's data lives: the owner's own Supabase
+  project (Chris, 2026-10-11, 22:16Z).** The owner connects their project
+  through secure key entry (D193); vibld holds no app data and runs no
+  database for it. A hosted option can come later behind the same
+  generated code.
+- **D233. Visitor sign-in for generated sites: the backend's own auth,
+  Supabase Auth (Chris, 2026-10-11, 22:16Z).** Each site has its own user
+  pool. A later "Sign in with vibld" would give each site a pairwise
+  subject, HMAC(site id, vibld user id), specified now so it is not
+  retrofitted.
+- **D234. Automations run as Supabase Edge Functions, with pg_cron for
+  schedules (Chris, 2026-10-11, 22:17Z),** in the owner's project, so they
+  export as they are.
+- **D235. An automation's AI steps use the owner's own model key, entered
+  through D193 (Chris, 2026-10-11, 22:17Z).** No vibld credit is billed
+  for them.
+
+M4's order of work follows from these: D193 secure key entry first, then
+one complete flow on the owner's Supabase (migrations, environment setup,
+authorization tests, export instructions), then visitor sign-in (D229),
+then automations (D216).
 
 ### Checkpoint history, 2026-10-03
 

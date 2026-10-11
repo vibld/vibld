@@ -60,6 +60,10 @@ import type { ReactNode } from 'react';
  * rather than one, because "not signed in" is something the reader can fix
  * in ten seconds and "not on the list" is not.
  */
+/** Claude's "add a custom connector" dialog with vibld's MCP server filled in (D220). */
+const ADD_TO_CLAUDE_URL =
+  'https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=vibld&connectorUrl=https%3A%2F%2Fapp.vibld.com%2Fmcp';
+
 export function App() {
   // A shared project (`/s/<token>`) is the one page anybody can open, signed
   // in or not, so it is decided before either gate. It carries none of the
@@ -220,6 +224,26 @@ function Builder() {
                     projectId={openProject?.id ?? null}
                     projectName={openProject?.name ?? ''}
                   />
+                </section>
+                <section className="settings__section">
+                  <h2 className="settings__heading">Assistants</h2>
+                  {/* D220: Claude's connector dialog with vibld filled in. */}
+                  <a
+                    className="settings__link"
+                    href={ADD_TO_CLAUDE_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Add vibld to Claude
+                  </a>
+                  <a
+                    className="settings__link"
+                    href="https://vibld.com/docs/assistants"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    ChatGPT, Claude Code and Cursor
+                  </a>
                 </section>
                 {/*
               The only way into the admin page, and it exists only for an

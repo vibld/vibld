@@ -11,7 +11,10 @@ import {
 import type { McpCaller } from '../worker/mcp-auth.ts';
 import {
   EDIT_TOOLS,
+  anonymousDiscovery,
+  anonymousResponse,
   INSTRUCTIONS,
+  MAX_ANONYMOUS_BODY_BYTES,
   MAX_READ_CHARS,
   MAX_SCREENSHOT_HEIGHT,
   MCP_METADATA_PATH,
@@ -34,6 +37,12 @@ import {
 import type { BrowserPage, ScreenshotOptions } from '../worker/screenshot.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
+
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
 
 const USER = 'user_2abc123';
 const PROJECT = '11111111-2222-4333-8444-555555555555';
@@ -573,6 +582,18 @@ describe('the MCP protocol', () => {
         ?.annotations as { readOnlyHint?: boolean } | undefined;
       assert.equal(annotations?.readOnlyHint, true, name);
     }
+    // Stated, never left to a client's default: the ChatGPT directory
+    // refuses a tool missing any of the three (D220).
+    for (const tool of TOOLS) {
+      const annotations = tool.annotations as Record<string, unknown>;
+      for (const hint of ['readOnlyHint', 'destructiveHint', 'openWorldHint']) {
+        assert.equal(
+          typeof annotations?.[hint],
+          'boolean',
+          `${tool.name} ${hint}`,
+        );
+      }
+    }
     for (const tool of TOOLS) {
       assert.equal(tool.inputSchema.additionalProperties, false);
       for (const property of Object.values(
@@ -662,6 +683,121 @@ describe('the MCP protocol', () => {
       query: 'bakery',
     });
     assert.equal(listed.isError, false);
+  });
+
+  it('answers initialize and tools/list in the body of the 401 (D222)', () => {
+    const init = anonymousDiscovery(
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18' },
+      },
+      true,
+    );
+    const response = mcpUnauthorized('https://app.vibld.com', 'missing', init);
+    // Still a 401 with the challenge, so a client signs the person in.
+    assert.equal(response.status, 401);
+    assert.match(
+      response.headers.get('WWW-Authenticate') ?? '',
+      /^Bearer resource_metadata=/,
+    );
+    assert.equal(
+      response.headers.get('access-control-expose-headers'),
+      'WWW-Authenticate',
+    );
+    const result = record(init).result as Record<string, unknown>;
+    assert.equal(record(init).id, 1);
+    assert.equal(result.protocolVersion, '2025-06-18');
+    assert.equal(record(result.serverInfo).name, 'vibld');
+    assert.equal(typeof result.instructions, 'string');
+
+    const listed = record(
+      record(
+        anonymousDiscovery(
+          { jsonrpc: '2.0', id: 'a', method: 'tools/list' },
+          true,
+        ),
+      ).result,
+    ).tools as Array<{ name: string }>;
+    assert.deepEqual(
+      listed.map((tool) => tool.name),
+      TOOLS.map((tool) => tool.name),
+    );
+    const noBrowser = record(
+      record(
+        anonymousDiscovery(
+          { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+          false,
+        ),
+      ).result,
+    ).tools as Array<{ name: string }>;
+    assert.ok(!noBrowser.some((tool) => tool.name === 'take_screenshot'));
+  });
+
+  it('keeps tool calls and anything else behind the plain 401', () => {
+    for (const body of [
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'list_projects' },
+      },
+      { jsonrpc: '2.0', id: 1, method: 'ping' },
+      { jsonrpc: '1.0', id: 1, method: 'tools/list' },
+      { jsonrpc: '2.0', id: { x: 1 }, method: 'tools/list' },
+      [{ jsonrpc: '2.0', id: 1, method: 'tools/list' }],
+      null,
+      'tools/list',
+    ]) {
+      assert.equal(anonymousDiscovery(body, true), null, JSON.stringify(body));
+    }
+  });
+
+  it('reads at most MAX_ANONYMOUS_BODY_BYTES of a token-less body', async () => {
+    const post = (body: BodyInit) =>
+      new Request('https://app.vibld.com/mcp', { method: 'POST', body });
+    const ok = await anonymousResponse(
+      post(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })),
+      'https://app.vibld.com',
+      true,
+    );
+    assert.equal(ok.status, 401);
+    assert.ok(Array.isArray((await ok.json()).result.tools));
+
+    // A chunked body with no Content-Length: the read stops at the cap
+    // and the stream is canceled rather than drained.
+    let pulled = 0;
+    let canceled = false;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(4096).fill(32));
+      },
+      cancel() {
+        canceled = true;
+      },
+    });
+    const big = await anonymousResponse(
+      new Request('https://app.vibld.com/mcp', {
+        method: 'POST',
+        body: endless,
+        duplex: 'half',
+      } as RequestInit),
+      'https://app.vibld.com',
+      true,
+    );
+    assert.equal(big.status, 401);
+    assert.ok('error' in (await big.json()));
+    assert.ok(canceled);
+    assert.ok(pulled * 4096 <= MAX_ANONYMOUS_BODY_BYTES + 3 * 4096);
+
+    const notJson = await anonymousResponse(
+      post('not json'),
+      'https://app.vibld.com',
+      true,
+    );
+    assert.ok('error' in (await notJson.json()));
   });
 
   it('points a client without a token at the metadata', async () => {
@@ -2115,6 +2251,27 @@ describe('the daily count of editing calls (D201)', () => {
       rows.results.map((row) => row.id),
       ['c1', 'c2', 'other'],
       "the account's own old calls are cleared, nobody else's",
+    );
+  });
+
+  it("sweeps every account's calls once they leave the window", async () => {
+    const db = new SqliteD1Database(schemaSql()) as unknown as D1Database;
+    await db
+      .prepare(
+        `INSERT INTO mcp_calls VALUES
+           ('old', ?1, 'client_x', 'list_files', ?2, '2026-10-09T09:59:59.000Z'),
+           ('other', 'user_other', 'client_x', 'list_files', ?2, '2026-10-08T00:00:00.000Z'),
+           ('kept', ?1, 'client_x', 'list_files', ?2, '2026-10-09T10:00:00.000Z')`,
+      )
+      .bind(USER, PROJECT)
+      .run();
+    assert.equal(await new McpCallStore(db).sweep(since), 2);
+    const rows = await db
+      .prepare('SELECT id FROM mcp_calls')
+      .all<{ id: string }>();
+    assert.deepEqual(
+      rows.results.map((row) => row.id),
+      ['kept'],
     );
   });
 });

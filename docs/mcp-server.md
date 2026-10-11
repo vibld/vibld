@@ -20,6 +20,15 @@ number of calls set by the plan (D201).
   `https://app.vibld.com/.well-known/oauth-protected-resource/mcp` (RFC
   9728), which names Clerk. The person signs in to vibld as they always do
   and approves the assistant. Nothing here creates accounts: D180 stands.
+- **Discovery before sign-in (D222):** that 401, for an `initialize` or a
+  `tools/list` with no token at all, carries the JSON-RPC answer in its
+  body: the server's instructions and the full tool list. The status and
+  challenge are unchanged, so a client still signs the person in; a
+  directory or scanner can read what vibld does. A tool call, any other
+  method, or an invalid token gets the plain 401.
+- **Connecting:** https://vibld.com/docs/assistants, with an "Add to
+  Claude" link (D220) that opens Claude's connector dialog with this
+  server filled in. The builder's settings menu has the same link.
 - **Token check:** every token is checked with Clerk's Backend API
   (`mcp-auth.ts`), which says whether the person revoked it. Only opaque
   tokens are accepted, since a JWT access token cannot be revoked. A token Clerk vouched for is trusted for

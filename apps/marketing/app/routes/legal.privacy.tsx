@@ -226,6 +226,20 @@ export default function Privacy() {
         code. Cloudflare keeps these logs for 7 days.
       </p>
 
+      <h2>AI assistants</h2>
+      <p>
+        If you connect vibld to an AI assistant such as Claude or ChatGPT, the
+        assistant signs in as you through our sign-in provider, with the
+        permissions you approve, and can list your projects, start builds, and
+        read and change your projects&apos; code. We receive only what the
+        assistant sends to vibld&apos;s tools, never your conversation with it.
+        For each editing call we record your account, the assistant&apos;s
+        client, the tool, the project and the time, to apply your plan&apos;s
+        daily limit; these records are kept for 24 hours. Builds an assistant
+        starts are recorded and billed like any other build. You can disconnect
+        an assistant at any time in its own settings.
+      </p>
+
       <h2>How we use it</h2>
       <p>
         To run the Service: generating, storing, previewing, building,

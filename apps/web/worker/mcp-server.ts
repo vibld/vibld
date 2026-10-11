@@ -3,6 +3,7 @@ import type { DesignTemplateName } from '@vibld/ai/design-template-index';
 import { MAX_BASE_CONTENT_CHARS, MAX_PROMPT_CHARS } from '@vibld/ai/limits';
 
 import { EDIT_SCOPE, MCP_SCOPE, type McpCaller } from './mcp-auth.ts';
+import { boundedText } from './owner-auth.ts';
 
 /**
  * `/mcp`: vibld as an MCP server (docs/decisions.md D182), so an assistant
@@ -236,7 +237,11 @@ export const TOOLS = [
       required: ['query'],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'list_projects',
@@ -248,7 +253,11 @@ export const TOOLS = [
       properties: {},
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'start_build',
@@ -311,7 +320,11 @@ export const TOOLS = [
       required: ['runId'],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'get_preview_url',
@@ -348,7 +361,11 @@ export const TOOLS = [
       required: ['projectId'],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'read_files',
@@ -381,7 +398,11 @@ export const TOOLS = [
       required: ['projectId', 'paths'],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'write_files',
@@ -476,7 +497,11 @@ export const TOOLS = [
       required: ['projectId'],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'restore_checkpoint',
@@ -519,7 +544,11 @@ export const TOOLS = [
       required: ['projectId'],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: true, openWorldHint: false },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'take_screenshot',
@@ -561,10 +590,14 @@ export const TOOLS = [
 ] as const;
 
 /** Tools only listed and served where their dependency is lent. */
-function toolsFor(deps: McpDeps) {
-  return deps.screenshot
+function toolList(screenshot: boolean) {
+  return screenshot
     ? TOOLS
     : TOOLS.filter((tool) => tool.name !== 'take_screenshot');
+}
+
+function toolsFor(deps: McpDeps) {
+  return toolList(Boolean(deps.screenshot));
 }
 
 /**
@@ -2156,6 +2189,7 @@ export const MCP_METADATA_PATH = '/.well-known/oauth-protected-resource/mcp';
 export function mcpUnauthorized(
   appOrigin: string,
   reason: 'missing' | 'invalid' | 'insufficient_scope',
+  discovery?: unknown,
 ): Response {
   // RFC 6750 section 3, with the RFC 9728 pointer and the scopes to ask
   // for. Both: clients ask for what this names and keep that token, and
@@ -2182,10 +2216,91 @@ export function mcpUnauthorized(
             `Bearer error="insufficient_scope", ${metadata}, ${scope}`,
             `This sign-in did not grant "${MCP_SCOPE}". Connect vibld again and approve it.`,
           ];
-  return new Response(JSON.stringify({ error }), {
+  return new Response(JSON.stringify(discovery ?? { error }), {
     status,
-    headers: { ...JSON_HEADERS, 'WWW-Authenticate': challenge },
+    headers: {
+      ...JSON_HEADERS,
+      'WWW-Authenticate': challenge,
+      'access-control-expose-headers': 'WWW-Authenticate',
+    },
   });
+}
+
+/**
+ * The most of a token-less request's body `/mcp` reads (D222). An
+ * `initialize` or `tools/list` request is a few hundred bytes; the cap is
+ * enforced while reading, so a chunked body with no `Content-Length` is
+ * never held whole (Codex review of internal PR 421).
+ */
+export const MAX_ANONYMOUS_BODY_BYTES = 16 * 1024;
+
+/**
+ * The 401 for a request with no token: `anonymousDiscovery`'s answer in
+ * its body when the request is one it answers, the plain 401 otherwise,
+ * including a body over `MAX_ANONYMOUS_BODY_BYTES` or not JSON.
+ */
+export async function anonymousResponse(
+  request: Request,
+  appOrigin: string,
+  screenshot: boolean,
+): Promise<Response> {
+  let body: unknown = null;
+  const text = await boundedText(request, MAX_ANONYMOUS_BODY_BYTES).catch(
+    () => null,
+  );
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      // Not JSON: the plain 401.
+    }
+  }
+  return mcpUnauthorized(
+    appOrigin,
+    'missing',
+    anonymousDiscovery(body, screenshot) ?? undefined,
+  );
+}
+
+/**
+ * What `/mcp` tells a caller with no token at all (D222): the answer to
+ * `initialize` or `tools/list`, carried in the body of the 401 that still
+ * sends a client to sign in. Directories, scanners and a person deciding
+ * whether to connect can read what vibld does; every tool call stays
+ * behind a token. Anything else, or a body that is not one JSON-RPC
+ * request, gets the plain 401 (null here).
+ */
+export function anonymousDiscovery(
+  body: unknown,
+  screenshot: boolean,
+): Record<string, unknown> | null {
+  const rpc = record(body);
+  if (rpc.jsonrpc !== '2.0') return null;
+  const id = rpc.id;
+  if (id !== null && typeof id !== 'string' && typeof id !== 'number') {
+    return null;
+  }
+  const params = record(rpc.params);
+  if (rpc.method === 'initialize') {
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        protocolVersion: negotiateVersion(params.protocolVersion),
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: SERVER_INFO,
+        instructions: INSTRUCTIONS,
+      },
+    };
+  }
+  if (rpc.method === 'tools/list') {
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: { tools: toolList(screenshot) },
+    };
+  }
+  return null;
 }
 
 /**

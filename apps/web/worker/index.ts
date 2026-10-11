@@ -23,10 +23,16 @@ import {
 import { handleOwnerSession, ownerIdentity } from './owner-auth.ts';
 import { withClientAddress } from './client-address.ts';
 import { verifyMcpToken } from './mcp-auth.ts';
+import {
+  OPENAI_APPS_CHALLENGE_PATH,
+  handleOpenAiAppsChallenge,
+} from './openai-apps.ts';
+import type { OpenAiAppsEnv } from './openai-apps.ts';
 import type { McpCaller } from './mcp-auth.ts';
 import {
   MCP_METADATA_PATH,
   handleMcpMessage,
+  anonymousResponse,
   mcpUnauthorized,
   protectedResourceMetadata,
   readBuildStart,
@@ -316,12 +322,17 @@ import {
 
 /** `wrangler.jsonc`'s second Cron Trigger: the custom domain plan check. */
 const DOMAIN_SWEEP_CRON = '47 9 * * *';
+// Clears assistants' editing-call records once they leave the 24-hour
+// window the daily cap counts (D201), so none is kept much past it.
+const MCP_CALL_SWEEP_CRON = '*/15 * * * *';
 
 export interface Env
   extends
     PrincipalEnv,
     StyleGalleryEnv,
     WebBotAuthEnv,
+    // The plugin portal's domain check for the ChatGPT listing (D220).
+    OpenAiAppsEnv,
     // A published site's own domain (D189, `custom-domain.ts`).
     CustomHostnameEnv,
     // Stock photo search (D176). Worker secrets; either alone works.
@@ -3413,6 +3424,18 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
+    if (event?.cron === MCP_CALL_SWEEP_CRON) {
+      if (!env.DB) return;
+      const before = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      ctx.waitUntil(
+        new McpCallStore(env.DB).sweep(before).then(
+          (cleared) =>
+            console.log(JSON.stringify({ event: 'mcp_calls.swept', cleared })),
+          (error: unknown) => console.error('MCP call sweep failed', error),
+        ),
+      );
+      return;
+    }
     // The custom domain plan check (D189) has a Cron Trigger of its own.
     if (event?.cron === DOMAIN_SWEEP_CRON) {
       ctx.waitUntil(
@@ -3915,6 +3938,11 @@ async function handleMcp(
   const origin = new URL(request.url).origin;
   const verified = await verifyMcpToken(request, env, `${origin}/mcp`);
   if (!verified.ok) {
+    if (verified.reason === 'missing') {
+      // D222: no token at all, so `initialize` and `tools/list` are
+      // answered in the 401's body.
+      return anonymousResponse(request, origin, Boolean(env.BROWSER));
+    }
     if (verified.reason !== 'unavailable') {
       return mcpUnauthorized(origin, verified.reason);
     }
@@ -4118,6 +4146,9 @@ async function route(
   // back into this router as the person, and is gated there.
   if (pathname === '/mcp') return handleMcp(request, env, ctx);
   if (pathname === MCP_METADATA_PATH) return handleMcpMetadata(request, env);
+  if (pathname === OPENAI_APPS_CHALLENGE_PATH) {
+    return handleOpenAiAppsChallenge(request, env);
+  }
   // What describes this API rather than being part of it (D186): open to
   // anybody, identifying nobody and touching no binding, so answered before
   // the panel keys are read from D1.

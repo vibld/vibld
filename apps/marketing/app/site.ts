@@ -141,10 +141,11 @@ export const SITE = {
    * It is the launch day, the day the beta opened (Chris, 2026-09-28). A
    * later revision of any one document changes this for all of them, since
    * they are one set. Revised 2026-10-07, when the welcome credit was
-   * retired (D163), and 2026-10-09, when the stock photo services were
-   * added as subprocessors (D176).
+   * retired (D163), 2026-10-09, when the stock photo services were added
+   * as subprocessors (D176), and 2026-10-11, when the Privacy Policy gained
+   * its AI assistants section (D220).
    */
-  legalEffectiveDate: '2026-10-09',
+  legalEffectiveDate: '2026-10-11',
   /**
    * Decisions BRAND-01 -- searching "vibld" returns Bible-study sites, because
    * Google reads the word as a misspelling of "Bible". Nothing on-page fixes
@@ -333,6 +334,14 @@ export const DOC_GUIDES: DocGuide[] = [
     title: `The builder API | ${SITE.name} docs`,
     description:
       'The HTTP API the builder runs on: where it is described, how a request signs in, and what it answers.',
+  },
+  {
+    slug: 'assistants',
+    track: 'hosted',
+    label: 'Building from Claude or ChatGPT',
+    title: `Building from Claude or ChatGPT | ${SITE.name} docs`,
+    description:
+      'Connect Claude, ChatGPT, Claude Code or Cursor to vibld, and what an assistant can do there.',
   },
   {
     slug: 'self-hosting',

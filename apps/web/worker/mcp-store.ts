@@ -83,7 +83,9 @@ export class McpBuildStore {
  * Only the window is kept. The rows are what the cap counts, not a
  * record of what an assistant did (the history shows each edit), so each
  * take clears the account's rows that have left it, which bounds the
- * table by the cap rather than by time.
+ * table by the cap, and `sweep` clears everybody's on a Cron Trigger, so
+ * an account that stops calling is not kept past the window either (the
+ * Privacy Policy says 24 hours; Codex review of internal PR 421).
  */
 export class McpCallStore {
   readonly #db: D1Database;
@@ -130,5 +132,14 @@ export class McpCallStore {
         ),
     ]);
     return (taken?.meta.changes ?? 0) > 0;
+  }
+
+  /** Clears every account's calls before `before` (ISO). How many went. */
+  async sweep(before: string): Promise<number> {
+    const result = await this.#db
+      .prepare(`DELETE FROM mcp_calls WHERE called_at < ?1`)
+      .bind(before)
+      .run();
+    return result.meta.changes ?? 0;
   }
 }
