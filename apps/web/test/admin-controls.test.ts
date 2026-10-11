@@ -1033,6 +1033,27 @@ describe('the account page', () => {
     assert.equal(page.body.ban, null);
   });
 
+  it("lists an account's builds, not its rollbacks or edits (D152, D190)", async () => {
+    const w = world();
+    await seedProject(w, 'proj_a');
+    await seedRunningBuild(w, 'proj_a', 'run_1');
+    for (const runId of ['rollback-1', 'edit-1', 'run_1:repair']) {
+      await exec(
+        w.db,
+        `INSERT INTO generation_stages
+           (run_id, project_id, base_revision, state, snapshot_revision, created_at, updated_at)
+         VALUES (?1, 'proj_a', NULL, 'accepted', NULL, ?2, ?2)`,
+        runId,
+        '2026-09-29T11:59:30.000Z',
+      );
+    }
+    const runs = await new AdminStore(w.db).recentRuns(USER);
+    assert.deepEqual(
+      runs.map((run) => run.runId),
+      ['run_1'],
+    );
+  });
+
   it('answers 404 for an address Clerk does not know', async () => {
     const w = world();
     const page = await w.call(

@@ -32,7 +32,12 @@ import {
   readBuildStart,
 } from './mcp-server.ts';
 import type { McpDeps } from './mcp-server.ts';
-import { McpBuildStore } from './mcp-store.ts';
+import { McpBuildStore, McpCallStore } from './mcp-store.ts';
+import {
+  type BrowserBinding,
+  captureScreenshot,
+  launchBrowser,
+} from './screenshot.ts';
 import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
 import { accountDirectoryFor } from './account-directory.ts';
 import {
@@ -485,6 +490,11 @@ export interface Env
    */
   DOMAIN_BURST?: RateLimit;
   /**
+   * File edits outside a build (D190, `project-handlers.ts`), per account,
+   * on top of the daily cap an assistant's calls take.
+   */
+  EDIT_BURST?: RateLimit;
+  /**
    * A project's share link, per address (`share-handlers.ts`): the view,
    * and the live preview's state and start. Keyed on the address rather
    * than a user, because nobody signs in to follow a link, and checked
@@ -513,6 +523,16 @@ export interface Env
   MCP_IP_BURST?: RateLimit;
   /** Builds started from `/mcp`, per account: one at a time, near enough. */
   MCP_BUILD_BURST?: RateLimit;
+  /**
+   * take_screenshot from `/mcp` (D190), per account: each capture holds a
+   * Browser Rendering browser, whose time is billed.
+   */
+  SCREENSHOT_BURST?: RateLimit;
+  /**
+   * Cloudflare Browser Rendering, for take_screenshot (D190). Unbound (a
+   * self-hosted copy under Docker), the tool is not offered.
+   */
+  BROWSER?: BrowserBinding;
   /**
    * Builds one account may start from assistants in any 24 hours (D182).
    * Unset means `DEFAULT_MCP_DAILY_BUILDS`. Builds started in the builder
@@ -3963,9 +3983,23 @@ function mcpDeps(
     );
   };
   const builds = new McpBuildStore(env.DB!);
+  const calls = new McpCallStore(env.DB!);
   const limit = Number(env.VIBLD_MCP_DAILY_BUILDS);
   const dailyBuildLimit =
     Number.isInteger(limit) && limit >= 0 ? limit : DEFAULT_MCP_DAILY_BUILDS;
+  // The plan's cap on editing calls (D201), read once per message and only
+  // by the editing tools: a message that calls none of them reads no plan.
+  // The tier `/api/plan` would read, with an admin's change to the plan
+  // (D134).
+  let editCallLimit: Promise<number> | undefined;
+  const editCallLimitOf = () =>
+    (editCallLimit ??= Promise.all([
+      planOf(env.DB!, userId),
+      savedPlanLimits(env.DB!),
+    ]).then(
+      ([plan, saved]) =>
+        planLimitsFor(plan.tier, saved, freeAllowanceOf(env)).mcpDailyEditCalls,
+    ));
   return {
     caller,
     appOrigin: origin,
@@ -4013,6 +4047,46 @@ function mcpDeps(
         return true;
       }
     },
+    takeEditCall: async (tool, projectId) => {
+      const limit = await editCallLimitOf();
+      const now = Date.now();
+      const taken = await calls.take({
+        id: crypto.randomUUID(),
+        userId,
+        clientId: caller.clientId,
+        tool,
+        projectId,
+        since: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+        calledAt: new Date(now).toISOString(),
+        limit,
+      });
+      return { taken, limit };
+    },
+    ...(env.BROWSER
+      ? {
+          screenshot: {
+            burstAllowed: async () => {
+              if (!env.SCREENSHOT_BURST) return true;
+              try {
+                return (
+                  await env.SCREENSHOT_BURST.limit({
+                    key: `mcp-screenshot:${userId}`,
+                  })
+                ).success;
+              } catch (error) {
+                console.error('MCP screenshot limiter unavailable', error);
+                return true;
+              }
+            },
+            capture: (url, options) =>
+              captureScreenshot(
+                () => launchBrowser(env.BROWSER!),
+                url,
+                options,
+              ),
+          },
+        }
+      : {}),
   };
 }
 
@@ -4309,7 +4383,7 @@ async function route(
     });
   }
 
-  // The caller's projects (`project-handlers.ts`). Six literal routes,
+  // The caller's projects (`project-handlers.ts`). Seven literal routes,
   // one handler: the handler reads the id from the request's own path.
   const links: ProjectLinks = {
     origin: new URL(request.url).origin,
@@ -4341,6 +4415,16 @@ async function route(
     // its site is in. A takedown alone keeps it, so publishing again
     // brings the domain back as it was.
     removeDomain: (projectId: string) => removeProjectDomain(env, projectId),
+    editAllowed: async (userId: string) => {
+      if (!env.EDIT_BURST) return true;
+      try {
+        const limited = await env.EDIT_BURST.limit({ key: `edit:${userId}` });
+        return limited.success;
+      } catch (error) {
+        console.error('edit rate limiter unavailable', error);
+        return true;
+      }
+    },
   };
   if (pathname === '/api/projects') {
     return handleProjects(request, env, projectDeps);
@@ -4358,6 +4442,9 @@ async function route(
     return handleProjects(request, env, projectDeps);
   }
   if (pathname === '/api/projects/:id/checkpoints/restore') {
+    return handleProjects(request, env, projectDeps);
+  }
+  if (pathname === '/api/projects/:id/files') {
     return handleProjects(request, env, projectDeps);
   }
   if (pathname === '/api/projects/:id/domain') {

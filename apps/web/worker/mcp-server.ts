@@ -1,8 +1,8 @@
 import { matchCatalogDesigns } from '@vibld/ai/catalog-inspiration';
 import type { DesignTemplateName } from '@vibld/ai/design-template-index';
-import { MAX_PROMPT_CHARS } from '@vibld/ai/limits';
+import { MAX_BASE_CONTENT_CHARS, MAX_PROMPT_CHARS } from '@vibld/ai/limits';
 
-import { MCP_SCOPE, type McpCaller } from './mcp-auth.ts';
+import { EDIT_SCOPE, MCP_SCOPE, type McpCaller } from './mcp-auth.ts';
 
 /**
  * `/mcp`: vibld as an MCP server (docs/decisions.md D182), so an assistant
@@ -23,6 +23,15 @@ import { MCP_SCOPE, type McpCaller } from './mcp-auth.ts';
  * only what an assistant needs on top: a cap on builds a day, and a burst
  * limit of its own, because an assistant can loop where a person clicks.
  *
+ * The editing tools (D190) work on a project's files without a build:
+ * read them, write them, type-check them, and go back to a checkpoint.
+ * They spend no model and nothing is billed for them (D201); each call
+ * takes one of the plan's calls a day instead (`EDIT_TOOLS` below). They
+ * need the `edit` scope as well as `build`, and a token without it is
+ * challenged to step up before anything is counted or read (`mcpStepUp`).
+ * take_screenshot is one of them, offered only where Browser Rendering is
+ * bound (`McpDeps.screenshot`).
+ *
  * Kept free of the Worker's bindings so it can be tested under
  * `node --test`; the router supplies them (`mcpDeps` in `index.ts`).
  */
@@ -41,7 +50,7 @@ export const SERVER_INFO = {
 };
 
 export const INSTRUCTIONS =
-  'vibld builds websites and web apps from a description. Find a starting design with search_templates, start a build with start_build, then poll get_build_status until it ends (a build takes several minutes). Open the result with get_preview_url. Builds are billed to the signed-in account, as they are in the builder at https://app.vibld.com.';
+  "vibld builds websites and web apps from a description. Find a starting design with search_templates, start a build with start_build, then poll get_build_status until it ends (a build takes several minutes). Open the result with get_preview_url. Builds are billed to the signed-in account, as they are in the builder at https://app.vibld.com. To change a project's code yourself instead, read it with list_files and read_files, change it with write_files (naming the revision you read as baseRevision), then run check_types. list_checkpoints and restore_checkpoint go back to earlier code, get_logs reports the preview and the project's recent builds, and take_screenshot, when it is listed, shows the preview at a desktop, tablet or phone width. The editing tools need the account to approve editing when it connects vibld, cost no credit, and each call counts toward a daily number set by the account's plan.";
 
 /** What the router lends a call: the person's own API, as them. */
 export interface ApiAnswer {
@@ -79,6 +88,45 @@ export interface McpDeps {
   dailyBuildLimit: number;
   /** False when this account is starting builds too fast. */
   buildBurstAllowed: () => Promise<boolean>;
+  /**
+   * Takes one of the account's calls to the editing tools for the last 24
+   * hours (D201), atomically, for `tool` in `projectId`. `limit` is the
+   * plan's cap, which a refusal names.
+   */
+  takeEditCall: (
+    tool: string,
+    projectId: string,
+  ) => Promise<{ taken: boolean; limit: number }>;
+  /**
+   * Cloudflare Browser Rendering, for take_screenshot. Absent where the
+   * Worker has no `BROWSER` binding (a self-hosted copy under Docker), and
+   * then the tool is not listed.
+   */
+  screenshot?: ScreenshotDeps;
+}
+
+/** The widths take_screenshot offers: the builder's Desktop, Tablet and Phone (D192). */
+export const SCREENSHOT_WIDTHS = [1280, 768, 390] as const;
+export type ScreenshotWidth = (typeof SCREENSHOT_WIDTHS)[number];
+
+export interface ScreenshotDeps {
+  /** False when this account is taking screenshots too fast: browser time is billed. */
+  burstAllowed: () => Promise<boolean>;
+  /** One page loaded in a headless browser and captured (`screenshot.ts`). */
+  capture: (
+    url: string,
+    options: { width: ScreenshotWidth; fullPage: boolean },
+  ) => Promise<Screenshot>;
+}
+
+export interface Screenshot {
+  /** The image, base64. */
+  data: string;
+  mimeType: 'image/png' | 'image/jpeg';
+  width: number;
+  height: number;
+  /** True when a full-page capture was cut at its height limit. */
+  clipped: boolean;
 }
 
 interface JsonRpcRequest {
@@ -116,6 +164,8 @@ const PARSE_ERROR = -32700;
 const INVALID_REQUEST = -32600;
 const METHOD_NOT_FOUND = -32601;
 const INVALID_PARAMS = -32602;
+/** Server-defined: the token lacks a scope the call needs (`mcpStepUp`). */
+const INSUFFICIENT_SCOPE = -32001;
 
 /** The newest version both sides speak, or ours when the client's is unknown. */
 export function negotiateVersion(requested: unknown): string {
@@ -126,6 +176,39 @@ export function negotiateVersion(requested: unknown): string {
 }
 
 const ID_PATTERN = '^[0-9a-f-]{36}$';
+/** A revision, as `project-handlers.ts` holds one. */
+const REVISION_PATTERN = '^[A-Za-z0-9_-]{1,64}$';
+/** The longest path a project file may have (`DEFAULT_LIMITS`). */
+const MAX_PATH_CHARS = 256;
+
+/** The most files one read_files or write_files call names. */
+export const MAX_TOOL_FILES = 20;
+/**
+ * The most file content one read_files answers with. A file past it is
+ * named with its size and left for another call, so one answer never
+ * fills an assistant's context with a whole project.
+ */
+export const MAX_READ_CHARS = 100_000;
+/** The most of a failed type check's output check_types passes on. */
+export const MAX_TYPECHECK_CHARS = 20_000;
+/** The longest page path take_screenshot loads. */
+const MAX_SCREENSHOT_PATH_CHARS = 512;
+/** How tall a full-page screenshot may be, in CSS pixels, before it is cut. */
+export const MAX_SCREENSHOT_HEIGHT = 8_000;
+
+const PROJECT_ID_INPUT = {
+  type: 'string',
+  pattern: ID_PATTERN,
+  description: 'The project (from list_projects).',
+} as const;
+
+const PATH_INPUT = {
+  type: 'string',
+  minLength: 1,
+  maxLength: MAX_PATH_CHARS,
+  description:
+    'A path relative to the project root, with forward slashes: "src/App.tsx".',
+} as const;
 
 export const TOOLS = [
   {
@@ -254,7 +337,246 @@ export const TOOLS = [
       openWorldHint: false,
     },
   },
+  {
+    name: 'list_files',
+    title: 'List files',
+    description:
+      "The files in a project's current code: each path and its size in characters, and the revision they are at, which write_files names as baseRevision. Counts toward the plan's daily editing calls.",
+    inputSchema: {
+      type: 'object',
+      properties: { projectId: PROJECT_ID_INPUT },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'read_files',
+    title: 'Read files',
+    description: `The contents of up to ${MAX_TOOL_FILES} files in a project's current code, or in one of its checkpoints with revision (from list_checkpoints). At most ${MAX_READ_CHARS} characters of content come back. A file that does not fit beside the others is named with its size and left out, to read in another call; one file longer than that comes back in parts: read it alone, then again with offset set to the nextOffset each part reports. Counts toward the plan's daily editing calls.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_INPUT,
+        paths: {
+          type: 'array',
+          items: PATH_INPUT,
+          minItems: 1,
+          maxItems: MAX_TOOL_FILES,
+          description: 'The files to read (from list_files).',
+        },
+        revision: {
+          type: 'string',
+          pattern: REVISION_PATTERN,
+          description:
+            'A checkpoint to read from instead of the current code. Leave out for the current code.',
+        },
+        offset: {
+          type: 'integer',
+          minimum: 0,
+          description:
+            'With one path only: the character to start reading from, the nextOffset a part of a long file reported. Defaults to 0.',
+        },
+      },
+      required: ['projectId', 'paths'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'write_files',
+    title: 'Write files',
+    description: `Write up to ${MAX_TOOL_FILES} files into a project's current code, and delete up to ${MAX_TOOL_FILES}, with no build. The change becomes the project's code at once, as a new revision and a checkpoint restore_checkpoint can undo. baseRevision is the revision the change was made against (from list_files or read_files): if the project has changed since, nothing is written and the error names the current revision to read again. Refused while a build runs. Costs no credit; counts toward the plan's daily editing calls. Run check_types afterwards.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_INPUT,
+        baseRevision: {
+          type: 'string',
+          pattern: REVISION_PATTERN,
+          description:
+            'The revision list_files or read_files reported for the code this change was made against.',
+        },
+        files: {
+          type: 'array',
+          maxItems: MAX_TOOL_FILES,
+          description:
+            'Files to write: each one replaces the file at its path, or is added.',
+          items: {
+            type: 'object',
+            properties: {
+              path: PATH_INPUT,
+              content: {
+                type: 'string',
+                maxLength: MAX_BASE_CONTENT_CHARS,
+                description: "The file's whole new content.",
+              },
+            },
+            required: ['path', 'content'],
+            additionalProperties: false,
+          },
+        },
+        delete: {
+          type: 'array',
+          items: PATH_INPUT,
+          maxItems: MAX_TOOL_FILES,
+          description: 'Paths of files to delete. Each must be in the project.',
+        },
+      },
+      required: ['projectId', 'baseRevision'],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnlyHint: false,
+      // It replaces the project's current code with a new revision.
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: 'check_types',
+    title: 'Check types',
+    description:
+      "Type-check a project's current code in its live preview, starting the preview if it is not running, which takes a minute or two: call again until the status is ready. Says whether the check passed and, if not, what the compiler reported. Uses the account's one preview, as get_preview_url does. Counts toward the plan's daily editing calls.",
+    inputSchema: {
+      type: 'object',
+      properties: { projectId: PROJECT_ID_INPUT },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: 'list_checkpoints',
+    title: 'List checkpoints',
+    description:
+      "A project's checkpoints, newest first: each revision its code has been at, what made it (a build, a repair, an edit, a restore) and when, and which is current. Counts toward the plan's daily editing calls.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_INPUT,
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 100,
+          description: 'How many to return. Defaults to 20.',
+        },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'restore_checkpoint',
+    title: 'Restore checkpoint',
+    description:
+      "Make one of a project's checkpoints (from list_checkpoints) its current code again. baseRevision is the current revision list_checkpoints reported: if the project has changed since, nothing moves. The code being replaced stays in the history. Refused while a build runs. Costs no credit; counts toward the plan's daily editing calls.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_INPUT,
+        revision: {
+          type: 'string',
+          pattern: REVISION_PATTERN,
+          description: 'The checkpoint to restore.',
+        },
+        baseRevision: {
+          type: 'string',
+          pattern: REVISION_PATTERN,
+          description: 'The current revision list_checkpoints reported.',
+        },
+      },
+      required: ['projectId', 'revision', 'baseRevision'],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: 'get_logs',
+    title: 'Get logs',
+    description:
+      "What vibld records about a project's code running: the account's live preview (its state, and its type check when it is serving this project's current code) and how the project's recent builds ended. Server output, runtime errors and the browser console are not captured, so they are not here. Starts nothing. Counts toward the plan's daily editing calls.",
+    inputSchema: {
+      type: 'object',
+      properties: { projectId: PROJECT_ID_INPUT },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'take_screenshot',
+    title: 'Take screenshot',
+    description:
+      "A picture of a project's current code running in its live preview, as a desktop (1280), tablet (768) or phone (390) browser sees it. Starts the preview if it is not running, which takes a minute or two: call again until the image comes back. Uses the account's one preview, as get_preview_url does. Counts toward the plan's daily editing calls.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_INPUT,
+        path: {
+          type: 'string',
+          pattern: '^/',
+          maxLength: MAX_SCREENSHOT_PATH_CHARS,
+          description:
+            'The page to load in the preview, from its root: "/" or "/pricing". Defaults to "/".',
+        },
+        width: {
+          type: 'integer',
+          enum: [...SCREENSHOT_WIDTHS],
+          description:
+            'The browser width: 1280 (desktop), 768 (tablet) or 390 (phone). Defaults to 1280.',
+        },
+        fullPage: {
+          type: 'boolean',
+          description: `The whole page, to at most ${MAX_SCREENSHOT_HEIGHT} pixels tall, rather than what fits in the window. Defaults to false.`,
+        },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
 ] as const;
+
+/** Tools only listed and served where their dependency is lent. */
+function toolsFor(deps: McpDeps) {
+  return deps.screenshot
+    ? TOOLS
+    : TOOLS.filter((tool) => tool.name !== 'take_screenshot');
+}
+
+/**
+ * The editing tools (D190). Every call to one, a read as much as a write,
+ * takes one of the plan's calls a day (D201); the five tools before them
+ * do not, and builds have their own cap. Each needs the `edit` scope.
+ */
+export const EDIT_TOOLS: ReadonlySet<string> = new Set([
+  'list_files',
+  'read_files',
+  'write_files',
+  'check_types',
+  'list_checkpoints',
+  'restore_checkpoint',
+  'get_logs',
+  'take_screenshot',
+]);
 
 class ToolError extends Error {}
 
@@ -297,6 +619,7 @@ function stringArg(
 }
 
 const PROJECT_ID = /^[0-9a-f-]{36}$/;
+const REVISION = /^[A-Za-z0-9_-]{1,64}$/;
 /** Words too common in a request to say which design it wants. */
 const FILLER = new Set([
   'and',
@@ -468,6 +791,16 @@ async function runTool(
 
     case 'get_preview_url':
       return previewUrl(args, deps);
+
+    case 'list_files':
+    case 'read_files':
+    case 'write_files':
+    case 'check_types':
+    case 'list_checkpoints':
+    case 'restore_checkpoint':
+    case 'get_logs':
+    case 'take_screenshot':
+      return runEditTool(name, args, deps);
 
     default:
       throw new ToolError(`There is no tool called "${name}".`);
@@ -656,6 +989,19 @@ async function previewUrl(
     required: true,
     pattern: PROJECT_ID,
   })!;
+  return previewAnswer(await ensurePreview(projectId, deps));
+}
+
+/**
+ * The account's one preview, started on or moved to the project's
+ * accepted code if it is not already serving it, as far as it has got:
+ * its status, which `get_preview_url` and `check_types` each read their
+ * own way.
+ */
+async function ensurePreview(
+  projectId: string,
+  deps: McpDeps,
+): Promise<Record<string, unknown>> {
   const opened = await deps.api(
     'GET',
     `/api/projects/${encodeURIComponent(projectId)}`,
@@ -687,10 +1033,10 @@ async function previewUrl(
   const live =
     current.status === 200 &&
     ['ready', 'installing', 'starting'].includes(String(status.status));
-  if (live && status.revision === revision) return previewAnswer(status);
+  if (live && status.revision === revision) return status;
   // A move to this revision still installing (D74): left to finish.
   if (status.status === 'installing' && status.updatingTo === revision) {
-    return previewAnswer(status);
+    return status;
   }
   const body = { files: snapshot.files, revision };
   if (live && status.status === 'ready') {
@@ -699,10 +1045,10 @@ async function previewUrl(
     const moved = await deps.api('PATCH', '/api/preview', body);
     const result = record(moved.body);
     if (moved.status === 200 && result.outcome === 'applied') {
-      return previewAnswer(record(result.status));
+      return record(result.status);
     }
     if (moved.status === 200 && result.outcome === 'installing') {
-      return previewAnswer({ status: 'installing' });
+      return { status: 'installing' };
     }
   }
   if (live) await stopPreview(deps);
@@ -719,7 +1065,7 @@ async function previewUrl(
       );
     }
   }
-  return previewAnswer(started);
+  return started;
 }
 
 function servesOther(
@@ -776,7 +1122,602 @@ function previewAnswer(status: Record<string, unknown>) {
   };
 }
 
+// -------------------------------------------------------------------------
+// The editing tools (D190), each call counted against the plan (D201).
+// -------------------------------------------------------------------------
+
+/**
+ * One call to an editing tool: its arguments checked, then one of the
+ * plan's daily calls taken, then the work. In that order, so a malformed
+ * call costs nothing and a refused one has read nothing.
+ */
+async function runEditTool(
+  name: string,
+  args: Record<string, unknown>,
+  deps: McpDeps,
+): Promise<unknown> {
+  const projectId = stringArg(args, 'projectId', {
+    required: true,
+    pattern: PROJECT_ID,
+  })!;
+  const project = encodeURIComponent(projectId);
+  switch (name) {
+    case 'list_files': {
+      await takeEditCall(name, projectId, deps);
+      const snapshot = await readCode(deps, project);
+      return {
+        projectId,
+        revision: snapshot.revision,
+        files: snapshot.files.map((file) => ({
+          path: file.path,
+          chars: file.content.length,
+        })),
+      };
+    }
+
+    case 'read_files': {
+      const paths = pathsArg(args, 'paths', { required: true });
+      const revision = stringArg(args, 'revision', { pattern: REVISION });
+      const offset = offsetArg(args, paths);
+      await takeEditCall(name, projectId, deps);
+      const snapshot = await readCode(deps, project, revision);
+      return readAnswer(projectId, snapshot, paths, offset);
+    }
+
+    case 'write_files': {
+      const base = stringArg(args, 'baseRevision', {
+        required: true,
+        pattern: REVISION,
+      })!;
+      const files = filesArg(args);
+      const remove = pathsArg(args, 'delete');
+      if (files.length === 0 && remove.length === 0) {
+        throw new ToolError('Name at least one file to write or delete.');
+      }
+      await takeEditCall(name, projectId, deps);
+      const answer = await deps.api('PUT', `/api/projects/${project}/files`, {
+        base,
+        files,
+        ...(remove.length > 0 ? { delete: remove } : {}),
+      });
+      const snapshot = snapshotOf(answer, 'The files could not be written.');
+      return {
+        projectId,
+        revision: snapshot.revision,
+        written: files.map((file) => file.path),
+        deleted: remove,
+        files: snapshot.files.length,
+        next: 'Call check_types to type-check the new code, or get_preview_url to open it.',
+      };
+    }
+
+    case 'check_types': {
+      await takeEditCall(name, projectId, deps);
+      return typecheckAnswer(await ensurePreview(projectId, deps));
+    }
+
+    case 'list_checkpoints': {
+      const raw = args.limit;
+      if (
+        raw !== undefined &&
+        raw !== null &&
+        (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1)
+      ) {
+        throw new ToolError('"limit" must be a whole number from 1 to 100.');
+      }
+      const limit = typeof raw === 'number' ? Math.min(100, raw) : 20;
+      await takeEditCall(name, projectId, deps);
+      const answer = await deps.api(
+        'GET',
+        `/api/projects/${project}/checkpoints`,
+      );
+      if (answer.status !== 200) {
+        throw new ToolError(
+          errorOf(answer, "That project's history could not be read."),
+        );
+      }
+      const body = record(answer.body);
+      const checkpoints = Array.isArray(body.checkpoints)
+        ? (body.checkpoints as unknown[])
+        : [];
+      return {
+        projectId,
+        current: body.current ?? null,
+        checkpoints: checkpoints.slice(0, limit).map((entry) => {
+          const checkpoint = record(entry);
+          return {
+            revision: checkpoint.revision,
+            kind: checkpoint.kind,
+            acceptedAt: checkpoint.acceptedAt,
+          };
+        }),
+        ...(checkpoints.length > limit ? { more: true } : {}),
+      };
+    }
+
+    case 'restore_checkpoint': {
+      const revision = stringArg(args, 'revision', {
+        required: true,
+        pattern: REVISION,
+      })!;
+      const base = stringArg(args, 'baseRevision', {
+        required: true,
+        pattern: REVISION,
+      })!;
+      await takeEditCall(name, projectId, deps);
+      const answer = await deps.api(
+        'POST',
+        `/api/projects/${project}/checkpoints/restore`,
+        { revision, base },
+      );
+      const snapshot = snapshotOf(
+        answer,
+        'That checkpoint could not be restored.',
+      );
+      return {
+        projectId,
+        revision: snapshot.revision,
+        files: snapshot.files.length,
+        next: 'Call check_types or get_preview_url to see the restored code.',
+      };
+    }
+
+    case 'get_logs':
+      await takeEditCall(name, projectId, deps);
+      return logs(projectId, deps);
+
+    case 'take_screenshot':
+      return takeScreenshot(projectId, args, deps);
+
+    default:
+      throw new ToolError(`There is no tool called "${name}".`);
+  }
+}
+
+async function takeEditCall(
+  name: string,
+  projectId: string,
+  deps: McpDeps,
+): Promise<void> {
+  const { taken, limit } = await deps.takeEditCall(name, projectId);
+  if (!taken) {
+    throw new ToolError(
+      `This account's assistants have made ${limit} calls to vibld's editing tools in the last 24 hours, which is the most its plan allows. Try again later. Editing in the builder at ${deps.appOrigin} is not affected.`,
+    );
+  }
+}
+
+/**
+ * read_files' `offset`: where in its one file a read starts. A part of a
+ * file longer than one call's budget names the next as `nextOffset`, so
+ * every file a project may hold can be read, however long.
+ */
+function offsetArg(args: Record<string, unknown>, paths: string[]): number {
+  const raw = args.offset;
+  if (raw === undefined || raw === null) return 0;
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 0) {
+    throw new ToolError('"offset" must be a whole number, 0 or more.');
+  }
+  if (paths.length !== 1) {
+    throw new ToolError(
+      '"offset" reads part of one file: name a single path with it.',
+    );
+  }
+  return raw;
+}
+
+/**
+ * The files read_files names, within the budget of one call. A file that
+ * does not fit beside the ones before it is named and left for another
+ * call. One that does not fit even alone, read first, comes back in parts.
+ */
+function readAnswer(
+  projectId: string,
+  snapshot: Code,
+  paths: string[],
+  offset: number,
+) {
+  const byPath = new Map(
+    snapshot.files.map((file) => [file.path, file.content]),
+  );
+  const files: {
+    path: string;
+    content: string;
+    offset?: number;
+    nextOffset?: number;
+    chars?: number;
+  }[] = [];
+  const omitted: { path: string; chars: number }[] = [];
+  const missing: string[] = [];
+  let budget = MAX_READ_CHARS;
+  let part: { path: string; nextOffset: number } | undefined;
+  for (const path of paths) {
+    const content = byPath.get(path);
+    if (content === undefined) {
+      missing.push(path);
+      continue;
+    }
+    if (offset > content.length) {
+      throw new ToolError(
+        `"offset" is past the end of ${path}, which has ${content.length} characters.`,
+      );
+    }
+    const rest = content.length - offset;
+    if (rest <= budget) {
+      files.push({
+        path,
+        content: offset === 0 ? content : content.slice(offset),
+        ...(offset > 0 ? { offset, chars: content.length } : {}),
+      });
+      budget -= rest;
+    } else if (files.length === 0 && part === undefined) {
+      const nextOffset = offset + budget;
+      files.push({
+        path,
+        content: content.slice(offset, nextOffset),
+        offset,
+        nextOffset,
+        chars: content.length,
+      });
+      part = { path, nextOffset };
+      budget = 0;
+    } else {
+      omitted.push({ path, chars: content.length });
+    }
+  }
+  const next = part
+    ? `Only part of ${part.path} came back. Call read_files with paths ["${part.path}"] and offset ${part.nextOffset} for the next part.`
+    : omitted.length > 0
+      ? `Over the ${MAX_READ_CHARS} characters one call returns. Read the omitted files in another call.`
+      : undefined;
+  return {
+    projectId,
+    revision: snapshot.revision,
+    files,
+    ...(omitted.length > 0 ? { omitted } : {}),
+    ...(next ? { next } : {}),
+    ...(missing.length > 0 ? { missing } : {}),
+  };
+}
+
+/** A list of project paths, each checked as the schema says. */
+function pathsArg(
+  args: Record<string, unknown>,
+  name: string,
+  options: { required?: boolean } = {},
+): string[] {
+  const value = args[name];
+  if (value === undefined || value === null) {
+    if (options.required) throw new ToolError(`"${name}" is required.`);
+    return [];
+  }
+  if (!Array.isArray(value)) throw new ToolError(`"${name}" must be a list.`);
+  if (options.required && value.length === 0) {
+    throw new ToolError(`"${name}" must name at least one file.`);
+  }
+  if (value.length > MAX_TOOL_FILES) {
+    throw new ToolError(
+      `"${name}" may name at most ${MAX_TOOL_FILES} files at once.`,
+    );
+  }
+  return value.map((path) => checkedPath(path, name));
+}
+
+function checkedPath(value: unknown, name: string): string {
+  if (
+    typeof value !== 'string' ||
+    value === '' ||
+    value.length > MAX_PATH_CHARS
+  ) {
+    throw new ToolError(
+      `Every path in "${name}" must be a string of 1 to ${MAX_PATH_CHARS} characters.`,
+    );
+  }
+  return value;
+}
+
+/** write_files' `files`, each a path and its whole content. */
+function filesArg(
+  args: Record<string, unknown>,
+): { path: string; content: string }[] {
+  const value = args.files;
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new ToolError('"files" must be a list.');
+  if (value.length > MAX_TOOL_FILES) {
+    throw new ToolError(
+      `"files" may name at most ${MAX_TOOL_FILES} files at once.`,
+    );
+  }
+  return value.map((entry) => {
+    const file = record(entry);
+    if (typeof file.content !== 'string') {
+      throw new ToolError('Every file in "files" needs a string "content".');
+    }
+    if (file.content.length > MAX_BASE_CONTENT_CHARS) {
+      throw new ToolError(
+        `A file's content must be ${MAX_BASE_CONTENT_CHARS} characters or fewer.`,
+      );
+    }
+    return { path: checkedPath(file.path, 'files'), content: file.content };
+  });
+}
+
+interface Code {
+  revision: string;
+  files: { path: string; content: string }[];
+}
+
+/** The project's accepted code, or one checkpoint's. */
+async function readCode(
+  deps: McpDeps,
+  project: string,
+  revision?: string,
+): Promise<Code> {
+  const answer = await deps.api(
+    'GET',
+    `/api/projects/${project}/files${
+      revision ? `?revision=${encodeURIComponent(revision)}` : ''
+    }`,
+  );
+  return snapshotOf(answer, "That project's files could not be read.");
+}
+
+/**
+ * The code a files route or a restore answered with. A refusal because the
+ * project moved on names the revision it is at now, so the assistant can
+ * read it again rather than guess.
+ */
+function snapshotOf(answer: ApiAnswer, fallback: string): Code {
+  const body = record(answer.body);
+  if (answer.status !== 200) {
+    const message = errorOf(answer, fallback);
+    throw new ToolError(
+      body.code === 'checkpoint-moved' && typeof body.current === 'string'
+        ? `${message} The current revision is ${body.current}.`
+        : message,
+    );
+  }
+  const snapshot = record(body.snapshot);
+  const files = Array.isArray(snapshot.files)
+    ? (snapshot.files as unknown[]).map(record)
+    : null;
+  if (
+    typeof snapshot.revision !== 'string' ||
+    !files ||
+    files.some(
+      (file) =>
+        typeof file.path !== 'string' || typeof file.content !== 'string',
+    )
+  ) {
+    throw new ToolError(fallback);
+  }
+  return {
+    revision: snapshot.revision,
+    files: files as unknown as Code['files'],
+  };
+}
+
+/** A preview's status, read for its type check. */
+function typecheckAnswer(status: Record<string, unknown>) {
+  if (status.status === 'ready') {
+    const failure =
+      typeof status.typecheckFailure === 'string'
+        ? status.typecheckFailure
+        : '';
+    return failure === ''
+      ? { status: 'ready', typecheck: 'passed' }
+      : {
+          status: 'ready',
+          typecheck: 'failed',
+          output:
+            failure.length > MAX_TYPECHECK_CHARS
+              ? `${failure.slice(0, MAX_TYPECHECK_CHARS)}\n[cut at ${MAX_TYPECHECK_CHARS} characters]`
+              : failure,
+          next: 'Fix what it reports with write_files, then call check_types again.',
+        };
+  }
+  if (status.status === 'failed') {
+    throw new ToolError(
+      typeof status.error === 'string' && status.error
+        ? status.error
+        : 'The preview failed to start, so the code could not be checked.',
+    );
+  }
+  return {
+    status: status.status,
+    ...(typeof status.position === 'number'
+      ? { position: status.position }
+      : {}),
+    next: 'The preview is starting so the code can be checked. Call check_types again in about 20 seconds.',
+  };
+}
+
+/**
+ * get_logs: what is recorded, read without starting anything. The
+ * preview is the account's one, so its state is this project's only when
+ * it serves this project's current code; otherwise the answer says it is
+ * serving something else rather than passing another project's on.
+ */
+async function logs(projectId: string, deps: McpDeps): Promise<unknown> {
+  const project = encodeURIComponent(projectId);
+  const [history, preview, runs] = await Promise.all([
+    deps.api('GET', `/api/projects/${project}/checkpoints`),
+    deps.api('GET', '/api/preview').catch(() => null),
+    deps.api('GET', `/api/runs?project=${project}`).catch(() => null),
+  ]);
+  if (history.status !== 200) {
+    throw new ToolError(errorOf(history, 'That project could not be read.'));
+  }
+  const current = record(history.body).current;
+  const revision = typeof current === 'string' ? current : null;
+
+  const status = preview?.status === 200 ? record(preview.body) : null;
+  let previewState: Record<string, unknown>;
+  if (!status) {
+    previewState = { status: 'unknown' };
+  } else if (status.status === 'failed') {
+    previewState = {
+      status: 'failed',
+      ...(typeof status.error === 'string' ? { error: status.error } : {}),
+    };
+  } else if (
+    !['ready', 'installing', 'starting'].includes(String(status.status))
+  ) {
+    previewState = { status: 'not-running' };
+  } else if (revision === null || status.revision !== revision) {
+    previewState = {
+      status: 'serving-other-code',
+      note: "The account's preview is not serving this project's current code. check_types or get_preview_url starts it on this code.",
+    };
+  } else if (status.status === 'ready') {
+    const checked = typecheckAnswer(status);
+    previewState = {
+      status: 'ready',
+      typecheck: checked.typecheck,
+      ...('output' in checked ? { typecheckOutput: checked.output } : {}),
+    };
+  } else {
+    previewState = { status: status.status };
+  }
+
+  const traces =
+    runs?.status === 200 && Array.isArray(record(runs.body).runs)
+      ? (record(runs.body).runs as unknown[]).map(record)
+      : null;
+  return {
+    projectId,
+    revision,
+    preview: previewState,
+    builds: traces
+      ? traces.slice(0, 10).map((trace) => ({
+          runId: trace.runId,
+          outcome: trace.stop,
+          model: trace.model,
+          endedAt: trace.endedAt,
+          seconds:
+            typeof trace.elapsedMs === 'number'
+              ? Math.round(trace.elapsedMs / 1000)
+              : undefined,
+        }))
+      : 'unavailable',
+    notCaptured:
+      "vibld does not record a running project's server output, runtime errors or browser console, so they are not here. The type check is the preview's.",
+  };
+}
+
+/**
+ * take_screenshot: the preview brought to the project's current code, as
+ * check_types brings it, then one page of it loaded in a headless browser.
+ *
+ * The browser opens the preview's own URL, which `/api/preview` hands only
+ * to the account it belongs to and which carries the preview's token; it
+ * is given no other access. The page path is resolved against that URL and
+ * must stay on its origin.
+ */
+async function takeScreenshot(
+  projectId: string,
+  args: Record<string, unknown>,
+  deps: McpDeps,
+): Promise<unknown> {
+  const browser = deps.screenshot;
+  if (!browser) {
+    throw new ToolError('Screenshots are not available on this server.');
+  }
+  const path =
+    stringArg(args, 'path', { max: MAX_SCREENSHOT_PATH_CHARS }) ?? '/';
+  if (!path.startsWith('/') || path.startsWith('//')) {
+    throw new ToolError('"path" must start with a single "/": "/pricing".');
+  }
+  const width = args.width ?? 1280;
+  if (!(SCREENSHOT_WIDTHS as readonly unknown[]).includes(width)) {
+    throw new ToolError('"width" must be 1280, 768 or 390.');
+  }
+  const fullPage = args.fullPage ?? false;
+  if (typeof fullPage !== 'boolean') {
+    throw new ToolError('"fullPage" must be true or false.');
+  }
+
+  // Before the daily call, so a burst refused costs nothing: each capture
+  // holds a browser, whose time is billed.
+  if (!(await browser.burstAllowed())) {
+    throw new ToolError(
+      'Screenshots are being taken too quickly. Wait a minute, then try again.',
+    );
+  }
+  await takeEditCall('take_screenshot', projectId, deps);
+  const status = await ensurePreview(projectId, deps);
+  if (status.status === 'failed') {
+    throw new ToolError(
+      typeof status.error === 'string' && status.error
+        ? status.error
+        : 'The preview failed to start, so there is nothing to take a picture of.',
+    );
+  }
+  if (status.status !== 'ready' || typeof status.url !== 'string') {
+    return {
+      status: status.status,
+      ...(typeof status.position === 'number'
+        ? { position: status.position }
+        : {}),
+      next: 'The preview is starting. Call take_screenshot again in about 20 seconds.',
+    };
+  }
+  let page: URL;
+  try {
+    const base = new URL(status.url);
+    page = new URL(path, base);
+    if (page.origin !== base.origin) throw new Error('another origin');
+  } catch {
+    throw new ToolError('"path" is not a page of this preview.');
+  }
+  let shot: Screenshot;
+  try {
+    shot = await browser.capture(page.href, {
+      width: width as ScreenshotWidth,
+      fullPage,
+    });
+  } catch (error) {
+    console.error('could not take a screenshot', error);
+    throw new ToolError(
+      'The page could not be captured: it may not have loaded in time. Try again, or open it with get_preview_url.',
+    );
+  }
+  return new ImageResult(shot, {
+    projectId,
+    path,
+    width: shot.width,
+    height: shot.height,
+    format: shot.mimeType === 'image/png' ? 'png' : 'jpeg',
+    ...(shot.clipped
+      ? { clipped: `Cut at ${MAX_SCREENSHOT_HEIGHT} pixels tall.` }
+      : {}),
+  });
+}
+
+/** A tool's answer that is a picture, with a few words about it. */
+class ImageResult {
+  readonly image: Screenshot;
+  readonly details: Record<string, unknown>;
+  constructor(image: Screenshot, details: Record<string, unknown>) {
+    this.image = image;
+    this.details = details;
+  }
+}
+
 function toolResult(value: unknown, isError = false) {
+  if (value instanceof ImageResult) {
+    return {
+      content: [
+        { type: 'text', text: JSON.stringify(value.details, null, 2) },
+        {
+          type: 'image',
+          data: value.image.data,
+          mimeType: value.image.mimeType,
+        },
+      ],
+      isError: false,
+    };
+  }
   return {
     content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     ...(isError ? {} : { structuredContent: value }),
@@ -801,14 +1742,19 @@ async function dispatch(
     case 'ping':
       return rpcResult(id, {});
     case 'tools/list':
-      return rpcResult(id, { tools: TOOLS });
+      return rpcResult(id, { tools: toolsFor(deps) });
     case 'tools/call': {
       const name = params.name;
       if (typeof name !== 'string') {
         return rpcError(id, INVALID_PARAMS, 'A tool name is required.');
       }
-      if (!TOOLS.some((tool) => tool.name === name)) {
+      if (!toolsFor(deps).some((tool) => tool.name === name)) {
         return rpcError(id, INVALID_PARAMS, `Unknown tool: ${name}`);
+      }
+      // Before the arguments are read, a daily call is taken or anything
+      // is read: a token granted `build` alone is asked to step up.
+      if (EDIT_TOOLS.has(name) && !deps.caller.scopes.includes(EDIT_SCOPE)) {
+        return mcpStepUp(deps.appOrigin, id);
       }
       try {
         return rpcResult(
@@ -968,7 +1914,7 @@ export function protectedResourceMetadata(
     resource: `${appOrigin}/mcp`,
     authorization_servers: [issuer],
     bearer_methods_supported: ['header'],
-    scopes_supported: [MCP_SCOPE],
+    scopes_supported: [MCP_SCOPE, EDIT_SCOPE],
     resource_name: 'vibld',
   };
 }
@@ -1005,4 +1951,30 @@ export function mcpUnauthorized(
     status,
     headers: { ...JSON_HEADERS, 'WWW-Authenticate': challenge },
   });
+}
+
+/**
+ * A call to an editing tool on a token granted `build` but not `edit`:
+ * the MCP authorization spec's step-up (2025-11-25, "Scope Challenge
+ * Handling"), a 403 whose challenge names every scope the call needs, so
+ * the client signs the person in again asking for both. A client that
+ * does not step up still has the JSON-RPC error to show, which says what
+ * to do by hand.
+ */
+export function mcpStepUp(
+  appOrigin: string,
+  id: JsonRpcRequest['id'] | undefined,
+): Response {
+  const metadata = `resource_metadata="${appOrigin}${MCP_METADATA_PATH}"`;
+  const response = rpcError(
+    id,
+    INSUFFICIENT_SCOPE,
+    `Editing a project's files needs the "${EDIT_SCOPE}" permission, which this connection was not given. Connect vibld again and approve editing.`,
+    403,
+  );
+  response.headers.set(
+    'WWW-Authenticate',
+    `Bearer error="insufficient_scope", scope="${MCP_SCOPE} ${EDIT_SCOPE}", ${metadata}, error_description="Editing needs the ${EDIT_SCOPE} scope"`,
+  );
+  return response;
 }

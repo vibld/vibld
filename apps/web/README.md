@@ -727,9 +727,18 @@ true`).
 
 `/mcp` lets an assistant the person connected (Claude, Cursor) search
 templates, start builds, follow them and open previews on that person's
-account. Sign-in is OAuth through Clerk; each tool calls this Worker's own
-routes as the person, so every gate and limit above applies. Design, limits
-and the one-time Clerk setting: [docs/mcp-server.md](../../docs/mcp-server.md).
+account, and read, write and type-check a project's files, take screenshots
+of its preview and go back to a checkpoint without a build (D190). Sign-in
+is OAuth through Clerk, with the `build` scope to connect and `edit` for the
+editing tools; each tool calls this Worker's own routes as the person, so
+every gate and limit above applies. The editing tools cost no credit and are
+held to a number of calls a day set by the plan (D201, `mcp_calls`,
+migration 0054). Screenshots use Cloudflare Browser Rendering through the
+`BROWSER` binding in `wrangler.jsonc`, which needs nothing provisioned and
+no extra API token permission, and `SCREENSHOT_BURST` (namespace 1015, 6 a
+minute per account); without the binding the tool is not offered. Design,
+limits and the one-time Clerk settings:
+[docs/mcp-server.md](../../docs/mcp-server.md).
 
 ## Sandbox previews (docs/decisions.md L7-L11)
 
@@ -1620,9 +1629,10 @@ goes back to that secret.
 
 ## Admin: plan limits (D134)
 
-Each plan's active-project limit and monthly allowance can be set on the
-admin page, under **Plans**, in place of the values in `worker/entitlement.ts`,
-and put back with **Reset to code**. A saved plan is stored in D1
+Each plan's active-project limit, monthly allowance and daily calls to the
+MCP editing tools (D201) can be set on the admin page, under **Plans**, in
+place of the values in `worker/entitlement.ts`, and put back with **Reset to
+code**. A saved plan is stored in D1
 (`plan_limits`, migration 0043), applies to every account on the plan within
 30 seconds, and every change is in the audit log. An account's own override
 (D73) still comes first.
@@ -1699,18 +1709,20 @@ back.
 **Routes** (`worker/project-handlers.ts`), all behind Clerk like every
 other `/api/*` route, and a project that is not the caller's is 404:
 
-| Route                                        | Does                                                                                        | Invite gate |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------- | ----------- |
-| `GET /api/projects`                          | List, active and archived, with the tier's limit                                            | open        |
-| `POST /api/projects`                         | Create (held to the limit)                                                                  | gated       |
-| `GET /api/projects/:id`                      | Open: settings, conversation, accepted code                                                 | open        |
-| `PATCH /api/projects/:id`                    | Rename, archive, unarchive (held to the limit), save settings and conversation              | open        |
-| `DELETE /api/projects/:id`                   | Delete: its published site first, then everything under its prefix, then its rows           | open        |
-| `POST /api/projects/:id/duplicate`           | Copy the accepted code, settings and conversation into "<name> (copy)" (held to the limit)  | gated       |
-| `POST /api/projects/:id/share`               | Turn its share link on (below)                                                              | gated       |
-| `DELETE /api/projects/:id/share`             | Turn it off, for good                                                                       | open        |
-| `GET /api/projects/:id/checkpoints`          | The newest 100 accepted checkpoints, newest first (D152)                                    | open        |
-| `POST /api/projects/:id/checkpoints/restore` | Make an earlier checkpoint the accepted one again; deletes none, refused while a build runs | open        |
+| Route                                        | Does                                                                                                                                                     | Invite gate |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `GET /api/projects`                          | List, active and archived, with the tier's limit                                                                                                         | open        |
+| `POST /api/projects`                         | Create (held to the limit)                                                                                                                               | gated       |
+| `GET /api/projects/:id`                      | Open: settings, conversation, accepted code                                                                                                              | open        |
+| `PATCH /api/projects/:id`                    | Rename, archive, unarchive (held to the limit), save settings and conversation                                                                           | open        |
+| `DELETE /api/projects/:id`                   | Delete: its published site first, then everything under its prefix, then its rows                                                                        | open        |
+| `POST /api/projects/:id/duplicate`           | Copy the accepted code, settings and conversation into "<name> (copy)" (held to the limit)                                                               | gated       |
+| `POST /api/projects/:id/share`               | Turn its share link on (below)                                                                                                                           | gated       |
+| `DELETE /api/projects/:id/share`             | Turn it off, for good                                                                                                                                    | open        |
+| `GET /api/projects/:id/checkpoints`          | The newest 100 accepted checkpoints, newest first (D152)                                                                                                 | open        |
+| `POST /api/projects/:id/checkpoints/restore` | Make an earlier checkpoint the accepted one again; deletes none, refused while a build runs                                                              | open        |
+| `GET /api/projects/:id/files`                | The accepted code, or one checkpoint's with `?revision=` (D190)                                                                                          | open        |
+| `PUT /api/projects/:id/files`                | Write and delete files in the accepted code with no build, from the revision read (`base`); refused while a build runs; `EDIT_BURST`, 30 a minute (D190) | gated       |
 
 The gate's reasons are in `access-gate.ts`: making or copying a project is
 starting new work, and reading, tidying or deleting your own is not.

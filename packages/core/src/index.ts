@@ -15,7 +15,7 @@ export type {
   PendingQuestion,
 } from './continuation.ts';
 export { FakeModelProvider } from './fake-provider.ts';
-export { GenerationMachine } from './generation-machine.ts';
+export { GenerationMachine, revisionFor } from './generation-machine.ts';
 export { InMemoryGenerationStore } from './memory-store.ts';
 export {
   RUN_REFUSALS,

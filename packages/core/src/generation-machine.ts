@@ -8,7 +8,15 @@ import type {
   Validator,
 } from './types.ts';
 
-function revisionFor(snapshot: Omit<ProjectSnapshot, 'revision'>): string {
+/**
+ * A snapshot's revision: a hash of its files, so the same files always
+ * name the same revision. Exported for the one other writer of accepted
+ * code, an edit made through `PUT /api/projects/:id/files` (D190), whose
+ * revisions have to read like a build's.
+ */
+export function revisionFor(
+  snapshot: Omit<ProjectSnapshot, 'revision'>,
+): string {
   const payload = JSON.stringify(snapshot.files);
   let hash = 2166136261;
   for (let index = 0; index < payload.length; index += 1) {

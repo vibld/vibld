@@ -627,7 +627,12 @@ export function describeAuditEntry(entry: AdminAuditEntry): string {
         typeof detail.activeProjectLimit === 'number'
           ? `${detail.activeProjectLimit} active projects`
           : 'no project limit'
-      }, ${formatUsd(detail.monthlyAllowanceMicroUsd)} a month`,
+      }, ${formatUsd(detail.monthlyAllowanceMicroUsd)} a month${
+        // Absent from a change saved before the cap existed (D201).
+        typeof detail.mcpDailyEditCalls === 'number'
+          ? `, ${detail.mcpDailyEditCalls} assistant edit calls a day`
+          : ''
+      }`,
     );
   }
   if (entry.action === 'person-models' && Array.isArray(detail.models)) {

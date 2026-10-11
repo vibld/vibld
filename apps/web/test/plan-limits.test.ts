@@ -8,6 +8,7 @@ import { AdminStore } from '../worker/admin-store.ts';
 import type { AuditEntry } from '../worker/admin-store.ts';
 import {
   ACTIVE_PROJECT_LIMIT,
+  MCP_DAILY_EDIT_CALLS,
   TIER_INCLUDED_MICRO_USD,
   activeProjectLimitFor,
   monthlyAllowanceFor,
@@ -84,7 +85,11 @@ describe('a plan’s limits (D134)', () => {
       [
         [
           'free',
-          { activeProjectLimit: 3, monthlyAllowanceMicroUsd: FREE },
+          {
+            activeProjectLimit: 3,
+            monthlyAllowanceMicroUsd: FREE,
+            mcpDailyEditCalls: 50,
+          },
           null,
         ],
         [
@@ -92,6 +97,7 @@ describe('a plan’s limits (D134)', () => {
           {
             activeProjectLimit: null,
             monthlyAllowanceMicroUsd: TIER_INCLUDED_MICRO_USD.build,
+            mcpDailyEditCalls: 500,
           },
           null,
         ],
@@ -100,6 +106,7 @@ describe('a plan’s limits (D134)', () => {
           {
             activeProjectLimit: null,
             monthlyAllowanceMicroUsd: TIER_INCLUDED_MICRO_USD.ship,
+            mcpDailyEditCalls: 2000,
           },
           null,
         ],
@@ -116,13 +123,17 @@ describe('a plan’s limits (D134)', () => {
     });
     assert.equal(saved.status, 200);
     const free = saved.body.plans.find((p: any) => p.tier === 'free');
+    // Saved without a cap on editing calls, as a panel older than it
+    // saves: the code's.
     assert.deepEqual(free.limits, {
       activeProjectLimit: 5,
       monthlyAllowanceMicroUsd: 2_500_000,
+      mcpDailyEditCalls: MCP_DAILY_EDIT_CALLS.free,
     });
     assert.deepEqual(free.code, {
       activeProjectLimit: ACTIVE_PROJECT_LIMIT.free,
       monthlyAllowanceMicroUsd: FREE,
+      mcpDailyEditCalls: MCP_DAILY_EDIT_CALLS.free,
     });
     assert.equal(free.saved.updatedBy, ADMIN);
     assert.deepEqual(w.audits, [
@@ -133,9 +144,52 @@ describe('a plan’s limits (D134)', () => {
         targetUserId: null,
         target: 'free',
         reason: null,
-        detail: { activeProjectLimit: 5, monthlyAllowanceMicroUsd: 2_500_000 },
+        detail: {
+          activeProjectLimit: 5,
+          monthlyAllowanceMicroUsd: 2_500_000,
+          mcpDailyEditCalls: MCP_DAILY_EDIT_CALLS.free,
+        },
       },
     ]);
+  });
+
+  it('saves a plan’s cap on assistant editing calls, or keeps the code’s (D201)', async () => {
+    const w = world();
+    await w.call('/api/admin/plans', {
+      tier: 'build',
+      activeProjectLimit: null,
+      monthlyAllowanceUsdCents: 1_400,
+      mcpDailyEditCalls: 75,
+    });
+    await w.call('/api/admin/plans', {
+      tier: 'ship',
+      activeProjectLimit: null,
+      monthlyAllowanceUsdCents: 4_000,
+    });
+    const stored = await w.db
+      .prepare(
+        'SELECT tier, mcp_daily_edit_calls FROM plan_limits ORDER BY tier',
+      )
+      .all<{ tier: string; mcp_daily_edit_calls: number | null }>();
+    // NULL is the code's, so the code's own value can still change.
+    assert.deepEqual(
+      stored.results.map((row) => ({ ...row })),
+      [
+        { tier: 'build', mcp_daily_edit_calls: 75 },
+        { tier: 'ship', mcp_daily_edit_calls: null },
+      ],
+    );
+    const saved = await savedPlanLimits(w.db);
+    assert.equal(planLimitsFor('build', saved, FREE).mcpDailyEditCalls, 75);
+    assert.equal(
+      planLimitsFor('ship', saved, FREE).mcpDailyEditCalls,
+      MCP_DAILY_EDIT_CALLS.ship,
+    );
+    assert.equal(
+      planLimitsFor('free', saved, FREE).mcpDailyEditCalls,
+      MCP_DAILY_EDIT_CALLS.free,
+    );
+    assert.equal(w.audits[0]!.detail!.mcpDailyEditCalls, 75);
   });
 
   it('can lift a plan’s project limit entirely, or set one where there was none', async () => {
@@ -189,6 +243,24 @@ describe('a plan’s limits (D134)', () => {
         monthlyAllowanceUsdCents: 1_000_001,
       },
       { tier: 'free', activeProjectLimit: '3', monthlyAllowanceUsdCents: 1 },
+      {
+        tier: 'free',
+        activeProjectLimit: 1,
+        monthlyAllowanceUsdCents: 1,
+        mcpDailyEditCalls: -1,
+      },
+      {
+        tier: 'free',
+        activeProjectLimit: 1,
+        monthlyAllowanceUsdCents: 1,
+        mcpDailyEditCalls: null,
+      },
+      {
+        tier: 'free',
+        activeProjectLimit: 1,
+        monthlyAllowanceUsdCents: 1,
+        mcpDailyEditCalls: 100_001,
+      },
     ]) {
       assert.equal(
         (await w.call('/api/admin/plans', body)).status,

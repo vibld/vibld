@@ -155,6 +155,27 @@ describe('the checkpoint history pane', () => {
     view.unmount();
   });
 
+  it('names an edit made with no build, which no turn of the conversation made (D190)', async () => {
+    serving(() =>
+      reply({
+        current: 're',
+        checkpoints: [
+          {
+            revision: 're',
+            runId: 'edit-1',
+            kind: 'edit',
+            acceptedAt: '2026-10-03T11:00:00.000Z',
+          },
+          ...HISTORY.checkpoints,
+        ],
+      }),
+    );
+    const view = await mount();
+    assert.match(view.text(), /Files edited outside the builder/);
+    assert.match(view.text(), /Edited without a build, revision re/);
+    view.unmount();
+  });
+
   it('asks before restoring, then restores from the revision it was looking at', async () => {
     let restored = false;
     const calls = serving((call) => {

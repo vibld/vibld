@@ -497,7 +497,17 @@ paying accounts until midnight UTC.
 - **D190. Editing-level MCP tools, built next (Chris, 2026-10-10).** File
   reads and writes, typecheck, screenshots, logs and checkpoints on `/mcp`,
   so a person's own assistant can edit a vibld project. After D185; how it
-  is charged is D201.
+  is charged is D201. Built: `list_files`, `read_files`, `write_files`,
+  `check_types`, `list_checkpoints`, `restore_checkpoint` and `get_logs`,
+  over a new `PUT /api/projects/:id/files` whose edits are checkpoints of
+  their own (`docs/mcp-server.md`). Not yet: runtime or browser console
+  logs, which nothing captures. Screenshots: "Include now" (Chris,
+  2026-10-11), built as `take_screenshot` with Cloudflare Browser
+  Rendering (the `BROWSER` binding, `SCREENSHOT_BURST` 6 a minute per
+  account), counted like the other editing tools. Scope: "Add edit scope"
+  (Chris, 2026-10-11): the editing tools need an OAuth scope `edit` on top
+  of `build`, which still connects and serves the first five tools, and a
+  call without it is answered with the MCP step-up challenge.
 - **D191. Example state screens: backlog (Chris, 2026-10-10).** Loading,
   empty and error versions of a page, switchable in the preview.
 - **D192. Device widths in the live preview (Chris, 2026-10-10).** Desktop,
@@ -524,7 +534,11 @@ paying accounts until midnight UTC.
 - **D201. Editing over MCP is limited by plan, not metered (Chris,
   2026-10-10: "Plan caps only").** The person's own assistant pays for its
   tokens; vibld's editing tools (D190) are free within per-plan daily call
-  caps, with no new billing.
+  caps, with no new billing. Built: every call to one of them counts, reads
+  included, over 24 hours, to the caps in `MCP_DAILY_EDIT_CALLS`
+  (`apps/web/worker/entitlement.ts`), each settable under **Plans**
+  (D134). The caps: "50 / 500 / 2000" (Chris, 2026-10-11), calls a day on
+  Free, Build and Ship.
 
 ### Checkpoint history, 2026-10-03
 

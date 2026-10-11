@@ -18,6 +18,7 @@
 import type { AuditEntry } from './admin-store.ts';
 import {
   ACTIVE_PROJECT_LIMIT,
+  MCP_DAILY_EDIT_CALLS,
   monthlyAllowanceMicroUsd,
   type Tier,
 } from './entitlement.ts';
@@ -29,6 +30,8 @@ export interface PlanLimits {
   /** Active projects at once, or null for no limit. */
   activeProjectLimit: number | null;
   monthlyAllowanceMicroUsd: number;
+  /** Calls a day to `/mcp`'s editing tools (D190, D201). */
+  mcpDailyEditCalls: number;
 }
 
 export interface SavedPlanLimits extends PlanLimits {
@@ -49,6 +52,7 @@ export function codePlanLimits(
       tier,
       freeAllowanceMicroUsd,
     ),
+    mcpDailyEditCalls: MCP_DAILY_EDIT_CALLS[tier],
   };
 }
 
@@ -63,6 +67,7 @@ export function planLimitsFor(
     ? {
         activeProjectLimit: row.activeProjectLimit,
         monthlyAllowanceMicroUsd: row.monthlyAllowanceMicroUsd,
+        mcpDailyEditCalls: row.mcpDailyEditCalls,
       }
     : codePlanLimits(tier, freeAllowanceMicroUsd);
 }
@@ -87,6 +92,7 @@ async function readSaved(db: D1Database): Promise<SavedPlans> {
     tier: string;
     active_project_limit: number | null;
     monthly_allowance_micro_usd: number;
+    mcp_daily_edit_calls: number | null;
     updated_at: string;
     updated_by: string;
   }>();
@@ -96,6 +102,10 @@ async function readSaved(db: D1Database): Promise<SavedPlans> {
     saved[row.tier as Tier] = {
       activeProjectLimit: row.active_project_limit,
       monthlyAllowanceMicroUsd: row.monthly_allowance_micro_usd,
+      // Null for a plan saved before the column existed, or saved without
+      // it: the code's cap, read as it is now.
+      mcpDailyEditCalls:
+        row.mcp_daily_edit_calls ?? MCP_DAILY_EDIT_CALLS[row.tier as Tier],
       updatedAt: row.updated_at,
       updatedBy: row.updated_by,
     };
@@ -146,6 +156,8 @@ export function isPlanRoute(pathname: string): boolean {
 export const MAX_PLAN_PROJECT_LIMIT = 1_000;
 /** The most a plan's monthly allowance may be set to: $10,000. */
 export const MAX_PLAN_ALLOWANCE_USD_CENTS = 1_000_000;
+/** The most a plan's daily assistant edit calls may be set to. */
+export const MAX_PLAN_MCP_DAILY_EDIT_CALLS = 100_000;
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
@@ -282,19 +294,32 @@ export async function handlePlanLimits(
     false,
   );
   if (!cents.ok) return json({ error: cents.error }, 400);
+  // Absent from an admin panel older than the cap, which keeps the code's.
+  const calls =
+    body.mcpDailyEditCalls === undefined
+      ? ({ ok: true, value: null } as const)
+      : bounded(
+          body.mcpDailyEditCalls,
+          'mcpDailyEditCalls',
+          MAX_PLAN_MCP_DAILY_EDIT_CALLS,
+          false,
+        );
+  if (!calls.ok) return json({ error: calls.error }, 400);
   const limits: PlanLimits = {
     activeProjectLimit: limit.value,
     monthlyAllowanceMicroUsd: cents.value! * 10_000,
+    mcpDailyEditCalls: calls.value ?? MCP_DAILY_EDIT_CALLS[tier],
   };
   await db
     .prepare(
       `INSERT INTO plan_limits
          (tier, active_project_limit, monthly_allowance_micro_usd,
-          updated_at, updated_by)
-       VALUES (?1, ?2, ?3, ?4, ?5)
+          mcp_daily_edit_calls, updated_at, updated_by)
+       VALUES (?1, ?2, ?3, ?6, ?4, ?5)
        ON CONFLICT(tier) DO UPDATE SET
          active_project_limit = excluded.active_project_limit,
          monthly_allowance_micro_usd = excluded.monthly_allowance_micro_usd,
+         mcp_daily_edit_calls = excluded.mcp_daily_edit_calls,
          updated_at = excluded.updated_at,
          updated_by = excluded.updated_by`,
     )
@@ -304,6 +329,7 @@ export async function handlePlanLimits(
       limits.monthlyAllowanceMicroUsd,
       at,
       deps.adminEmail,
+      calls.value,
     )
     .run();
   forgetPlanLimits();

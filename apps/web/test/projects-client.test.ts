@@ -210,6 +210,12 @@ describe('the checkpoint history (D152)', () => {
             acceptedAt: '2026-10-03T10:00:00.000Z',
           },
           {
+            revision: 'r1e',
+            runId: 'edit-1',
+            kind: 'edit',
+            acceptedAt: '2026-10-03T09:30:00.000Z',
+          },
+          {
             revision: 'r1',
             runId: null,
             kind: 'copy',
@@ -224,7 +230,7 @@ describe('the checkpoint history (D152)', () => {
     assert.equal(history.value.current, 'r2');
     assert.deepEqual(
       history.value.checkpoints.map((entry) => entry.revision),
-      ['r2', 'r1'],
+      ['r2', 'r1e', 'r1'],
     );
     assert.equal(calls[0]!.url, '/api/projects/p%201/checkpoints');
     assert.equal(calls[0]!.method, 'GET');

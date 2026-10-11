@@ -74,6 +74,23 @@ export const ACTIVE_PROJECT_LIMIT: Record<Tier, number | null> = {
   ship: null,
 };
 
+/**
+ * Calls a day an account's assistants may make to `/mcp`'s editing tools
+ * (D190): reading, writing and checking files, checkpoints, logs and
+ * screenshots, at the numbers Chris chose (2026-10-11, "50 / 500 / 2000").
+ * The cap is the whole of what they cost (D201, "Plan caps only"): the
+ * person's assistant pays for its own tokens, and these tools spend no
+ * model, so nothing is metered or billed. Reads count as writes do, since
+ * each one reads a stored project. Counted over the last 24 hours. Builds
+ * an assistant starts have their own cap (`VIBLD_MCP_DAILY_BUILDS`), and
+ * nothing here limits the builder.
+ */
+export const MCP_DAILY_EDIT_CALLS: Record<Tier, number> = {
+  free: 50,
+  build: 500,
+  ship: 2000,
+};
+
 export function monthlyAllowanceMicroUsd(
   tier: Tier,
   freeIncludedMicroUsd: number,

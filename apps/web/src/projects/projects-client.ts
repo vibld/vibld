@@ -390,11 +390,12 @@ export async function setProjectShared(
 
 /**
  * What made a checkpoint the accepted one (D152): a build, its repair, the
- * first attempt put back after a repair, a restore from the history, or the
+ * first attempt put back after a repair, a restore from the history, files
+ * written with no build (D190, by an assistant or through the API), or the
  * copy the project was made from.
  */
 export type CheckpointKind =
-  'build' | 'repair' | 'restore' | 'rollback' | 'copy';
+  'build' | 'repair' | 'restore' | 'rollback' | 'edit' | 'copy';
 
 export interface Checkpoint {
   revision: string;
@@ -416,6 +417,7 @@ const KINDS: readonly string[] = [
   'repair',
   'restore',
   'rollback',
+  'edit',
   'copy',
 ];
 

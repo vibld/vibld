@@ -57,8 +57,18 @@ const LOCAL_SETTINGS = {
   previewDomain: 'localhost.invalid',
 };
 
-/** Keys `wrangler dev` has no use for, or would reach Cloudflare for. */
-const DEPLOY_ONLY = ['routes', 'workers_dev', 'observability', 'limits'];
+/**
+ * Keys `wrangler dev` has no use for, or would reach Cloudflare for.
+ * `browser` (Browser Rendering, the MCP server's take_screenshot) would
+ * need a Chrome in the box; unbound, the tool is not offered.
+ */
+const DEPLOY_ONLY = [
+  'routes',
+  'workers_dev',
+  'observability',
+  'limits',
+  'browser',
+];
 
 /**
  * One Worker's configuration under Docker: the self-host configuration,

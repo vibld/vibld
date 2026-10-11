@@ -240,6 +240,7 @@ const KIND_LABELS: Record<Checkpoint['kind'], string> = {
   repair: 'Repaired after its build check',
   restore: 'First attempt kept after a repair',
   rollback: 'Restored from history',
+  edit: 'Edited without a build',
   copy: 'Copied with the project',
 };
 
@@ -253,6 +254,9 @@ export function labelFor(
   transcript: readonly TranscriptTurn[],
 ): string {
   if (checkpoint.kind === 'rollback') return 'Restored an earlier checkpoint';
+  // No turn of the conversation made it: an assistant connected over
+  // `/mcp`, or a call to the API, wrote the files (D190).
+  if (checkpoint.kind === 'edit') return 'Files edited outside the builder';
   const runId = checkpoint.runId?.split(':')[0] ?? null;
   const turn =
     (runId

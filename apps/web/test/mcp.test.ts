@@ -10,6 +10,10 @@ import {
 } from '../worker/mcp-auth.ts';
 import type { McpCaller } from '../worker/mcp-auth.ts';
 import {
+  EDIT_TOOLS,
+  INSTRUCTIONS,
+  MAX_READ_CHARS,
+  MAX_SCREENSHOT_HEIGHT,
   MCP_METADATA_PATH,
   SERVER_INFO,
   TOOLS,
@@ -20,7 +24,13 @@ import {
   readBuildStart,
 } from '../worker/mcp-server.ts';
 import type { ApiAnswer, McpDeps } from '../worker/mcp-server.ts';
-import { McpBuildStore } from '../worker/mcp-store.ts';
+import { McpBuildStore, McpCallStore } from '../worker/mcp-store.ts';
+import {
+  MAX_SCREENSHOT_BYTES,
+  NAVIGATION_TIMEOUT_MS,
+  captureScreenshot,
+} from '../worker/screenshot.ts';
+import type { BrowserPage, ScreenshotOptions } from '../worker/screenshot.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
 
@@ -31,8 +41,14 @@ const RUN = '99999999-8888-4777-8666-555555555555';
 const CALLER: McpCaller = {
   principal: { userId: USER, policyIdentity: 'unknown' },
   clientId: 'client_assistant',
-  scopes: ['build'],
+  scopes: ['build', 'edit'],
 };
+
+/** A connection approved for builds, before editing was a scope of its own. */
+const BUILD_ONLY: McpCaller = { ...CALLER, scopes: ['build'] };
+
+/** A small PNG's worth of base64, for the fake browser to answer with. */
+const IMAGE = Buffer.from('fake png bytes').toString('base64');
 
 const TEMPLATES: DesignTemplateName[] = [
   {
@@ -75,6 +91,9 @@ function deps(
   const recorded: { runId: string; projectId: string }[] = [];
   const reserved: string[] = [];
   const released: string[] = [];
+  const editCalls: { tool: string; projectId: string }[] = [];
+  const captures: { url: string; width: number; fullPage: boolean }[] = [];
+  const bursts: string[] = [];
   const routes = overrides.routes ?? {};
   const value: McpDeps = {
     caller: CALLER,
@@ -107,9 +126,39 @@ function deps(
       released.push(place);
     },
     buildBurstAllowed: async () => true,
+    takeEditCall: async (tool, projectId) => {
+      editCalls.push({ tool, projectId });
+      return { taken: true, limit: 50 };
+    },
+    screenshot: {
+      burstAllowed: async () => {
+        bursts.push('screenshot');
+        return true;
+      },
+      capture: async (url, options) => {
+        captures.push({ url, ...options });
+        return {
+          data: IMAGE,
+          mimeType: 'image/png',
+          width: options.width,
+          height: 800,
+          clipped: false,
+        };
+      },
+    },
     ...overrides,
   };
-  return { value, calls, builds, recorded, reserved, released };
+  return {
+    value,
+    calls,
+    builds,
+    recorded,
+    reserved,
+    released,
+    editCalls,
+    captures,
+    bursts,
+  };
 }
 
 function rpc(body: unknown): Request {
@@ -479,7 +528,7 @@ describe('the MCP protocol', () => {
     assert.equal(body.error.code, -32601);
   });
 
-  it('lists the five tools, each with a closed input schema', async () => {
+  it('lists the thirteen tools, each with a closed input schema', async () => {
     const response = await handleMcpMessage(
       rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
       deps().value,
@@ -497,17 +546,121 @@ describe('the MCP protocol', () => {
         'start_build',
         'get_build_status',
         'get_preview_url',
+        'list_files',
+        'read_files',
+        'write_files',
+        'check_types',
+        'list_checkpoints',
+        'restore_checkpoint',
+        'get_logs',
+        'take_screenshot',
       ],
     );
-    // It can replace a named project's code, so clients may confirm it.
-    assert.equal(
-      TOOLS.find((tool) => tool.name === 'start_build')?.annotations
-        ?.destructiveHint,
-      true,
-    );
+    // Each can replace a project's code, so clients may confirm it.
+    for (const name of ['start_build', 'write_files', 'restore_checkpoint']) {
+      const annotations = TOOLS.find((tool) => tool.name === name)
+        ?.annotations as { destructiveHint?: boolean } | undefined;
+      assert.equal(annotations?.destructiveHint, true, name);
+    }
+    for (const name of [
+      'list_files',
+      'read_files',
+      'list_checkpoints',
+      'get_logs',
+    ]) {
+      const annotations = TOOLS.find((tool) => tool.name === name)
+        ?.annotations as { readOnlyHint?: boolean } | undefined;
+      assert.equal(annotations?.readOnlyHint, true, name);
+    }
     for (const tool of TOOLS) {
       assert.equal(tool.inputSchema.additionalProperties, false);
+      for (const property of Object.values(
+        tool.inputSchema.properties as Record<string, Record<string, unknown>>,
+      )) {
+        const items = property.items as Record<string, unknown> | undefined;
+        if (items?.type === 'object') {
+          assert.equal(items.additionalProperties, false, tool.name);
+        }
+      }
     }
+    // Only the editing tools are counted against the plan (D201).
+    assert.deepEqual(
+      TOOLS.map((tool) => tool.name).filter((name) => EDIT_TOOLS.has(name)),
+      [
+        'list_files',
+        'read_files',
+        'write_files',
+        'check_types',
+        'list_checkpoints',
+        'restore_checkpoint',
+        'get_logs',
+        'take_screenshot',
+      ],
+    );
+  });
+
+  it('offers no screenshots where Browser Rendering is not bound', async () => {
+    const d = deps({ screenshot: undefined });
+    const response = await handleMcpMessage(
+      rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+      d.value,
+    );
+    const body = (await response.json()) as {
+      result: { tools: { name: string }[] };
+    };
+    assert.equal(body.result.tools.length, 12);
+    assert.ok(!body.result.tools.some((t) => t.name === 'take_screenshot'));
+    const called = await handleMcpMessage(
+      rpc({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'take_screenshot', arguments: { projectId: PROJECT } },
+      }),
+      d.value,
+    );
+    const refused = (await called.json()) as { error: { code: number } };
+    assert.equal(refused.error.code, -32602);
+    assert.deepEqual(d.editCalls, []);
+    assert.deepEqual(d.calls, []);
+  });
+
+  it('asks a connection without the edit scope to step up, before counting or reading anything', async () => {
+    for (const name of EDIT_TOOLS) {
+      const d = deps({ caller: BUILD_ONLY });
+      const response = await handleMcpMessage(
+        rpc({
+          jsonrpc: '2.0',
+          id: 9,
+          method: 'tools/call',
+          params: { name, arguments: { projectId: PROJECT } },
+        }),
+        d.value,
+      );
+      assert.equal(response.status, 403, name);
+      assert.equal(
+        response.headers.get('WWW-Authenticate'),
+        `Bearer error="insufficient_scope", scope="build edit", resource_metadata="https://app.vibld.com${MCP_METADATA_PATH}", error_description="Editing needs the edit scope"`,
+      );
+      const body = (await response.json()) as {
+        id: number;
+        error: { code: number; message: string };
+      };
+      assert.equal(body.id, 9);
+      assert.match(
+        body.error.message,
+        /Connect vibld again and approve editing/,
+      );
+      assert.deepEqual(d.editCalls, [], name);
+      assert.deepEqual(d.calls, [], name);
+      assert.deepEqual(d.bursts, [], name);
+    }
+    // The five tools before them need only build.
+    const d = deps({ caller: BUILD_ONLY });
+    const listed = await callTool(d.value, 'search_templates', {
+      query: 'bakery',
+    });
+    assert.equal(listed.isError, false);
   });
 
   it('points a client without a token at the metadata', async () => {
@@ -526,7 +679,7 @@ describe('the MCP protocol', () => {
         resource: 'https://app.vibld.com/mcp',
         authorization_servers: ['https://clerk.vibld.com'],
         bearer_methods_supported: ['header'],
-        scopes_supported: ['build'],
+        scopes_supported: ['build', 'edit'],
         resource_name: 'vibld',
       },
     );
@@ -1070,6 +1223,708 @@ describe('get_preview_url', () => {
   });
 });
 
+describe('the editing tools (D190)', () => {
+  const FILES = `/api/projects/${PROJECT}/files`;
+  const code = (revision: string, files: { path: string; content: string }[]) =>
+    ({ status: 200, body: { snapshot: { revision, files } } }) as ApiAnswer;
+  const accepted = code('r0000000a', [
+    { path: 'src/App.tsx', content: 'export default 1;' },
+    { path: 'index.html', content: '<div id="root"></div>' },
+  ]);
+
+  /** A valid call to each editing tool. */
+  const VALID: Record<string, Record<string, unknown>> = {
+    list_files: { projectId: PROJECT },
+    read_files: { projectId: PROJECT, paths: ['src/App.tsx'] },
+    write_files: {
+      projectId: PROJECT,
+      baseRevision: 'r0000000a',
+      files: [{ path: 'src/App.tsx', content: 'x' }],
+    },
+    check_types: { projectId: PROJECT },
+    list_checkpoints: { projectId: PROJECT },
+    restore_checkpoint: {
+      projectId: PROJECT,
+      revision: 'r0000000b',
+      baseRevision: 'r0000000a',
+    },
+    get_logs: { projectId: PROJECT },
+    take_screenshot: { projectId: PROJECT },
+  };
+
+  it('counts every editing call, a read as much as a write, and no other tool', async () => {
+    const d = deps({ routes: { [`GET ${FILES}`]: accepted } });
+    await callTool(d.value, 'list_files', { projectId: PROJECT });
+    await callTool(d.value, 'read_files', {
+      projectId: PROJECT,
+      paths: ['src/App.tsx'],
+    });
+    await callTool(d.value, 'search_templates', { query: 'bakery' });
+    await callTool(d.value, 'list_projects', {});
+    assert.deepEqual(d.editCalls, [
+      { tool: 'list_files', projectId: PROJECT },
+      { tool: 'read_files', projectId: PROJECT },
+    ]);
+  });
+
+  it("refuses at the plan's cap before reading or writing anything", async () => {
+    for (const [name, args] of Object.entries(VALID)) {
+      const d = deps({
+        takeEditCall: async () => ({ taken: false, limit: 50 }),
+      });
+      const result = await callTool(d.value, name, args);
+      assert.equal(result.isError, true, name);
+      assert.match(
+        String(result.value.error),
+        /made 50 calls to vibld's editing tools in the last 24 hours/,
+        name,
+      );
+      assert.match(
+        String(result.value.error),
+        /Editing in the builder at https:\/\/app\.vibld\.com is not affected/,
+      );
+      assert.deepEqual(d.calls, [], `${name} read nothing`);
+    }
+  });
+
+  it('takes no call for a malformed one', async () => {
+    const malformed: [string, Record<string, unknown>][] = [
+      ['list_files', { projectId: 'not-a-project' }],
+      ['read_files', { projectId: PROJECT, paths: [] }],
+      ['read_files', { projectId: PROJECT, paths: ['a'.repeat(257)] }],
+      ['read_files', { projectId: PROJECT, paths: ['a'], revision: '../x' }],
+      [
+        'read_files',
+        {
+          projectId: PROJECT,
+          paths: Array.from({ length: 21 }, (_, i) => `f${i}.ts`),
+        },
+      ],
+      ['write_files', { projectId: PROJECT, files: [] }],
+      ['write_files', { projectId: PROJECT, baseRevision: 'r0000000a' }],
+      [
+        'write_files',
+        {
+          projectId: PROJECT,
+          baseRevision: 'r0000000a',
+          files: [{ path: 'a.ts' }],
+        },
+      ],
+      [
+        'write_files',
+        { projectId: PROJECT, baseRevision: 'r0000000a', delete: 'a.ts' },
+      ],
+      ['list_checkpoints', { projectId: PROJECT, limit: 0 }],
+      ['restore_checkpoint', { projectId: PROJECT, revision: 'r0000000b' }],
+      ['read_files', { projectId: PROJECT, paths: ['a'], offset: -1 }],
+      ['read_files', { projectId: PROJECT, paths: ['a'], offset: 1.5 }],
+      ['read_files', { projectId: PROJECT, paths: ['a', 'b'], offset: 10 }],
+      ['take_screenshot', { projectId: PROJECT, width: 1024 }],
+      ['take_screenshot', { projectId: PROJECT, path: 'pricing' }],
+      ['take_screenshot', { projectId: PROJECT, path: '//evil.example' }],
+      ['take_screenshot', { projectId: PROJECT, fullPage: 'yes' }],
+    ];
+    for (const [name, args] of malformed) {
+      const d = deps();
+      const result = await callTool(d.value, name, args);
+      assert.equal(result.isError, true, `${name} ${JSON.stringify(args)}`);
+      assert.deepEqual(d.editCalls, [], name);
+      assert.deepEqual(d.calls, [], name);
+      assert.deepEqual(d.bursts, [], name);
+    }
+  });
+
+  it('lists the files with their sizes and the revision to write against', async () => {
+    const d = deps({ routes: { [`GET ${FILES}`]: accepted } });
+    const result = await callTool(d.value, 'list_files', {
+      projectId: PROJECT,
+    });
+    assert.deepEqual(result.value, {
+      projectId: PROJECT,
+      revision: 'r0000000a',
+      files: [
+        { path: 'src/App.tsx', chars: 17 },
+        { path: 'index.html', chars: 21 },
+      ],
+    });
+  });
+
+  it('reads files up to its budget, naming what it left out or could not find', async () => {
+    const big = 'x'.repeat(MAX_READ_CHARS - 10);
+    const d = deps({
+      routes: {
+        [`GET ${FILES}?revision=r0000000b`]: code('r0000000b', [
+          { path: 'big.ts', content: big },
+          { path: 'small.ts', content: 'tiny' },
+          { path: 'second.ts', content: 'y'.repeat(20) },
+        ]),
+      },
+    });
+    const result = await callTool(d.value, 'read_files', {
+      projectId: PROJECT,
+      paths: ['big.ts', 'second.ts', 'small.ts', 'gone.ts'],
+      revision: 'r0000000b',
+    });
+    assert.equal(result.value.revision, 'r0000000b');
+    assert.deepEqual(result.value.files, [
+      { path: 'big.ts', content: big },
+      { path: 'small.ts', content: 'tiny' },
+    ]);
+    assert.deepEqual(result.value.omitted, [{ path: 'second.ts', chars: 20 }]);
+    assert.deepEqual(result.value.missing, ['gone.ts']);
+  });
+
+  it('reads a file longer than one call in parts, from the offset each part names', async () => {
+    const long = 'a'.repeat(MAX_READ_CHARS) + 'b'.repeat(60_000);
+    const routes = {
+      [`GET ${FILES}`]: code('r0000000a', [
+        { path: 'long.ts', content: long },
+        { path: 'small.ts', content: 'tiny' },
+      ]),
+    };
+    const first = await callTool(deps({ routes }).value, 'read_files', {
+      projectId: PROJECT,
+      paths: ['long.ts', 'small.ts'],
+    });
+    assert.deepEqual(first.value.files, [
+      {
+        path: 'long.ts',
+        content: 'a'.repeat(MAX_READ_CHARS),
+        offset: 0,
+        nextOffset: MAX_READ_CHARS,
+        chars: long.length,
+      },
+    ]);
+    assert.deepEqual(first.value.omitted, [{ path: 'small.ts', chars: 4 }]);
+    assert.match(
+      String(first.value.next),
+      new RegExp(`paths \\["long\\.ts"\\] and offset ${MAX_READ_CHARS}`),
+    );
+
+    const second = await callTool(deps({ routes }).value, 'read_files', {
+      projectId: PROJECT,
+      paths: ['long.ts'],
+      offset: MAX_READ_CHARS,
+    });
+    assert.deepEqual(second.value.files, [
+      {
+        path: 'long.ts',
+        content: 'b'.repeat(60_000),
+        offset: MAX_READ_CHARS,
+        chars: long.length,
+      },
+    ]);
+    assert.equal(second.value.next, undefined);
+
+    const past = await callTool(deps({ routes }).value, 'read_files', {
+      projectId: PROJECT,
+      paths: ['long.ts'],
+      offset: long.length + 1,
+    });
+    assert.equal(past.isError, true);
+    assert.match(String(past.value.error), /past the end of long\.ts/);
+  });
+
+  it('passes on a project with no code yet', async () => {
+    const d = deps({
+      routes: {
+        [`GET ${FILES}`]: {
+          status: 404,
+          body: { error: 'This project has no code yet.' },
+        },
+      },
+    });
+    const result = await callTool(d.value, 'list_files', {
+      projectId: PROJECT,
+    });
+    assert.equal(result.isError, true);
+    assert.equal(result.value.error, 'This project has no code yet.');
+  });
+
+  it("writes and deletes through the project's own files route", async () => {
+    const d = deps({
+      routes: {
+        [`PUT ${FILES}`]: code('r0000000c', [
+          { path: 'src/App.tsx', content: 'x' },
+          { path: 'src/new.ts', content: 'y' },
+        ]),
+      },
+    });
+    const result = await callTool(d.value, 'write_files', {
+      projectId: PROJECT,
+      baseRevision: 'r0000000a',
+      files: [
+        { path: 'src/App.tsx', content: 'x' },
+        { path: 'src/new.ts', content: 'y' },
+      ],
+      delete: ['index.html'],
+    });
+    assert.equal(result.isError, false);
+    assert.deepEqual(d.calls, [
+      {
+        method: 'PUT',
+        path: FILES,
+        body: {
+          base: 'r0000000a',
+          files: [
+            { path: 'src/App.tsx', content: 'x' },
+            { path: 'src/new.ts', content: 'y' },
+          ],
+          delete: ['index.html'],
+        },
+      },
+    ]);
+    assert.equal(result.value.revision, 'r0000000c');
+    assert.deepEqual(result.value.written, ['src/App.tsx', 'src/new.ts']);
+    assert.deepEqual(result.value.deleted, ['index.html']);
+    assert.equal(result.value.files, 2);
+    assert.match(String(result.value.next), /check_types/);
+  });
+
+  it('names the current revision when the project moved on, and passes on a build or an archive', async () => {
+    const refusals: [ApiAnswer, RegExp][] = [
+      [
+        {
+          status: 409,
+          body: {
+            error:
+              'This project has changed since its files were read. Read them again, then edit.',
+            code: 'checkpoint-moved',
+            current: 'r0000000f',
+          },
+        },
+        /Read them again, then edit\. The current revision is r0000000f\.$/,
+      ],
+      [
+        {
+          status: 409,
+          body: {
+            error:
+              'A build is still running in this project. Wait for it to finish, then edit its files.',
+          },
+        },
+        /A build is still running/,
+      ],
+      [
+        {
+          status: 409,
+          body: {
+            error: 'This project is archived. Unarchive it to edit its files.',
+          },
+        },
+        /archived/,
+      ],
+    ];
+    for (const [answer, message] of refusals) {
+      const d = deps({ routes: { [`PUT ${FILES}`]: answer } });
+      const result = await callTool(d.value, 'write_files', VALID.write_files!);
+      assert.equal(result.isError, true);
+      assert.match(String(result.value.error), message);
+    }
+  });
+
+  it("reads the preview's type check, starting the preview where it must", async () => {
+    const opened = {
+      status: 200,
+      body: {
+        snapshot: {
+          revision: 'r0000000a',
+          files: [{ path: 'src/App.tsx', content: 'x' }],
+        },
+      },
+    };
+    const ready = (extra: Record<string, unknown>) => ({
+      [`GET /api/projects/${PROJECT}`]: opened,
+      'GET /api/preview': {
+        status: 200,
+        body: {
+          status: 'ready',
+          url: 'https://p.vibld-preview.dev/',
+          expiresAt: 1_800_000_000_000,
+          revision: 'r0000000a',
+          ...extra,
+        },
+      },
+    });
+    const failing = await callTool(
+      deps({
+        routes: ready({ typecheckFailure: 'src/App.tsx(1,1): error TS2304' }),
+      }).value,
+      'check_types',
+      { projectId: PROJECT },
+    );
+    assert.equal(failing.value.typecheck, 'failed');
+    assert.equal(failing.value.output, 'src/App.tsx(1,1): error TS2304');
+    const passing = await callTool(
+      deps({ routes: ready({}) }).value,
+      'check_types',
+      { projectId: PROJECT },
+    );
+    assert.deepEqual(passing.value, { status: 'ready', typecheck: 'passed' });
+
+    const d = deps({
+      routes: {
+        [`GET /api/projects/${PROJECT}`]: opened,
+        'GET /api/preview': { status: 200, body: { status: 'ready-to-start' } },
+        'POST /api/preview': { status: 200, body: { status: 'installing' } },
+      },
+    });
+    const starting = await callTool(d.value, 'check_types', {
+      projectId: PROJECT,
+    });
+    assert.equal(starting.value.status, 'installing');
+    assert.match(String(starting.value.next), /check_types again/);
+    assert.equal(d.calls.at(-1)?.method, 'POST');
+  });
+
+  it('lists checkpoints newest first, as many as asked for', async () => {
+    const checkpoints = Array.from({ length: 3 }, (_, i) => ({
+      revision: `r000000${i}0`,
+      runId: `edit-${i}`,
+      kind: i === 0 ? 'edit' : 'build',
+      acceptedAt: `2026-10-0${3 - i}T00:00:00.000Z`,
+    }));
+    const d = deps({
+      routes: {
+        [`GET /api/projects/${PROJECT}/checkpoints`]: {
+          status: 200,
+          body: { current: 'r00000000', checkpoints },
+        },
+      },
+    });
+    const result = await callTool(d.value, 'list_checkpoints', {
+      projectId: PROJECT,
+      limit: 2,
+    });
+    assert.deepEqual(result.value, {
+      projectId: PROJECT,
+      current: 'r00000000',
+      checkpoints: [
+        {
+          revision: 'r00000000',
+          kind: 'edit',
+          acceptedAt: '2026-10-03T00:00:00.000Z',
+        },
+        {
+          revision: 'r00000010',
+          kind: 'build',
+          acceptedAt: '2026-10-02T00:00:00.000Z',
+        },
+      ],
+      more: true,
+    });
+  });
+
+  it("restores through the history's own route, from the revision it was shown", async () => {
+    const d = deps({
+      routes: {
+        [`POST /api/projects/${PROJECT}/checkpoints/restore`]: code(
+          'r0000000b',
+          [{ path: 'src/App.tsx', content: 'old' }],
+        ),
+      },
+    });
+    const result = await callTool(
+      d.value,
+      'restore_checkpoint',
+      VALID.restore_checkpoint!,
+    );
+    assert.deepEqual(d.calls, [
+      {
+        method: 'POST',
+        path: `/api/projects/${PROJECT}/checkpoints/restore`,
+        body: { revision: 'r0000000b', base: 'r0000000a' },
+      },
+    ]);
+    assert.equal(result.value.revision, 'r0000000b');
+
+    const moved = deps({
+      routes: {
+        [`POST /api/projects/${PROJECT}/checkpoints/restore`]: {
+          status: 409,
+          body: {
+            error: 'This project has changed since its history was loaded.',
+            code: 'checkpoint-moved',
+            current: 'r0000000c',
+          },
+        },
+      },
+    });
+    const refused = await callTool(
+      moved.value,
+      'restore_checkpoint',
+      VALID.restore_checkpoint!,
+    );
+    assert.equal(refused.isError, true);
+    assert.match(String(refused.value.error), /current revision is r0000000c/);
+  });
+
+  it('reports the preview and recent builds, starts nothing, and says what is not captured', async () => {
+    const runs = Array.from({ length: 12 }, (_, i) => ({
+      runId: `run-${i}`,
+      projectId: PROJECT,
+      stop: i === 0 ? 'validation-failed' : 'applied',
+      model: 'claude-opus',
+      elapsedMs: 61_400,
+      endedAt: '2026-10-10T00:00:00.000Z',
+      costMicroUsd: 1,
+    }));
+    const routes = (previewRevision: string) => ({
+      [`GET /api/projects/${PROJECT}/checkpoints`]: {
+        status: 200,
+        body: { current: 'r0000000a', checkpoints: [] },
+      },
+      'GET /api/preview': {
+        status: 200,
+        body: {
+          status: 'ready',
+          url: 'https://p.vibld-preview.dev/',
+          expiresAt: 1,
+          revision: previewRevision,
+          typecheckFailure: 'error TS1005',
+        },
+      },
+      [`GET /api/runs?project=${PROJECT}`]: { status: 200, body: { runs } },
+    });
+    const d = deps({ routes: routes('r0000000a') });
+    const result = await callTool(d.value, 'get_logs', { projectId: PROJECT });
+    assert.deepEqual(result.value.preview, {
+      status: 'ready',
+      typecheck: 'failed',
+      typecheckOutput: 'error TS1005',
+    });
+    const builds = result.value.builds as Record<string, unknown>[];
+    assert.equal(builds.length, 10);
+    assert.deepEqual(builds[0], {
+      runId: 'run-0',
+      outcome: 'validation-failed',
+      model: 'claude-opus',
+      endedAt: '2026-10-10T00:00:00.000Z',
+      seconds: 61,
+    });
+    assert.match(String(result.value.notCaptured), /browser console/);
+    assert.ok(d.calls.every((call) => call.method === 'GET'));
+
+    const other = await callTool(
+      deps({ routes: routes('r0000000z') }).value,
+      'get_logs',
+      { projectId: PROJECT },
+    );
+    assert.equal(
+      (other.value.preview as Record<string, unknown>).status,
+      'serving-other-code',
+    );
+  });
+
+  describe('take_screenshot', () => {
+    const opened = {
+      status: 200,
+      body: {
+        snapshot: {
+          revision: 'r0000000a',
+          files: [{ path: 'src/App.tsx', content: 'x' }],
+        },
+      },
+    };
+    const ready = {
+      [`GET /api/projects/${PROJECT}`]: opened,
+      'GET /api/preview': {
+        status: 200,
+        body: {
+          status: 'ready',
+          url: 'https://3000-sbx-tok.vibld-preview.dev/',
+          expiresAt: 1_800_000_000_000,
+          revision: 'r0000000a',
+        },
+      },
+    } as Record<string, ApiAnswer>;
+
+    async function shoot(d: McpDeps, args: Record<string, unknown>) {
+      const response = await handleMcpMessage(
+        rpc({
+          jsonrpc: '2.0',
+          id: 11,
+          method: 'tools/call',
+          params: { name: 'take_screenshot', arguments: args },
+        }),
+        d,
+      );
+      return (await response.json()) as {
+        result: {
+          isError: boolean;
+          content: {
+            type: string;
+            text?: string;
+            data?: string;
+            mimeType?: string;
+          }[];
+        };
+      };
+    }
+
+    it('loads the page in the preview and answers with the image', async () => {
+      const d = deps({ routes: ready });
+      const body = await shoot(d.value, {
+        projectId: PROJECT,
+        path: '/pricing?plan=pro',
+        width: 390,
+        fullPage: true,
+      });
+      assert.equal(body.result.isError, false);
+      const [text, image] = body.result.content;
+      assert.equal(image?.type, 'image');
+      assert.equal(image?.data, IMAGE);
+      assert.equal(image?.mimeType, 'image/png');
+      assert.deepEqual(JSON.parse(text!.text!), {
+        projectId: PROJECT,
+        path: '/pricing?plan=pro',
+        width: 390,
+        height: 800,
+        format: 'png',
+      });
+      assert.deepEqual(d.captures, [
+        {
+          url: 'https://3000-sbx-tok.vibld-preview.dev/pricing?plan=pro',
+          width: 390,
+          fullPage: true,
+        },
+      ]);
+      assert.deepEqual(d.editCalls, [
+        { tool: 'take_screenshot', projectId: PROJECT },
+      ]);
+      assert.deepEqual(d.bursts, ['screenshot']);
+    });
+
+    it('defaults to the home page at the desktop width', async () => {
+      const d = deps({ routes: ready });
+      await shoot(d.value, { projectId: PROJECT });
+      assert.deepEqual(d.captures, [
+        {
+          url: 'https://3000-sbx-tok.vibld-preview.dev/',
+          width: 1280,
+          fullPage: false,
+        },
+      ]);
+    });
+
+    it('starts the preview and takes no picture until it is ready', async () => {
+      const d = deps({
+        routes: {
+          [`GET /api/projects/${PROJECT}`]: opened,
+          'GET /api/preview': {
+            status: 200,
+            body: { status: 'ready-to-start' },
+          },
+          'POST /api/preview': { status: 200, body: { status: 'installing' } },
+        },
+      });
+      const result = await callTool(d.value, 'take_screenshot', {
+        projectId: PROJECT,
+      });
+      assert.equal(result.isError, false);
+      assert.equal(result.value.status, 'installing');
+      assert.match(String(result.value.next), /take_screenshot again/);
+      assert.deepEqual(d.captures, []);
+      assert.equal(d.calls.at(-1)?.method, 'POST');
+    });
+
+    it('refuses a burst before taking a daily call or reading anything', async () => {
+      const d = deps({ routes: ready });
+      d.value.screenshot = {
+        burstAllowed: async () => false,
+        capture: async () => {
+          throw new Error('not reached');
+        },
+      };
+      const result = await callTool(d.value, 'take_screenshot', {
+        projectId: PROJECT,
+      });
+      assert.equal(result.isError, true);
+      assert.match(String(result.value.error), /too quickly/);
+      assert.deepEqual(d.editCalls, []);
+      assert.deepEqual(d.calls, []);
+    });
+
+    it('says so when the page could not be captured', async () => {
+      const d = deps({ routes: ready });
+      d.value.screenshot = {
+        burstAllowed: async () => true,
+        capture: async () => {
+          throw new Error('Navigation timeout of 20000 ms exceeded');
+        },
+      };
+      const result = await callTool(d.value, 'take_screenshot', {
+        projectId: PROJECT,
+      });
+      assert.equal(result.isError, true);
+      assert.match(String(result.value.error), /could not be captured/);
+    });
+  });
+
+  it('tells an assistant how to use them', () => {
+    for (const name of EDIT_TOOLS) {
+      assert.ok(INSTRUCTIONS.includes(name), name);
+    }
+  });
+});
+
+describe('the daily count of editing calls (D201)', () => {
+  const since = '2026-10-09T10:00:00.000Z';
+  function take(store: McpCallStore, id: string, userId = USER) {
+    return store.take({
+      id,
+      userId,
+      clientId: 'client_x',
+      tool: 'read_files',
+      projectId: PROJECT,
+      since,
+      calledAt: '2026-10-10T09:00:00.000Z',
+      limit: 2,
+    });
+  }
+
+  it('gives an account no more calls in the window than its limit', async () => {
+    const db = new SqliteD1Database(schemaSql()) as unknown as D1Database;
+    const store = new McpCallStore(db);
+    const taken = await Promise.all([
+      take(store, 'c1'),
+      take(store, 'c2'),
+      take(store, 'c3'),
+    ]);
+    assert.equal(
+      taken.filter(Boolean).length,
+      2,
+      'two calls, however many arrive at once',
+    );
+    assert.equal(await take(store, 'c4', 'user_other'), true);
+  });
+
+  it('keeps only the window, so calls older than it count for nothing', async () => {
+    const db = new SqliteD1Database(schemaSql()) as unknown as D1Database;
+    await db
+      .prepare(
+        `INSERT INTO mcp_calls VALUES
+           ('old1', ?1, 'client_x', 'list_files', ?2, '2026-10-09T09:59:59.000Z'),
+           ('old2', ?1, 'client_x', 'list_files', ?2, '2026-10-08T00:00:00.000Z'),
+           ('other', 'user_other', 'client_x', 'list_files', ?2, '2026-10-08T00:00:00.000Z')`,
+      )
+      .bind(USER, PROJECT)
+      .run();
+    const store = new McpCallStore(db);
+    assert.equal(await take(store, 'c1'), true);
+    assert.equal(await take(store, 'c2'), true);
+    assert.equal(await take(store, 'c3'), false);
+    const rows = await db
+      .prepare('SELECT id FROM mcp_calls ORDER BY id')
+      .all<{ id: string }>();
+    assert.deepEqual(
+      rows.results.map((row) => row.id),
+      ['c1', 'c2', 'other'],
+      "the account's own old calls are cleared, nobody else's",
+    );
+  });
+});
+
 describe("reading /api/plan's answer", () => {
   function stream(chunks: string[]): Response {
     const encoder = new TextEncoder();
@@ -1182,6 +2037,123 @@ describe('the daily count', () => {
     );
     assert.equal(await place(store, 'r3'), true);
     assert.equal(await place(store, 'r4'), false);
+  });
+});
+
+describe('the screenshot browser', () => {
+  /** A fake Browser Rendering browser: what was asked of it, and when it closed. */
+  function browser(
+    options: {
+      scrollHeight?: number;
+      sizes?: number[];
+      goto?: () => Promise<unknown>;
+      idle?: () => Promise<unknown>;
+    } = {},
+  ) {
+    const seen = {
+      viewport: undefined as { width: number; height: number } | undefined,
+      goto: [] as { url: string; timeout: number }[],
+      shots: [] as ScreenshotOptions[],
+      closed: 0,
+    };
+    const sizes = [...(options.sizes ?? [1000])];
+    const page: BrowserPage = {
+      setViewport: async (viewport) => {
+        seen.viewport = viewport;
+      },
+      goto: async (url, { timeout }) => {
+        seen.goto.push({ url, timeout });
+        return options.goto?.();
+      },
+      waitForNetworkIdle: async () => options.idle?.(),
+      evaluate: async <T>() => (options.scrollHeight ?? 0) as T,
+      screenshot: async (shot) => {
+        seen.shots.push(shot);
+        return new Uint8Array(sizes.shift() ?? 1000);
+      },
+    };
+    const launch = async () => ({
+      newPage: async () => page,
+      close: async () => {
+        seen.closed++;
+      },
+    });
+    return { seen, launch };
+  }
+
+  it('loads the page at the width and its frame height, then closes the browser', async () => {
+    const b = browser({ idle: () => Promise.reject(new Error('never idle')) });
+    const shot = await captureScreenshot(b.launch, 'https://p.example/', {
+      width: 768,
+      fullPage: false,
+    });
+    assert.deepEqual(b.seen.viewport, { width: 768, height: 1024 });
+    assert.deepEqual(b.seen.goto, [
+      { url: 'https://p.example/', timeout: NAVIGATION_TIMEOUT_MS },
+    ]);
+    assert.equal(shot.mimeType, 'image/png');
+    assert.equal(shot.height, 1024);
+    assert.equal(shot.clipped, false);
+    assert.equal(Buffer.from(shot.data, 'base64').length, 1000);
+    assert.equal(b.seen.closed, 1);
+  });
+
+  it('cuts a full page at its height limit', async () => {
+    const b = browser({ scrollHeight: MAX_SCREENSHOT_HEIGHT * 3 });
+    const shot = await captureScreenshot(b.launch, 'https://p.example/', {
+      width: 1280,
+      fullPage: true,
+    });
+    assert.equal(shot.height, MAX_SCREENSHOT_HEIGHT);
+    assert.equal(shot.clipped, true);
+    assert.deepEqual(b.seen.shots[0]?.clip, {
+      x: 0,
+      y: 0,
+      width: 1280,
+      height: MAX_SCREENSHOT_HEIGHT,
+    });
+    assert.equal(b.seen.shots[0]?.captureBeyondViewport, true);
+  });
+
+  it('takes a large picture again as a JPEG, and gives up past the last quality', async () => {
+    const b = browser({
+      sizes: [MAX_SCREENSHOT_BYTES + 1, MAX_SCREENSHOT_BYTES + 1, 900],
+    });
+    const shot = await captureScreenshot(b.launch, 'https://p.example/', {
+      width: 390,
+      fullPage: false,
+    });
+    assert.equal(shot.mimeType, 'image/jpeg');
+    assert.deepEqual(
+      b.seen.shots.map((s) => [s.type, s.quality]),
+      [
+        ['png', undefined],
+        ['jpeg', 70],
+        ['jpeg', 45],
+      ],
+    );
+    const huge = browser({ sizes: Array(4).fill(MAX_SCREENSHOT_BYTES + 1) });
+    await assert.rejects(
+      captureScreenshot(huge.launch, 'https://p.example/', {
+        width: 390,
+        fullPage: false,
+      }),
+    );
+    assert.equal(huge.seen.closed, 1);
+  });
+
+  it('closes the browser when the page does not load', async () => {
+    const b = browser({
+      goto: () => Promise.reject(new Error('Navigation timeout')),
+    });
+    await assert.rejects(
+      captureScreenshot(b.launch, 'https://p.example/', {
+        width: 1280,
+        fullPage: false,
+      }),
+      /Navigation timeout/,
+    );
+    assert.equal(b.seen.closed, 1);
   });
 });
 

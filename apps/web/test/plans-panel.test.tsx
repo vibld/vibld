@@ -17,25 +17,50 @@ import { PlansPanel } from '../src/components/PlansPanel.tsx';
 const PLANS = [
   {
     tier: 'free',
-    limits: { activeProjectLimit: 5, monthlyAllowanceMicroUsd: 2_500_000 },
-    code: { activeProjectLimit: 3, monthlyAllowanceMicroUsd: 1_000_000 },
+    limits: {
+      activeProjectLimit: 5,
+      monthlyAllowanceMicroUsd: 2_500_000,
+      mcpDailyEditCalls: 80,
+    },
+    code: {
+      activeProjectLimit: 3,
+      monthlyAllowanceMicroUsd: 1_000_000,
+      mcpDailyEditCalls: 50,
+    },
     saved: {
       activeProjectLimit: 5,
       monthlyAllowanceMicroUsd: 2_500_000,
+      mcpDailyEditCalls: 80,
       updatedAt: '2026-10-01T04:00:00.000Z',
       updatedBy: 'admin@example.com',
     },
   },
   {
     tier: 'build',
-    limits: { activeProjectLimit: null, monthlyAllowanceMicroUsd: 14_000_000 },
-    code: { activeProjectLimit: null, monthlyAllowanceMicroUsd: 14_000_000 },
+    limits: {
+      activeProjectLimit: null,
+      monthlyAllowanceMicroUsd: 14_000_000,
+      mcpDailyEditCalls: 500,
+    },
+    code: {
+      activeProjectLimit: null,
+      monthlyAllowanceMicroUsd: 14_000_000,
+      mcpDailyEditCalls: 500,
+    },
     saved: null,
   },
   {
     tier: 'ship',
-    limits: { activeProjectLimit: null, monthlyAllowanceMicroUsd: 40_000_000 },
-    code: { activeProjectLimit: null, monthlyAllowanceMicroUsd: 40_000_000 },
+    limits: {
+      activeProjectLimit: null,
+      monthlyAllowanceMicroUsd: 40_000_000,
+      mcpDailyEditCalls: 2000,
+    },
+    code: {
+      activeProjectLimit: null,
+      monthlyAllowanceMicroUsd: 40_000_000,
+      mcpDailyEditCalls: 2000,
+    },
     saved: null,
   },
 ];
@@ -104,14 +129,17 @@ describe('the Plans panel', () => {
   it('shows each plan’s limits now, and the code’s beside a saved one', async () => {
     const panel = await mount();
     const free = panel.group('Free').textContent ?? '';
-    assert.match(free, /Now: 5 active projects, \$2\.50 a month\./);
     assert.match(
       free,
-      /Set Oct 1, 2026 by admin@example\.com; in code: 3 active projects, \$1\.00\./,
+      /Now: 5 active projects, \$2\.50 a month, 80 assistant edit calls a day\./,
+    );
+    assert.match(
+      free,
+      /Set Oct 1, 2026 by admin@example\.com; in code: 3 active projects, \$1\.00, 50 assistant edit calls a day\./,
     );
     assert.match(
       panel.group('Build').textContent ?? '',
-      /Now: No project limit, \$14\.00 a month\. The limits in code\./,
+      /Now: No project limit, \$14\.00 a month, 500 assistant edit calls a day\. The limits in code\./,
     );
     // Reset only where there is something to reset.
     assert.ok(panel.button('Free', /^Reset to code$/));
@@ -125,11 +153,13 @@ describe('the Plans panel', () => {
 
   it('saves what was typed, blank as no limit', async () => {
     const panel = await mount();
-    const [limit, allowance] = panel.inputs('Build');
+    const [limit, allowance, calls] = panel.inputs('Build');
     assert.equal(limit!.value, '');
     assert.equal(allowance!.value, '14.00');
+    assert.equal(calls!.value, '500');
     await panel.type(limit!, '25');
     await panel.type(allowance!, '$12.5');
+    await panel.type(calls!, '750');
     await panel.click(panel.button('Build', /^Save$/)!);
     assert.deepEqual(panel.posts, [
       {
@@ -138,6 +168,7 @@ describe('the Plans panel', () => {
           tier: 'build',
           activeProjectLimit: 25,
           monthlyAllowanceUsdCents: 1_250,
+          mcpDailyEditCalls: 750,
         },
       },
     ]);
@@ -164,7 +195,7 @@ describe('the Plans panel', () => {
     const panel = await mount(reset);
     assert.deepEqual(
       panel.inputs('Free').map((input) => input.value),
-      ['5', '2.50'],
+      ['5', '2.50', '80'],
     );
     await panel.click(panel.button('Free', /^Reset to code$/)!);
     assert.deepEqual(panel.posts, [
@@ -174,7 +205,7 @@ describe('the Plans panel', () => {
     // old ones back (Codex review of internal PR 343).
     assert.deepEqual(
       panel.inputs('Free').map((input) => input.value),
-      ['3', '1.00'],
+      ['3', '1.00', '50'],
     );
     assert.equal(panel.button('Free', /^Reset to code$/), undefined);
     panel.unmount();
@@ -183,21 +214,26 @@ describe('the Plans panel', () => {
 
 describe('what the plans client reads', () => {
   it('parses the fields an admin types', () => {
-    assert.deepEqual(parsePlanFields('', '1'), {
+    assert.deepEqual(parsePlanFields('', '1', '50'), {
       ok: true,
       activeProjectLimit: null,
       monthlyAllowanceUsdCents: 100,
+      mcpDailyEditCalls: 50,
     });
-    assert.deepEqual(parsePlanFields(' 0 ', '0'), {
+    assert.deepEqual(parsePlanFields(' 0 ', '0', ' 0 '), {
       ok: true,
       activeProjectLimit: 0,
       monthlyAllowanceUsdCents: 0,
+      mcpDailyEditCalls: 0,
     });
-    assert.equal(parsePlanFields('1001', '1').ok, false);
-    assert.equal(parsePlanFields('-1', '1').ok, false);
-    assert.equal(parsePlanFields('1', '').ok, false);
-    assert.equal(parsePlanFields('1', '10000.01').ok, false);
-    assert.equal(parsePlanFields('1', 'ten').ok, false);
+    assert.equal(parsePlanFields('1001', '1', '1').ok, false);
+    assert.equal(parsePlanFields('-1', '1', '1').ok, false);
+    assert.equal(parsePlanFields('1', '', '1').ok, false);
+    assert.equal(parsePlanFields('1', '10000.01', '1').ok, false);
+    assert.equal(parsePlanFields('1', 'ten', '1').ok, false);
+    assert.equal(parsePlanFields('1', '1', '').ok, false);
+    assert.equal(parsePlanFields('1', '1', '2.5').ok, false);
+    assert.equal(parsePlanFields('1', '1', '100001').ok, false);
     assert.equal(describeProjectLimit(1), '1 active project');
     assert.equal(describeProjectLimit(null), 'No project limit');
   });
@@ -230,6 +266,23 @@ describe('what the plans client reads', () => {
         detail: { activeProjectLimit: 5, monthlyAllowanceMicroUsd: 2_500_000 },
       }),
       /^Set a plan's limits \(free\) · 5 active projects, \$2\.50 a month · by admin@example\.com$/,
+    );
+    assert.match(
+      describeAuditEntry({
+        id: 2,
+        at: '2026-10-10T00:00:00.000Z',
+        adminEmail: 'admin@example.com',
+        action: 'plan-limits',
+        targetUserId: null,
+        target: 'build',
+        reason: null,
+        detail: {
+          activeProjectLimit: null,
+          monthlyAllowanceMicroUsd: 14_000_000,
+          mcpDailyEditCalls: 500,
+        },
+      }),
+      /· no project limit, \$14\.00 a month, 500 assistant edit calls a day ·/,
     );
   });
 });

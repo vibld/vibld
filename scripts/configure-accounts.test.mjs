@@ -324,14 +324,15 @@ test('clerkOAuthChanges asks for opaque tokens and the MCP default scopes', () =
   const onboarding = {
     client_id_metadata_documents_advertised: true,
     dynamic_oauth_client_registration: true,
-    dynamic_client_allowed_scopes: 'offline_access build email openid profile',
+    dynamic_client_allowed_scopes:
+      'offline_access build edit email openid profile',
   };
   assert.deepEqual(
     clerkOAuthChanges({
       oauth_jwt_access_tokens: false,
       aud_claim_enabled: true,
       ...onboarding,
-      default_scopes: 'build email openid profile',
+      default_scopes: 'build edit email openid profile',
     }),
     {},
   );
@@ -344,6 +345,27 @@ test('clerkOAuthChanges asks for opaque tokens and the MCP default scopes', () =
     }),
     { default_scopes: CLERK_OAUTH_SETTINGS.default_scopes },
   );
+  // A copy set up before the `edit` scope (D190) is brought up to it.
+  assert.deepEqual(
+    clerkOAuthChanges({
+      oauth_jwt_access_tokens: false,
+      aud_claim_enabled: true,
+      client_id_metadata_documents_advertised: true,
+      dynamic_oauth_client_registration: true,
+      dynamic_client_allowed_scopes:
+        'offline_access build email openid profile',
+      default_scopes: 'build email openid profile',
+    }),
+    {
+      default_scopes: CLERK_OAUTH_SETTINGS.default_scopes,
+      dynamic_client_allowed_scopes:
+        CLERK_OAUTH_SETTINGS.dynamic_client_allowed_scopes,
+    },
+  );
+  assert.ok(CLERK_OAUTH_SETTINGS.default_scopes.includes('edit'));
+  assert.ok(
+    CLERK_OAUTH_SETTINGS.dynamic_client_allowed_scopes.includes('edit'),
+  );
 });
 
 test('clerkOAuthChanges turns on CIMD and DCR (D185)', () => {
@@ -353,7 +375,7 @@ test('clerkOAuthChanges turns on CIMD and DCR (D185)', () => {
       aud_claim_enabled: true,
       client_id_metadata_documents_advertised: false,
       dynamic_oauth_client_registration: false,
-      default_scopes: ['openid', 'profile', 'email', 'build'],
+      default_scopes: ['openid', 'profile', 'email', 'build', 'edit'],
       dynamic_client_allowed_scopes: null,
     }),
     {

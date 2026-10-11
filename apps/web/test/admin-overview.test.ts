@@ -217,6 +217,24 @@ describe('the platform overview (D128)', () => {
     assert.equal(overview.unendedBuilds, 1);
   });
 
+  it('counts neither a rollback nor an edit as a build (D152, D190)', async () => {
+    const w = world();
+    await account(w, 'user_a', '2026-09-30T08:00:00.000Z', NOW.toISOString());
+    await account(w, 'user_b', '2026-09-30T08:00:00.000Z', NOW.toISOString());
+    await project(w, 'p_a', 'user_a');
+    await project(w, 'p_b', 'user_b');
+    await stage(w, 'r1', 'p_a', 'accepted', '2026-10-01T10:00:00.000Z');
+    await stage(w, 'rollback-x', 'p_b', 'accepted', '2026-10-01T10:01:00.000Z');
+    await stage(w, 'edit-y', 'p_b', 'accepted', '2026-10-01T10:02:00.000Z');
+    await stage(w, 'edit-z', 'p_a', 'accepted', '2026-10-01T10:03:00.000Z');
+
+    const overview = await readOverview(w.db, NOW, 1, noBalances);
+    assert.equal(overview.days[0]!.builds, 1);
+    assert.equal(overview.days[0]!.accepted, 1);
+    assert.equal(overview.days[0]!.builders, 1);
+    assert.equal(overview.totals.builders, 1);
+  });
+
   it('counts a run as not ended while a later stage of it is still going', async () => {
     const w = world();
     await project(w, 'p_a', 'user_a');

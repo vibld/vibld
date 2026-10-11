@@ -279,6 +279,10 @@ describe('starting vibld in its container', () => {
     assert.equal(web.vars.PUBLISH_HOSTNAME, undefined);
     assert.ok(configs.web.services.some((b) => b.binding === 'PREVIEW'));
     assert.equal(configs.web.vars.VIBLD_PREVIEW, undefined);
+    // Browser Rendering is Cloudflare's: the box has none (D190).
+    assert.deepEqual(base.web.browser, { binding: 'BROWSER' });
+    assert.equal(web.browser, undefined);
+    assert.equal(configs.web.browser, undefined);
   });
 
   it('answers on two domains of its own behind the proxy on a server (D141)', () => {

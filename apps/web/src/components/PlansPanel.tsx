@@ -5,6 +5,7 @@ import {
   formatUsd,
 } from '../admin/admin-users-client.ts';
 import {
+  describeEditCalls,
   describeProjectLimit,
   fetchPlans,
   parsePlanFields,
@@ -14,8 +15,9 @@ import {
 import type { PlanView } from '../admin/plans-client.ts';
 
 /**
- * What each plan allows (docs/decisions.md D134): active projects at once
- * and the monthly allowance, set here in place of the code's, and put
+ * What each plan allows (docs/decisions.md D134): active projects at once,
+ * the monthly allowance and the calls a day an assistant may make to the
+ * editing tools on `/mcp` (D201), set here in place of the code's, and put
  * back with Reset. An account's own override still comes first.
  *
  * vibld.com/pricing is built from the limits in code, not from here, so
@@ -94,12 +96,12 @@ export function PlansPanel() {
           // starts the fields again from the limits now in force, not from
           // what was typed before (a Save after Reset would otherwise put
           // the old limits straight back).
-          key={`${plan.tier}:${plan.limits.activeProjectLimit}:${plan.limits.monthlyAllowanceMicroUsd}:${plan.saved?.updatedAt ?? 'code'}`}
+          key={`${plan.tier}:${plan.limits.activeProjectLimit}:${plan.limits.monthlyAllowanceMicroUsd}:${plan.limits.mcpDailyEditCalls}:${plan.saved?.updatedAt ?? 'code'}`}
           plan={plan}
           busy={busy}
-          onSave={(limit, cents) =>
+          onSave={(limit, cents, calls) =>
             change(
-              () => savePlan(plan.tier, limit, cents),
+              () => savePlan(plan.tier, limit, cents, calls),
               `Saved the ${TIER_NAMES[plan.tier]} plan's limits.`,
             )
           }
@@ -123,11 +125,16 @@ function PlanRow({
 }: {
   plan: PlanView;
   busy: boolean;
-  onSave: (limit: number | null, cents: number) => Promise<boolean>;
+  onSave: (
+    limit: number | null,
+    cents: number,
+    calls: number,
+  ) => Promise<boolean>;
   onReset: () => Promise<boolean>;
 }) {
   const limitId = useId();
   const allowanceId = useId();
+  const callsId = useId();
   const [limit, setLimit] = useState(
     plan.limits.activeProjectLimit === null
       ? ''
@@ -136,6 +143,7 @@ function PlanRow({
   const [dollars, setDollars] = useState(
     (plan.limits.monthlyAllowanceMicroUsd / 1_000_000).toFixed(2),
   );
+  const [calls, setCalls] = useState(String(plan.limits.mcpDailyEditCalls));
   const [problem, setProblem] = useState<string | null>(null);
   const name = TIER_NAMES[plan.tier];
 
@@ -144,18 +152,21 @@ function PlanRow({
       <p className="prompt__label">{name}</p>
       <p className="pane-note">
         Now: {describeProjectLimit(plan.limits.activeProjectLimit)},{' '}
-        {formatUsd(plan.limits.monthlyAllowanceMicroUsd)} a month.{' '}
+        {formatUsd(plan.limits.monthlyAllowanceMicroUsd)} a month,{' '}
+        {describeEditCalls(plan.limits.mcpDailyEditCalls)}.{' '}
         {plan.saved
           ? `Set ${formatDay(plan.saved.updatedAt)} by ${plan.saved.updatedBy}; in code: ${describeProjectLimit(
               plan.code.activeProjectLimit,
-            ).toLowerCase()}, ${formatUsd(plan.code.monthlyAllowanceMicroUsd)}.`
+            ).toLowerCase()}, ${formatUsd(plan.code.monthlyAllowanceMicroUsd)}, ${describeEditCalls(
+              plan.code.mcpDailyEditCalls,
+            )}.`
           : 'The limits in code.'}
       </p>
       <form
         className="prompt__row"
         onSubmit={(event) => {
           event.preventDefault();
-          const parsed = parsePlanFields(limit, dollars);
+          const parsed = parsePlanFields(limit, dollars, calls);
           if (!parsed.ok) {
             setProblem(parsed.error);
             return;
@@ -164,6 +175,7 @@ function PlanRow({
           void onSave(
             parsed.activeProjectLimit,
             parsed.monthlyAllowanceUsdCents,
+            parsed.mcpDailyEditCalls,
           );
         }}
       >
@@ -190,6 +202,18 @@ function PlanRow({
           value={dollars}
           disabled={busy}
           onChange={(event) => setDollars(event.target.value)}
+        />
+        <label className="prompt__label" htmlFor={callsId}>
+          Assistant edit calls a day
+        </label>
+        <input
+          id={callsId}
+          type="text"
+          inputMode="numeric"
+          className="prompt__input"
+          value={calls}
+          disabled={busy}
+          onChange={(event) => setCalls(event.target.value)}
         />
         <button type="submit" className="button" disabled={busy}>
           Save

@@ -90,6 +90,12 @@ export const GATED_METHODS: Readonly<Record<string, readonly string[]>> = {
   // DELETE on the share link is: a revoked owner must be able to stop their
   // own domain from serving.
   '/api/projects/:id/domain': ['POST'],
+  // PUT writes files into a project's accepted code with no build (D190):
+  // a new revision in storage, and the way an assistant edits a project,
+  // which is new work as a build is, without the model. GET reads one of
+  // the project's own checkpoints and is open for the reason the history
+  // is: a revoked account can still read what it made.
+  '/api/projects/:id/files': ['PUT'],
 };
 
 /** Routes an uninvited caller must not reach, whatever the method. */
@@ -403,6 +409,8 @@ export const PROJECT_SHARE_ROUTE = '/api/projects/:id/share';
 /** A project's accepted checkpoints, and restoring one (D152). */
 export const PROJECT_CHECKPOINTS_ROUTE = '/api/projects/:id/checkpoints';
 export const PROJECT_RESTORE_ROUTE = '/api/projects/:id/checkpoints/restore';
+/** A project's files: one checkpoint's, and editing them (D190). */
+export const PROJECT_FILES_ROUTE = '/api/projects/:id/files';
 /** A published site's own domain (D189, `domain-handlers.ts`). */
 export const PROJECT_DOMAIN_ROUTE = '/api/projects/:id/domain';
 /**
@@ -420,6 +428,7 @@ const PROJECT_DUPLICATE = /^\/api\/projects\/([^/]+)\/duplicate$/;
 const PROJECT_SHARE = /^\/api\/projects\/([^/]+)\/share$/;
 const PROJECT_CHECKPOINTS = /^\/api\/projects\/([^/]+)\/checkpoints$/;
 const PROJECT_RESTORE = /^\/api\/projects\/([^/]+)\/checkpoints\/restore$/;
+const PROJECT_FILES = /^\/api\/projects\/([^/]+)\/files$/;
 const PROJECT_DOMAIN = /^\/api\/projects\/([^/]+)\/domain$/;
 const SHARE_VIEW = /^\/api\/share\/([^/]+)$/;
 const SHARE_PREVIEW = /^\/api\/share\/([^/]+)\/preview$/;
@@ -431,6 +440,7 @@ export function routeKeyFor(pathname: string): string {
   if (PROJECT_SHARE.test(pathname)) return PROJECT_SHARE_ROUTE;
   if (PROJECT_CHECKPOINTS.test(pathname)) return PROJECT_CHECKPOINTS_ROUTE;
   if (PROJECT_RESTORE.test(pathname)) return PROJECT_RESTORE_ROUTE;
+  if (PROJECT_FILES.test(pathname)) return PROJECT_FILES_ROUTE;
   if (PROJECT_DOMAIN.test(pathname)) return PROJECT_DOMAIN_ROUTE;
   if (PROJECT_ITEM.test(pathname)) return PROJECT_ITEM_ROUTE;
   if (SHARE_PREVIEW.test(pathname)) return SHARE_PREVIEW_ROUTE;
@@ -456,6 +466,7 @@ export function projectIdInPath(pathname: string): string | null {
       PROJECT_SHARE.exec(pathname) ??
       PROJECT_CHECKPOINTS.exec(pathname) ??
       PROJECT_RESTORE.exec(pathname) ??
+      PROJECT_FILES.exec(pathname) ??
       PROJECT_DOMAIN.exec(pathname) ??
       PROJECT_ITEM.exec(pathname),
   );

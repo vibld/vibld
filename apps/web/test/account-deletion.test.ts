@@ -1459,9 +1459,13 @@ describe('the purge', () => {
       nights += 1;
       assert.ok(nights < 20, 'the purge never finished');
       const before = w.statements();
-      await runDeletionNight(w.deps, await findDeletionWork(w.deps), 20);
+      await runDeletionNight(
+        w.deps,
+        await findDeletionWork(w.deps),
+        MIN_DELETION_SHARE,
+      );
       const spent = w.statements() - before - QUERIES_TO_FIND_DELETIONS;
-      assert.ok(spent <= 20, `night ${nights}: ${spent}`);
+      assert.ok(spent <= MIN_DELETION_SHARE, `night ${nights}: ${spent}`);
       w.clock.now = new Date(w.clock.now.getTime() + 86_400_000);
     }
     assert.ok(nights > 2, 'twelve projects fit in one small share');
@@ -1522,6 +1526,8 @@ describe('the purge', () => {
       'user_bans.user_id',
       // D182: deleted in `deleteAccountRows`.
       'mcp_builds.user_id',
+      // D201: deleted in `deleteAccountRows`.
+      'mcp_calls.user_id',
       // D189: deleted in `deleteAccountRows`, once disconnected at
       // Cloudflare by the account rows step.
       'custom_domains.user_id',

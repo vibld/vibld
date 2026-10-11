@@ -4767,6 +4767,263 @@ export const OPENAPI = {
         },
       },
     },
+    '/api/projects/{id}/files': {
+      parameters: [
+        {
+          name: 'id',
+          in: 'path',
+          required: true,
+          description:
+            'The project id. An id that does not match the pattern, or names a project the caller does not own, is answered 404 (never 403).',
+          schema: {
+            type: 'string',
+            pattern: '^[A-Za-z0-9_-]{1,128}$',
+          },
+        },
+      ],
+      get: {
+        operationId: 'readProjectFiles',
+        summary:
+          "Read a project's accepted code, or one checkpoint's with `revision`.",
+        tags: ['Projects'],
+        security: [
+          {
+            clerk: [],
+          },
+        ],
+        parameters: [
+          {
+            name: 'revision',
+            in: 'query',
+            required: false,
+            description:
+              "A checkpoint in the project's history (`GET /api/projects/{id}/checkpoints`). Absent, the accepted code.",
+            schema: {
+              type: 'string',
+              pattern: '^[A-Za-z0-9_-]{1,64}$',
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The code.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SnapshotEnvelope',
+                },
+              },
+            },
+          },
+          '401': {
+            description:
+              'No usable identity: the request carries none of the sign-in its `security` names. The body also carries `reason: "not-signed-in"`.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '403': {
+            description:
+              'Refused: the session token failed verification (`reason: "not-signed-in"`), the account is banned (`reason: "account-banned"`), the account is scheduled for deletion (`reason: "deletion-scheduled"`, with `purgeAfter`), or sign-in is not configured on this deployment (`reason: "not-configured"`).',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '404': {
+            description:
+              "The project does not exist or is not the caller's, it has no code yet, the checkpoint is not in its history, or the checkpoint is no longer stored.",
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '405': {
+            description:
+              'Method not allowed. The error text names the accepted methods (GET, PUT).',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '503': {
+            description:
+              'Projects are not configured for this deployment (no D1 or R2 binding), or the account could not be checked right now.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+        },
+      },
+      put: {
+        operationId: 'editProjectFiles',
+        summary:
+          "Write and delete files in a project's accepted code, with no build, and return the code accepted now.",
+        description:
+          'Spends nothing and publishes nothing (D190). The change is accepted at once as a new revision, which the history lists as an `edit` checkpoint. The project it leaves is held to the limits a build or a preview is: at most 50 files and 160,000 characters of paths and content. An edit that changes nothing is answered as done without writing. Invite-gated. On this method the invite gate also applies: a signed-in caller who has not been invited gets 403 with `accessRefused: true` and `reason: "access-refused"`.',
+        tags: ['Projects'],
+        security: [
+          {
+            clerk: [],
+          },
+        ],
+        parameters: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/FileEditRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The code accepted now.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SnapshotEnvelope',
+                },
+              },
+            },
+          },
+          '400': {
+            description:
+              'The body is not valid JSON, `base` is not a revision, a path is not relative and canonical, a path is named twice, a path to delete is not in the project, nothing is named, or the edit would leave no files.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '401': {
+            description:
+              'No usable identity: the request carries none of the sign-in its `security` names. The body also carries `reason: "not-signed-in"`.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '403': {
+            description:
+              'A cross-site Origin was sent, or the caller was refused by identity or the invite gate.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '404': {
+            description: "The project does not exist or is not the caller's.",
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '405': {
+            description:
+              'Method not allowed. The error text names the accepted methods (GET, PUT).',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '409': {
+            description:
+              'The project is archived, a build is still running in it, it has no code yet, or the accepted revision is no longer `base` (`code: "checkpoint-moved"`, with `current`).',
+            content: {
+              'application/json': {
+                schema: {
+                  anyOf: [
+                    {
+                      $ref: '#/components/schemas/CheckpointMovedError',
+                    },
+                    {
+                      $ref: '#/components/schemas/Error',
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '413': {
+            description:
+              'The declared Content-Length is over the body limit for project writes, or the edit or the project it would leave is over the file, path or content limits.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '415': {
+            description: 'The Content-Type header is not application/json.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '500': {
+            description:
+              'The files could not be stored under their revision. Nothing was written.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '503': {
+            description:
+              'Projects are not configured for this deployment (no D1 or R2 binding), or the account could not be checked right now.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     '/api/projects/{id}/duplicate': {
       parameters: [
         {
@@ -7410,7 +7667,7 @@ export const OPENAPI = {
           },
           kind: {
             type: 'string',
-            enum: ['build', 'repair', 'restore', 'rollback', 'copy'],
+            enum: ['build', 'repair', 'restore', 'rollback', 'edit', 'copy'],
           },
           acceptedAt: {
             type: 'string',
@@ -7510,6 +7767,37 @@ export const OPENAPI = {
               },
               { type: 'null' },
             ],
+          },
+        },
+      },
+      FileEditRequest: {
+        type: 'object',
+        required: ['base'],
+        description:
+          'At least one file to write or one path to delete. A path may be named once.',
+        properties: {
+          base: {
+            type: 'string',
+            pattern: '^[A-Za-z0-9_-]{1,64}$',
+            description: 'The accepted revision the edit was made against.',
+          },
+          files: {
+            type: 'array',
+            maxItems: 50,
+            description:
+              'Files to write: each replaces the file at its path, or is added at the end.',
+            items: {
+              $ref: '#/components/schemas/StagedFile',
+            },
+          },
+          delete: {
+            type: 'array',
+            maxItems: 50,
+            description: 'Paths to delete. Each must be in the project.',
+            items: {
+              type: 'string',
+              maxLength: 256,
+            },
           },
         },
       },

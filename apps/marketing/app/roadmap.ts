@@ -87,8 +87,9 @@ export const ROADMAP_ITEMS: readonly RoadmapItem[] = [
       'A history that lists the newest 100 accepted checkpoints and restores any one of them in a single step.',
   },
   {
+    // D189.
     id: 'custom-domains',
-    status: 'upcoming',
+    status: 'shipped',
     title: 'Custom domains',
     description:
       'Publish a site on your own domain as well as its vibld-preview.dev address.',

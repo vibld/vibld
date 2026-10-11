@@ -29,6 +29,15 @@ const VERIFY_URL =
  */
 export const MCP_SCOPE = 'build';
 
+/**
+ * The scope the editing tools need on top of `MCP_SCOPE` (D190): reading
+ * and writing a project's files, and looking at its preview. Not needed to
+ * connect, so a token granted `build` alone still lists, builds and
+ * previews; a call to an editing tool without it is answered with a step-up
+ * challenge for both (`mcpStepUp` in `mcp-server.ts`).
+ */
+export const EDIT_SCOPE = 'edit';
+
 /** How long a token Clerk vouched for is taken on trust. */
 export const VERIFIED_TTL_MS = 60_000;
 /** Bounds the cache, which lives as long as the isolate does. */

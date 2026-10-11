@@ -12,6 +12,8 @@ import type { AdminResult, Tier } from './admin-users-client.ts';
 export interface PlanLimits {
   activeProjectLimit: number | null;
   monthlyAllowanceMicroUsd: number;
+  /** Calls a day to `/mcp`'s editing tools (D190, D201). */
+  mcpDailyEditCalls: number;
 }
 
 export interface PlanView {
@@ -34,17 +36,24 @@ function readLimits(value: unknown): PlanLimits | null {
   if (!isRecord(value)) return null;
   const limit = value.activeProjectLimit;
   const allowance = value.monthlyAllowanceMicroUsd;
+  const calls = value.mcpDailyEditCalls;
   if (
     !(
       limit === null ||
       (typeof limit === 'number' && Number.isFinite(limit))
     ) ||
     typeof allowance !== 'number' ||
-    !Number.isFinite(allowance)
+    !Number.isFinite(allowance) ||
+    typeof calls !== 'number' ||
+    !Number.isFinite(calls)
   ) {
     return null;
   }
-  return { activeProjectLimit: limit, monthlyAllowanceMicroUsd: allowance };
+  return {
+    activeProjectLimit: limit,
+    monthlyAllowanceMicroUsd: allowance,
+    mcpDailyEditCalls: calls,
+  };
 }
 
 function readPlan(value: unknown): PlanView | null {
@@ -135,12 +144,13 @@ export function savePlan(
   tier: Tier,
   activeProjectLimit: number | null,
   monthlyAllowanceUsdCents: number,
+  mcpDailyEditCalls: number,
   fetchImpl: Fetch = defaultFetch,
   getToken: GetToken = getClerkToken,
 ) {
   return call(
     '/api/admin/plans',
-    { tier, activeProjectLimit, monthlyAllowanceUsdCents },
+    { tier, activeProjectLimit, monthlyAllowanceUsdCents, mcpDailyEditCalls },
     fetchImpl,
     getToken,
   );
@@ -156,17 +166,20 @@ export function resetPlan(
 
 /**
  * What an admin typed for a plan: the project limit (blank is no limit, a
- * whole number from 0 to 1000 is the limit) and the allowance in dollars
- * (0 to 10,000, to the cent). Refused before it is sent otherwise.
+ * whole number from 0 to 1000 is the limit), the allowance in dollars
+ * (0 to 10,000, to the cent) and the assistant edit calls a day (a whole
+ * number from 0 to 100,000). Refused before it is sent otherwise.
  */
 export function parsePlanFields(
   limit: string,
   dollars: string,
+  calls: string,
 ):
   | {
       ok: true;
       activeProjectLimit: number | null;
       monthlyAllowanceUsdCents: number;
+      mcpDailyEditCalls: number;
     }
   | { ok: false; error: string } {
   const typedLimit = limit.trim();
@@ -194,10 +207,24 @@ export function parsePlanFields(
       error: 'The monthly allowance is an amount from $0 to $10,000.',
     };
   }
+  const typedCalls = calls.trim();
+  const mcpDailyEditCalls = Number(typedCalls);
+  if (
+    typedCalls === '' ||
+    !Number.isInteger(mcpDailyEditCalls) ||
+    mcpDailyEditCalls < 0 ||
+    mcpDailyEditCalls > 100_000
+  ) {
+    return {
+      ok: false,
+      error: 'Assistant edit calls a day is a whole number from 0 to 100,000.',
+    };
+  }
   return {
     ok: true,
     activeProjectLimit,
     monthlyAllowanceUsdCents: Math.round(amount * 100),
+    mcpDailyEditCalls,
   };
 }
 
@@ -205,4 +232,9 @@ export function parsePlanFields(
 export function describeProjectLimit(limit: number | null): string {
   if (limit === null) return 'No project limit';
   return `${limit} active project${limit === 1 ? '' : 's'}`;
+}
+
+/** "50 assistant edit calls a day". */
+export function describeEditCalls(calls: number): string {
+  return `${calls} assistant edit call${calls === 1 ? '' : 's'} a day`;
 }

@@ -89,8 +89,21 @@ export class SqliteD1Database implements D1Database {
    * apps/publish's copy of this fake gives: one that committed the
    * statements it got through before a failure would let a test pass
    * against the half-written state a batch is used to prevent.
+   *
+   * One at a time, as D1 runs them: two batches started together would
+   * otherwise both try to open a transaction on the one connection.
    */
   async batch<T = Record<string, unknown>>(
+    statements: D1PreparedStatement[],
+  ): Promise<D1Result<T>[]> {
+    const turn = this.#batches.then(() => this.#runBatch<T>(statements));
+    this.#batches = turn.catch(() => undefined);
+    return turn;
+  }
+
+  #batches: Promise<unknown> = Promise.resolve();
+
+  async #runBatch<T>(
     statements: D1PreparedStatement[],
   ): Promise<D1Result<T>[]> {
     this.#db.exec('BEGIN');

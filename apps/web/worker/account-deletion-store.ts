@@ -568,6 +568,8 @@ export class AccountDeletionStore {
       // Which assistants started which builds (D182): only a count for a
       // cap, and nothing to cap once the account is gone.
       `DELETE FROM mcp_builds WHERE user_id = ?1`,
+      // And the editing tools' calls (D201), for the same reason.
+      `DELETE FROM mcp_calls WHERE user_id = ?1`,
       // The account's own domains (D189). The purge's account rows step
       // disconnects each one from Cloudflare first, and comes here only
       // once every one is gone there (`PURGE_STEPS` in account-deletion.ts).
@@ -577,7 +579,7 @@ export class AccountDeletionStore {
     }
   }
 
-  static readonly ACCOUNT_ROW_QUERIES = 16;
+  static readonly ACCOUNT_ROW_QUERIES = 17;
 
   /**
    * The Cloudflare id of one of the account's own domains (D189), or null

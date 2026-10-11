@@ -90,10 +90,7 @@ describe('the roadmap data', () => {
       'Public beta',
       'Modern component stack',
     ]);
-    assert.deepEqual(titles('upcoming'), [
-      'Custom domains',
-      'Screenshot and image import',
-    ]);
+    assert.deepEqual(titles('upcoming'), ['Screenshot and image import']);
     assert.deepEqual(titles('considering'), [
       'Figma import',
       'GitHub repository import',
@@ -107,6 +104,7 @@ describe('the roadmap data', () => {
     ]);
     assert.deepEqual(titles('shipped'), [
       'Checkpoint history and rollback',
+      'Custom domains',
       'Sandbox previews with share links',
       'One-step publishing',
       'GitHub pull requests',

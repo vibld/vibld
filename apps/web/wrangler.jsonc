@@ -285,7 +285,28 @@
       "namespace_id": "1013",
       "simple": { "limit": 20, "period": 60 },
     },
+    // File edits outside a build (D190, PUT /api/projects/:id/files), per
+    // Clerk user id after identity. Each one stores a whole snapshot in R2,
+    // so a loop, from an assistant or a script, cannot write without end.
+    {
+      "name": "EDIT_BURST",
+      "namespace_id": "1014",
+      "simple": { "limit": 30, "period": 60 },
+    },
+    // take_screenshot from /mcp (D190), per Clerk user id after identity.
+    // Each capture holds a Browser Rendering browser, whose time is billed.
+    {
+      "name": "SCREENSHOT_BURST",
+      "namespace_id": "1015",
+      "simple": { "limit": 6, "period": 60 },
+    },
   ],
+
+  // Cloudflare Browser Rendering, for the MCP server's take_screenshot
+  // (D190, worker/screenshot.ts). Nothing to provision; billed by browser
+  // time. Left out under Docker (scripts/docker-config.mjs), where the tool
+  // is then not offered.
+  "browser": { "binding": "BROWSER" },
 
   // The spend ceiling. Also not provisioned: the object is created on first
   // access. SQLite storage is required rather than preferred -- it is the only

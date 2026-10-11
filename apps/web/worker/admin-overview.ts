@@ -142,7 +142,8 @@ export async function readOverview(
       ),
       // A run's first stage row is its own id; a later stage's id carries a
       // ':' suffix (the same reading as the account page's runs). A
-      // rollback's row (D152) is not a build, and is not counted as one.
+      // rollback's row (D152) or an edit's (D190) is not a build, and is not
+      // counted as one.
       byDay<{
         day: string;
         builds: number;
@@ -162,6 +163,7 @@ export async function readOverview(
            JOIN projects AS p ON p.id = s.project_id
           WHERE s.created_at >= ?1 AND instr(s.run_id, ':') = 0
             AND substr(s.run_id, 1, 9) <> 'rollback-'
+            AND substr(s.run_id, 1, 5) <> 'edit-'
           GROUP BY day`,
         since,
       ),
@@ -259,7 +261,8 @@ export async function readOverview(
          FROM generation_stages AS s
          JOIN projects AS p ON p.id = s.project_id
         WHERE s.created_at >= ?1 AND instr(s.run_id, ':') = 0
-          AND substr(s.run_id, 1, 9) <> 'rollback-'`,
+          AND substr(s.run_id, 1, 9) <> 'rollback-'
+          AND substr(s.run_id, 1, 5) <> 'edit-'`,
     )
     .bind(since)
     .first<{ n: number }>();

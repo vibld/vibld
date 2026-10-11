@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   DEFAULT_FREE_INCLUDED_MICRO_USD,
+  MCP_DAILY_EDIT_CALLS,
   TIER_INCLUDED_MICRO_USD,
   allowancePeriodKey,
   monthlyAllowanceMicroUsd,
@@ -74,5 +75,15 @@ describe('allowancePeriodKey', () => {
       '2026-09',
     );
     assert.equal(allowancePeriodKey(Date.UTC(2026, 9, 1, 0, 0, 0)), '2026-10');
+  });
+});
+
+describe('MCP_DAILY_EDIT_CALLS', () => {
+  it("is each plan's daily cap on assistant editing calls (D201)", () => {
+    assert.deepEqual(MCP_DAILY_EDIT_CALLS, {
+      free: 50,
+      build: 500,
+      ship: 2000,
+    });
   });
 });

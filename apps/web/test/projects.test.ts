@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { revisionFor } from '@vibld/core';
 import type { TranscriptTurn } from '@vibld/core';
 
 import { handleProjects } from '../worker/project-handlers.ts';
@@ -38,6 +39,8 @@ interface World {
   clock: { now: Date };
   /** What each run's Workflow instance says of itself, where it says. */
   statuses: Map<string, string>;
+  /** Accounts whose file edits the burst limit refuses (D190). */
+  editLimited: Set<string>;
   call(
     user: string,
     method: string,
@@ -52,6 +55,7 @@ function world(db = new SqliteD1Database(schemaSql())): World {
   const tiers = new Map<string, Tier>();
   const clock = { now: new Date('2026-09-28T12:00:00.000Z') };
   const statuses = new Map<string, string>();
+  const editLimited = new Set<string>();
   let ids = 0;
   const deps = (user: string): ProjectsDeps => ({
     resolvePrincipal: async () =>
@@ -64,6 +68,7 @@ function world(db = new SqliteD1Database(schemaSql())): World {
       if (status === undefined) throw new Error('no such instance');
       return status;
     },
+    editAllowed: async (who) => !editLimited.has(who),
   });
   return {
     db,
@@ -71,6 +76,7 @@ function world(db = new SqliteD1Database(schemaSql())): World {
     tiers,
     clock,
     statuses,
+    editLimited,
     async call(user, method, path, body, headers = {}) {
       const response = await handleProjects(
         new Request(`${ORIGIN}${path}`, {
@@ -1346,5 +1352,295 @@ describe('checkpoint history (D152)', () => {
       `/api/projects/${project.id}/checkpoints/restore`,
     );
     assert.equal(read.status, 405);
+  });
+});
+
+describe('editing files with no build (D190)', () => {
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+  /** A project built once, at r1, with two files. */
+  async function built(w: World) {
+    const project = await create(w, ALICE);
+    const store = new D1GenerationStore(w.db, w.bucket);
+    await store.saveStage({
+      runId: 'run-edit-1',
+      projectId: project.id,
+      baseRevision: null,
+      state: 'validating',
+    });
+    const promoted = await store.promote(project.id, 'run-edit-1', null, {
+      revision: 'r1',
+      files: [
+        { path: 'index.html', content: '<div id="root"></div>' },
+        { path: 'src/App.tsx', content: 'export default 1;' },
+      ],
+    });
+    assert.ok(promoted.promoted);
+    await tick();
+    return project;
+  }
+
+  const edits = (w: World) =>
+    count(
+      w.db,
+      `SELECT COUNT(*) AS n FROM generation_stages WHERE run_id LIKE 'edit-%'`,
+    );
+
+  it('writes over a file in its place, adds one at the end, and deletes one', async () => {
+    const w = world();
+    const project = await built(w);
+    const path = `/api/projects/${project.id}/files`;
+    const edited = await w.call(ALICE, 'PUT', path, {
+      base: 'r1',
+      files: [
+        { path: 'src/App.tsx', content: 'export default 2;' },
+        { path: 'src/new.ts', content: 'export const x = 1;' },
+      ],
+      delete: ['index.html'],
+    });
+    assert.equal(edited.status, 200, JSON.stringify(edited.body));
+    const files = [
+      { path: 'src/App.tsx', content: 'export default 2;' },
+      { path: 'src/new.ts', content: 'export const x = 1;' },
+    ];
+    // Named by its files, as a build's revision is.
+    assert.deepEqual(edited.body.snapshot, {
+      revision: revisionFor({ files }),
+      files,
+    });
+
+    const opened = await w.call(ALICE, 'GET', `/api/projects/${project.id}`);
+    assert.deepEqual(opened.body.snapshot, edited.body.snapshot);
+    const read = await w.call(ALICE, 'GET', path);
+    assert.deepEqual(read.body.snapshot, edited.body.snapshot);
+    const history = await w.call(
+      ALICE,
+      'GET',
+      `/api/projects/${project.id}/checkpoints`,
+    );
+    assert.deepEqual(
+      history.body.checkpoints.map((entry: any) => entry.kind),
+      ['edit', 'build'],
+    );
+    assert.match(history.body.checkpoints[0].runId, /^edit-[^:]+$/);
+    // Nothing was traced: an edit is not a run.
+    assert.equal(
+      await count(w.db, `SELECT COUNT(*) AS n FROM generation_run_traces`),
+      0,
+    );
+
+    // The code it replaced is still a checkpoint, readable and restorable.
+    const earlier = await w.call(ALICE, 'GET', `${path}?revision=r1`);
+    assert.equal(earlier.status, 200);
+    assert.equal(earlier.body.snapshot.files.length, 2);
+    const restored = await w.call(
+      ALICE,
+      'POST',
+      `/api/projects/${project.id}/checkpoints/restore`,
+      { revision: 'r1', base: edited.body.snapshot.revision },
+    );
+    assert.equal(restored.status, 200);
+  });
+
+  it('refuses an edit past the burst limit and writes nothing', async () => {
+    const w = world();
+    const project = await built(w);
+    w.editLimited.add(ALICE);
+    const refused = await w.call(
+      ALICE,
+      'PUT',
+      `/api/projects/${project.id}/files`,
+      { base: 'r1', files: [{ path: 'src/App.tsx', content: 'x' }] },
+    );
+    assert.equal(refused.status, 429);
+    assert.match(refused.body.error, /Too many file edits/);
+    assert.equal(await edits(w), 0);
+  });
+
+  it('reads the accepted code or a checkpoint, and nothing else', async () => {
+    const w = world();
+    const empty = await create(w, ALICE);
+    const none = await w.call(ALICE, 'GET', `/api/projects/${empty.id}/files`);
+    assert.equal(none.status, 404);
+    assert.match(none.body.error, /no code yet/);
+
+    const project = await built(w);
+    const path = `/api/projects/${project.id}/files`;
+    assert.equal(
+      (await w.call(ALICE, 'GET', path)).body.snapshot.revision,
+      'r1',
+    );
+    for (const revision of ['r-other', '..%2Fr1']) {
+      const unknown = await w.call(
+        ALICE,
+        'GET',
+        `${path}?revision=${revision}`,
+      );
+      assert.equal(unknown.status, 404, revision);
+    }
+    assert.equal((await w.call(BOB, 'GET', path)).status, 404);
+  });
+
+  it('refuses an edit it cannot apply, writing nothing', async () => {
+    const w = world();
+    const project = await built(w);
+    const path = `/api/projects/${project.id}/files`;
+    for (const body of [
+      { base: 'r1' },
+      { base: 'r1', files: [], delete: [] },
+      { files: [{ path: 'a.ts', content: '' }] },
+      { base: '../r1', files: [{ path: 'a.ts', content: '' }] },
+      { base: 'r1', files: [{ path: '../escape.ts', content: '' }] },
+      { base: 'r1', files: [{ path: '/etc/passwd', content: '' }] },
+      { base: 'r1', files: [{ path: 'src/./a.ts', content: '' }] },
+      { base: 'r1', files: [{ path: 'a.ts' }] },
+      { base: 'r1', delete: ['../index.html'] },
+      { base: 'r1', delete: ['missing.ts'] },
+      { base: 'r1', files: 'a.ts' },
+      {
+        base: 'r1',
+        files: [
+          { path: 'a.ts', content: '1' },
+          { path: 'a.ts', content: '2' },
+        ],
+      },
+      {
+        base: 'r1',
+        files: [{ path: 'index.html', content: '' }],
+        delete: ['index.html'],
+      },
+      // Every file gone: no project left to build or preview.
+      { base: 'r1', delete: ['index.html', 'src/App.tsx'] },
+      [],
+    ]) {
+      const refused = await w.call(ALICE, 'PUT', path, body);
+      assert.equal(refused.status, 400, JSON.stringify(body));
+    }
+    assert.equal(await edits(w), 0);
+    assert.equal(
+      (await w.call(ALICE, 'GET', path)).body.snapshot.revision,
+      'r1',
+    );
+  });
+
+  it('holds the project it would leave to the limits a build is held to', async () => {
+    const w = world();
+    const project = await built(w);
+    const path = `/api/projects/${project.id}/files`;
+    // Two files already, so 49 more is 51.
+    const many = await w.call(ALICE, 'PUT', path, {
+      base: 'r1',
+      files: Array.from({ length: 49 }, (_, i) => ({
+        path: `src/f${i}.ts`,
+        content: '',
+      })),
+    });
+    assert.equal(many.status, 413);
+    assert.match(many.body.error, /^After this edit: .*at most 50 files/);
+    const large = await w.call(ALICE, 'PUT', path, {
+      base: 'r1',
+      files: [{ path: 'src/big.ts', content: 'x'.repeat(159_990) }],
+    });
+    assert.equal(large.status, 413);
+    assert.equal(await edits(w), 0);
+  });
+
+  it('refuses from a stale base, while a build runs, in an archived project, or with no code', async () => {
+    const w = world();
+    const project = await built(w);
+    const path = `/api/projects/${project.id}/files`;
+    const body = (base: string) => ({
+      base,
+      files: [{ path: 'src/App.tsx', content: 'export default 3;' }],
+    });
+
+    const stale = await w.call(ALICE, 'PUT', path, body('r0'));
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.code, 'checkpoint-moved');
+    assert.equal(stale.body.current, 'r1');
+
+    await new D1GenerationStore(w.db, w.bucket).saveStage({
+      runId: 'run-live',
+      projectId: project.id,
+      baseRevision: 'r1',
+      state: 'planning',
+    });
+    w.clock.now = new Date(Date.now());
+    const busy = await w.call(ALICE, 'PUT', path, body('r1'));
+    assert.equal(busy.status, 409);
+    assert.match(busy.body.error, /build is still running/);
+
+    w.statuses.set('run-live', 'errored');
+    await w.call(ALICE, 'PATCH', `/api/projects/${project.id}`, {
+      archived: true,
+    });
+    const archived = await w.call(ALICE, 'PUT', path, body('r1'));
+    assert.equal(archived.status, 409);
+    assert.match(archived.body.error, /archived/);
+
+    const empty = await create(w, ALICE);
+    const nothing = await w.call(
+      ALICE,
+      'PUT',
+      `/api/projects/${empty.id}/files`,
+      body('r1'),
+    );
+    assert.equal(nothing.status, 409);
+    assert.match(nothing.body.error, /no code yet/);
+    assert.equal(await edits(w), 0);
+  });
+
+  it('answers an edit that changes nothing as done, writing nothing', async () => {
+    const w = world();
+    const project = await built(w);
+    const same = await w.call(
+      ALICE,
+      'PUT',
+      `/api/projects/${project.id}/files`,
+      {
+        base: 'r1',
+        files: [{ path: 'src/App.tsx', content: 'export default 1;' }],
+      },
+    );
+    assert.equal(same.status, 200);
+    assert.equal(same.body.snapshot.revision, 'r1');
+    assert.equal(await edits(w), 0);
+  });
+
+  it("answers 404 on somebody else's project, 403 cross-site, and 405 otherwise", async () => {
+    const w = world();
+    const project = await built(w);
+    const path = `/api/projects/${project.id}/files`;
+    const body = {
+      base: 'r1',
+      files: [{ path: 'src/App.tsx', content: 'export default 4;' }],
+    };
+    assert.equal((await w.call(BOB, 'PUT', path, body)).status, 404);
+    assert.equal(
+      (
+        await w.call(ALICE, 'PUT', path, body, {
+          origin: 'https://evil.example',
+        })
+      ).status,
+      403,
+    );
+    assert.equal((await w.call(ALICE, 'POST', path, body)).status, 405);
+    assert.equal(await edits(w), 0);
+  });
+
+  it('lets one of two edits from the same base through', async () => {
+    const w = world();
+    const project = await built(w);
+    const path = `/api/projects/${project.id}/files`;
+    const [one, two] = await Promise.all(
+      ['a', 'b'].map((name) =>
+        w.call(ALICE, 'PUT', path, {
+          base: 'r1',
+          files: [{ path: `src/${name}.ts`, content: name }],
+        }),
+      ),
+    );
+    assert.deepEqual([one!.status, two!.status].sort(), [200, 409]);
+    assert.equal(await edits(w), 1);
   });
 });

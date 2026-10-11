@@ -70,3 +70,65 @@ export class McpBuildStore {
       .run();
   }
 }
+
+/**
+ * `mcp_calls` (migration 0054): the editing tools' calls (D190), for the
+ * per-plan daily cap `mcp-server.ts` holds them to (D201).
+ *
+ * The pattern `McpBuildStore.reserve` uses: a call is written only while
+ * the account is under the cap, in one statement, so two calls at once
+ * cannot both take the last place. A call is never given back: every
+ * call the cap lets through has read or written something.
+ *
+ * Only the window is kept. The rows are what the cap counts, not a
+ * record of what an assistant did (the history shows each edit), so each
+ * take clears the account's rows that have left it, which bounds the
+ * table by the cap rather than by time.
+ */
+export class McpCallStore {
+  readonly #db: D1Database;
+
+  constructor(db: D1Database) {
+    this.#db = db;
+  }
+
+  /**
+   * Takes one of the account's `limit` calls since `since` (ISO). False
+   * when all are taken.
+   */
+  async take(entry: {
+    id: string;
+    userId: string;
+    clientId: string;
+    tool: string;
+    projectId: string;
+    since: string;
+    calledAt: string;
+    limit: number;
+  }): Promise<boolean> {
+    const [, taken] = await this.#db.batch([
+      this.#db
+        .prepare(`DELETE FROM mcp_calls WHERE user_id = ?1 AND called_at < ?2`)
+        .bind(entry.userId, entry.since),
+      this.#db
+        .prepare(
+          `INSERT INTO mcp_calls
+             (id, user_id, client_id, tool, project_id, called_at)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?7
+            WHERE (SELECT COUNT(*) FROM mcp_calls
+                    WHERE user_id = ?2 AND called_at >= ?6) < ?8`,
+        )
+        .bind(
+          entry.id,
+          entry.userId,
+          entry.clientId,
+          entry.tool,
+          entry.projectId,
+          entry.since,
+          entry.calledAt,
+          entry.limit,
+        ),
+    ]);
+    return (taken?.meta.changes ?? 0) > 0;
+  }
+}

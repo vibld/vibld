@@ -7,7 +7,7 @@
     "title": "vibld",
     "version": "0.1.0"
   },
-  "description": "Build websites and web apps from a description with vibld: search the template catalog, start a build on your own vibld account, follow it, and open a live preview.",
+  "description": "Build websites and web apps from a description with vibld: search the template catalog, start a build on your own vibld account, follow it, open a live preview and take screenshots of it, and read, edit and type-check a project's files.",
   "websiteUrl": "https://vibld.com",
   "documentationUrl": "https://vibld.com/docs",
   "iconUrl": "https://vibld.com/icon-512.png",
@@ -28,6 +28,14 @@
     "list_projects",
     "start_build",
     "get_build_status",
-    "get_preview_url"
+    "get_preview_url",
+    "list_files",
+    "read_files",
+    "write_files",
+    "check_types",
+    "list_checkpoints",
+    "restore_checkpoint",
+    "get_logs",
+    "take_screenshot"
   ]
 }

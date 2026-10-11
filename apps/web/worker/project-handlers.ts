@@ -8,13 +8,15 @@ import {
   cleanProjectName,
   copyName,
   parseTranscript,
+  revisionFor,
   subdomainOrigin,
 } from '@vibld/core';
-import type { TranscriptTurn } from '@vibld/core';
+import type { ProjectFile, TranscriptTurn } from '@vibld/core';
 
 import {
   PROJECT_CHECKPOINTS_ROUTE,
   PROJECT_DUPLICATE_ROUTE,
+  PROJECT_FILES_ROUTE,
   PROJECT_ITEM_ROUTE,
   PROJECT_RESTORE_ROUTE,
   PROJECT_SHARE_ROUTE,
@@ -37,7 +39,9 @@ import {
   checkRequestOrigin,
   isProjectId,
   parseKnowledge,
+  parseProjectFiles,
   parseReferenceUrl,
+  pathProblem,
 } from './request-guard.ts';
 import type { GuardResult } from './request-guard.ts';
 import { buildInFlight, UNREADABLE_RUN_HELD_MS } from './run-control.ts';
@@ -62,6 +66,11 @@ import { newShareToken, shareUrl } from './share-link.ts';
  *     POST   /api/projects/:id/checkpoints/restore
  *                                          make one of them the accepted
  *                                          one again (D152)
+ *     GET    /api/projects/:id/files       the accepted code, or one
+ *                                          checkpoint's (D190)
+ *     PUT    /api/projects/:id/files       write and delete files in the
+ *                                          accepted code, with no build
+ *                                          (D190)
  *
  * Every route that names a project answers 404 for one that is not the
  * caller's, never 403: "that exists, and it is not yours" is a fact about
@@ -108,6 +117,11 @@ export interface ProjectsDeps {
    * naming the hostname at Cloudflare is still there to try again with.
    */
   removeDomain?: (projectId: string) => Promise<boolean>;
+  /**
+   * Whether this account may edit files again now (D190): a burst limit,
+   * since every edit stores a whole snapshot. Absent, every edit may.
+   */
+  editAllowed?: (userId: string) => Promise<boolean>;
   /**
    * Stop the live preview a share link may have started (`share-handlers.
    * ts`). Called when the link stops for a reason somebody is present for,
@@ -416,6 +430,7 @@ const ALLOWED: Record<string, readonly string[]> = {
   [PROJECT_SHARE_ROUTE]: ['POST', 'DELETE'],
   [PROJECT_CHECKPOINTS_ROUTE]: ['GET'],
   [PROJECT_RESTORE_ROUTE]: ['POST'],
+  [PROJECT_FILES_ROUTE]: ['GET', 'PUT'],
 };
 
 /**
@@ -453,6 +468,90 @@ export function parseRestore(body: unknown): GuardResult<RestoreRequest> {
   return { ok: true, value: { revision: raw.revision, base: raw.base } };
 }
 
+interface FileEdit {
+  /** The accepted revision the edit was made against. */
+  base: string;
+  /** Written: added, or in place of a file already at the path. */
+  files: ProjectFile[];
+  /** Taken out of the project; each must be in it. */
+  remove: string[];
+}
+
+/**
+ * An edit's body (D190): the files to write, the paths to delete, and the
+ * revision they were made against. Every entry is checked before anything
+ * is read, by the rules a project's own files are held to
+ * (`parseProjectFiles`), and a path may be named once.
+ */
+export function parseFileEdit(body: unknown): GuardResult<FileEdit> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const raw = body as Record<string, unknown>;
+  if (typeof raw.base !== 'string' || !REVISION.test(raw.base)) {
+    return fail(400, '"base" must be the accepted revision.');
+  }
+  const written = raw.files ?? [];
+  const deleted = raw.delete ?? [];
+  if (!Array.isArray(written)) return fail(400, '"files" must be a list.');
+  if (!Array.isArray(deleted)) return fail(400, '"delete" must be a list.');
+  if (written.length === 0 && deleted.length === 0) {
+    return fail(400, 'Name at least one file to write or delete.');
+  }
+  const files = parseProjectFiles(written, DEFAULT_LIMITS);
+  if (!files.ok) return files;
+  if (deleted.length > DEFAULT_LIMITS.maxFiles) {
+    return fail(
+      413,
+      `At most ${DEFAULT_LIMITS.maxFiles} files can be deleted at once.`,
+    );
+  }
+  const remove: string[] = [];
+  for (const path of deleted) {
+    if (typeof path !== 'string') {
+      return fail(400, 'Every path to delete must be a string.');
+    }
+    const problem = pathProblem(path);
+    if (problem) return fail(400, problem);
+    remove.push(path);
+  }
+  const named = new Set<string>();
+  for (const path of [...files.value.map((file) => file.path), ...remove]) {
+    if (named.has(path)) return fail(400, `"${path}" is named twice.`);
+    named.add(path);
+  }
+  return { ok: true, value: { base: raw.base, files: files.value, remove } };
+}
+
+/**
+ * The accepted files with an edit applied: a file written over one at
+ * the same path keeps its place, a new one goes at the end, and a deleted
+ * one goes. A path to delete that is not in the project is refused rather
+ * than ignored, since the caller believed it was there and is working
+ * from something else.
+ */
+export function applyFileEdit(
+  current: readonly ProjectFile[],
+  edit: Pick<FileEdit, 'files' | 'remove'>,
+): GuardResult<ProjectFile[]> {
+  const byPath = new Map(current.map((file) => [file.path, file.content]));
+  for (const path of edit.remove) {
+    if (!byPath.has(path)) return fail(400, `"${path}" is not in the project.`);
+  }
+  const removed = new Set(edit.remove);
+  const written = new Map(edit.files.map((file) => [file.path, file.content]));
+  const files = current
+    .filter((file) => !removed.has(file.path))
+    .map((file) => ({
+      path: file.path,
+      content: written.get(file.path) ?? file.content,
+    }));
+  for (const file of edit.files) {
+    if (!byPath.has(file.path)) files.push(file);
+  }
+  return { ok: true, value: files };
+}
+
 export async function handleProjects(
   request: Request,
   env: ProjectsEnv,
@@ -477,7 +576,7 @@ export async function handleProjects(
   // Shape before identity, so a hostile request is refused before it costs
   // a token verification.
   const guarded =
-    method === 'POST' || method === 'PATCH'
+    method === 'POST' || method === 'PATCH' || method === 'PUT'
       ? writeGuard(request)
       : method === 'DELETE'
         ? deleteGuard(request)
@@ -588,6 +687,22 @@ export async function handleProjects(
       project,
       store,
       new D1GenerationStore(db, env.PROJECT_CONTENT),
+      clock(),
+      deps,
+    );
+  }
+
+  if (route === PROJECT_FILES_ROUTE) {
+    const generations = new D1GenerationStore(db, env.PROJECT_CONTENT);
+    if (method === 'GET') {
+      return readFiles(request, project, generations);
+    }
+    return editFiles(
+      request,
+      userId,
+      project,
+      store,
+      generations,
       clock(),
       deps,
     );
@@ -927,6 +1042,173 @@ async function restoreCheckpoint(
     return json({ error: 'That checkpoint is no longer stored.' }, 404);
   }
   if (result.outcome === 'stale') return moved(result.current);
+  return json({
+    snapshot: {
+      revision: result.snapshot.revision,
+      files: result.snapshot.files,
+    },
+  });
+}
+
+/**
+ * The project's accepted code, or with `?revision=` one of the checkpoints
+ * in its history (D190), as opening the project answers it.
+ */
+async function readFiles(
+  request: Request,
+  project: ProjectRecord,
+  generations: D1GenerationStore,
+): Promise<Response> {
+  const wanted = new URL(request.url).searchParams.get('revision');
+  if (wanted !== null && !REVISION.test(wanted)) {
+    return json({ error: 'That checkpoint does not exist.' }, 404);
+  }
+  const history = await generations.listCheckpoints(project.id);
+  const revision = wanted ?? history.current;
+  if (revision === null) {
+    return json({ error: 'This project has no code yet.' }, 404);
+  }
+  if (!history.checkpoints.some((entry) => entry.revision === revision)) {
+    return json({ error: 'That checkpoint does not exist.' }, 404);
+  }
+  const snapshot = await generations.loadRevision(project.id, revision);
+  if (!snapshot) {
+    return json({ error: 'That checkpoint is no longer stored.' }, 404);
+  }
+  return json({
+    snapshot: { revision: snapshot.revision, files: snapshot.files },
+  });
+}
+
+/**
+ * Write and delete files in a project's accepted code, with no build
+ * (D190), and answer with the code that is accepted now, as a restore
+ * does. How an assistant connected over `/mcp` edits a project.
+ *
+ * Held to what a restore is held to, for the same reasons: not while a
+ * build runs in the project, not in an archived one, and only from the
+ * revision that is accepted now (`base`), so an edit made from an older
+ * read never undoes what a build or another tab accepted since. The
+ * project it leaves is held to the limits a project sent to a build or a
+ * preview is (`parseProjectFiles`), so it can still be built on.
+ *
+ * Nothing here spends: no model, no sandbox, no budget. The new revision
+ * is stored, and joins the history as an `edit` checkpoint that can be
+ * restored from like any other. Nothing is published or pushed.
+ */
+async function editFiles(
+  request: Request,
+  userId: string,
+  project: ProjectRecord,
+  store: ProjectStore,
+  generations: D1GenerationStore,
+  now: Date,
+  deps: ProjectsDeps,
+): Promise<Response> {
+  const body = await readJson(request);
+  if (!body.ok) return json({ error: body.error }, body.status);
+  const parsed = parseFileEdit(body.value);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+  const { base } = parsed.value;
+  if (deps.editAllowed && !(await deps.editAllowed(userId))) {
+    return json({ error: 'Too many file edits. Try again in a minute.' }, 429);
+  }
+
+  const archived = () =>
+    json(
+      {
+        error: 'This project is archived. Unarchive it to edit its files.',
+      },
+      409,
+    );
+  if (project.archivedAt !== null) return archived();
+  const buildRunning = () =>
+    json(
+      {
+        error:
+          'A build is still running in this project. Wait for it to finish, then edit its files.',
+      },
+      409,
+    );
+  // As a restore asks (`restoreCheckpoint`): every unended run, an
+  // unreadable one held for longer, and the batch in `commitEdit` asks
+  // again, which is what decides a build started in between.
+  if (
+    await buildInFlight(
+      store,
+      generations,
+      userId,
+      project.id,
+      now,
+      deps,
+      UNREADABLE_RUN_HELD_MS,
+    )
+  ) {
+    return buildRunning();
+  }
+  const moved = (current: string | null) =>
+    json(
+      {
+        error:
+          'This project has changed since its files were read. Read them again, then edit.',
+        code: CHECKPOINT_MOVED_CODE,
+        current,
+      },
+      409,
+    );
+  const accepted = await generations.loadAccepted(project.id);
+  if (!accepted) {
+    // No code to edit: the first build makes it. A project whose pointer
+    // names a revision that is no longer stored is refused the same way
+    // rather than edited from nothing.
+    return json(
+      { error: 'This project has no code yet. Build it first.' },
+      409,
+    );
+  }
+  if (accepted.revision !== base) return moved(accepted.revision);
+
+  const merged = applyFileEdit(accepted.files, parsed.value);
+  if (!merged.ok) return json({ error: merged.error }, merged.status);
+  if (merged.value.length === 0) {
+    return json({ error: 'A project needs at least one file.' }, 400);
+  }
+  const whole = parseProjectFiles(merged.value, DEFAULT_LIMITS);
+  if (!whole.ok) {
+    return json({ error: `After this edit: ${whole.error}` }, whole.status);
+  }
+  // Nothing changed: what was asked for is already true, so it is answered
+  // as done and nothing is written, as restoring the current checkpoint is.
+  // Compared by content, since a revision is not always its files' hash (a
+  // build older than `revisionFor`, or a copy).
+  if (JSON.stringify(whole.value) === JSON.stringify(accepted.files)) {
+    return json({
+      snapshot: { revision: accepted.revision, files: accepted.files },
+    });
+  }
+  const revision = revisionFor({ files: whole.value });
+
+  const result = await generations.commitEdit(
+    project.id,
+    {
+      revision,
+      files: whole.value,
+    },
+    base,
+  );
+  if (result.outcome === 'busy') return buildRunning();
+  if (result.outcome === 'archived') return archived();
+  if (result.outcome === 'gone') return NOT_FOUND();
+  if (result.outcome === 'stale') return moved(result.current);
+  if (result.outcome === 'collision') {
+    return json(
+      {
+        error:
+          'These files could not be stored. Change anything in them, then try again.',
+      },
+      500,
+    );
+  }
   return json({
     snapshot: {
       revision: result.snapshot.revision,

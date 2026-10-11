@@ -196,7 +196,7 @@ export function parseGenerationRequest(
  * the browser entirely could otherwise ask a sandbox to write outside
  * `/workspace`.
  */
-function pathProblem(path: string): string | undefined {
+export function pathProblem(path: string): string | undefined {
   if (path.length === 0) return 'A file has an empty path.';
   if (path.startsWith('/') || /^[a-zA-Z]:/.test(path)) {
     return `"${path}" must be a relative path.`;
@@ -218,9 +218,11 @@ function pathProblem(path: string): string | undefined {
  * both need: how many files, how long a path, how much content in total.
  * Shared so the two endpoints cannot quietly drift onto different limits for
  * what is, in both cases, "how big a project can this deployment afford to
- * hand to a model or a sandbox".
+ * hand to a model or a sandbox". An edit (`PUT /api/projects/:id/files`,
+ * D190) holds the project it would leave to the same rules, so the code it
+ * accepts can still be previewed and built on.
  */
-function parseProjectFiles(
+export function parseProjectFiles(
   entries: unknown[],
   limits: GuardLimits,
 ): GuardResult<{ path: string; content: string }[]> {

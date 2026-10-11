@@ -10,7 +10,7 @@
 //
 // What the APIs do not reach (Stripe's own-account branding, public details
 // and statement descriptor, Clerk's logo, favicon and application name,
-// its `build` OAuth scope) is a Dashboard step, and the run
+// its `build` and `edit` OAuth scopes) is a Dashboard step, and the run
 // summary lists each one with its URL.
 //
 // The portal's own retention-coupon drop-down is deliberately not one of
@@ -250,19 +250,21 @@ export const CLERK_INSTANCE_SETTINGS = { support_email: 'support@vibld.com' };
 // Registration both on (D185). Default scopes apply only when a client names
 // none, so `dynamic_client_allowed_scopes` caps what a self-registered client
 // may ask for (plus `offline_access`, which Clerk adds for refresh tokens).
-// Creating the `build` scope is not in Clerk's Backend API and stays a
-// Dashboard step.
+// `build` lets an assistant start builds; `edit` lets it read and write a
+// project's files too (D190). Creating either scope is not in Clerk's
+// Backend API and stays a Dashboard step.
 export const CLERK_OAUTH_SETTINGS = {
   oauth_jwt_access_tokens: false,
   aud_claim_enabled: true,
   client_id_metadata_documents_advertised: true,
   dynamic_oauth_client_registration: true,
-  default_scopes: ['openid', 'profile', 'email', 'build'],
+  default_scopes: ['openid', 'profile', 'email', 'build', 'edit'],
   dynamic_client_allowed_scopes: [
     'openid',
     'profile',
     'email',
     'build',
+    'edit',
     'offline_access',
   ],
 };
@@ -787,8 +789,8 @@ async function configureClerkOAuth(key, apply, report) {
   } else if (!apply) {
     report.line(`- Would set: \`${JSON.stringify(changes)}\``);
   } else {
-    // Clerk refuses scopes naming one that does not exist yet (`build` is
-    // created in the Dashboard), and refuses the whole request with them, so
+    // Clerk refuses scopes naming one that does not exist yet (`build` and
+    // `edit` are created in the Dashboard), and refuses the whole request with them, so
     // they go in a request of their own. They go first: client onboarding is
     // not opened unless the scope cap is in place.
     const scopes = {};
@@ -827,7 +829,7 @@ async function configureClerkOAuth(key, apply, report) {
     await send(rest);
   }
   report.line(
-    '- Dashboard only (https://dashboard.clerk.com/~/oauth-applications): create and advertise the `build` scope.',
+    '- Dashboard only (https://dashboard.clerk.com/~/oauth-applications): create and advertise the `build` scope, and the `edit` scope (description: "Read and edit the files of your vibld projects").',
   );
 }
 

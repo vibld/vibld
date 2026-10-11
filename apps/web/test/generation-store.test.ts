@@ -567,4 +567,119 @@ describe('[d1] checkpoint history (D152)', () => {
     assert.equal(await store.loadStage('rollback-gone'), undefined);
     assert.equal((await store.loadAccepted('project-1'))?.revision, 'r1');
   });
+
+  describe('an edit with no build (D190)', () => {
+    const edited = (revision: string): ProjectSnapshot => ({
+      revision,
+      files: [{ path: 'index.html', content: `edited ${revision}` }],
+    });
+
+    it('stores the files, moves the pointer and lists it as an edit', async () => {
+      const { store } = await owned();
+      await accept(store, 'run-1', 'r1');
+      await tick();
+
+      const result = await store.commitEdit(
+        'project-1',
+        edited('e1'),
+        'r1',
+        'edit-one',
+      );
+      assert.deepEqual(result, {
+        outcome: 'committed',
+        snapshot: edited('e1'),
+      });
+      assert.deepEqual(await store.loadAccepted('project-1'), edited('e1'));
+      const row = await store.loadStage('edit-one');
+      assert.equal(row?.state, 'accepted');
+      assert.equal(row?.baseRevision, 'r1');
+      const history = await store.listCheckpoints('project-1');
+      assert.deepEqual(
+        history.checkpoints.map(({ revision, kind }) => `${revision} ${kind}`),
+        ['e1 edit', 'r1 build'],
+      );
+      // Its own id when none is given, with no `:` for a build's reader.
+      assert.equal(
+        (await store.commitEdit('project-1', edited('e2'), 'e1')).outcome,
+        'committed',
+      );
+      const latest = await store.listCheckpoints('project-1');
+      assert.match(latest.checkpoints[0]!.runId!, /^edit-[0-9a-f-]{36}$/);
+    });
+
+    it('changes nothing from a stale base, and leaves no row behind', async () => {
+      const { store } = await owned();
+      await accept(store, 'run-1', 'r1');
+      await accept(store, 'run-2', 'r2');
+
+      const result = await store.commitEdit(
+        'project-1',
+        edited('e1'),
+        'r1',
+        'edit-late',
+      );
+      assert.deepEqual(result, { outcome: 'stale', current: 'r2' });
+      assert.equal((await store.loadAccepted('project-1'))?.revision, 'r2');
+      assert.equal(await store.loadStage('edit-late'), undefined);
+    });
+
+    it('changes nothing while a build is running, or once archived or deleted', async () => {
+      const busy = await owned();
+      await accept(busy.store, 'run-1', 'r1');
+      await busy.store.saveStage({
+        runId: 'run-2',
+        projectId: 'project-1',
+        baseRevision: 'r1',
+        state: 'validating',
+        snapshot: snapshot('r2'),
+      });
+      assert.deepEqual(
+        await busy.store.commitEdit('project-1', edited('e1'), 'r1', 'edit-b'),
+        { outcome: 'busy' },
+      );
+      assert.equal(await busy.store.loadStage('edit-b'), undefined);
+
+      const archived = await owned('2026-10-03T12:00:00.000Z');
+      await accept(archived.store, 'run-1', 'r1');
+      assert.deepEqual(
+        await archived.store.commitEdit('project-1', edited('e1'), 'r1'),
+        { outcome: 'archived' },
+      );
+      assert.equal(
+        (await archived.store.loadAccepted('project-1'))?.revision,
+        'r1',
+      );
+
+      const gone = await owned();
+      await accept(gone.store, 'run-1', 'r1');
+      await gone.db
+        .prepare(`DELETE FROM projects WHERE id = 'project-1'`)
+        .run();
+      assert.deepEqual(
+        await gone.store.commitEdit('project-1', edited('e1'), 'r1', 'edit-g'),
+        { outcome: 'gone' },
+      );
+      assert.equal(await gone.store.loadStage('edit-g'), undefined);
+    });
+
+    it('never writes over another revision stored under the same name', async () => {
+      const { store } = await owned();
+      await accept(store, 'run-1', 'r1');
+      await accept(store, 'run-2', 'r2');
+
+      // r1 is stored with other files: refused, and r1 is as it was.
+      const result = await store.commitEdit('project-1', edited('r1'), 'r2');
+      assert.deepEqual(result, { outcome: 'collision' });
+      assert.deepEqual(
+        await store.loadRevision('project-1', 'r1'),
+        snapshot('r1'),
+      );
+      assert.equal((await store.loadAccepted('project-1'))?.revision, 'r2');
+
+      // The same files under the same name are that revision again.
+      const again = await store.commitEdit('project-1', snapshot('r1'), 'r2');
+      assert.equal(again.outcome, 'committed');
+      assert.equal((await store.loadAccepted('project-1'))?.revision, 'r1');
+    });
+  });
 });

@@ -59,6 +59,17 @@ export function rollbackRunId(id: string): string {
   return `${ROLLBACK_PREFIX}${id}`;
 }
 
+/**
+ * The run id an edit's stage row is recorded under (D190): files written
+ * straight into the accepted code, by an assistant or through the API,
+ * with no build. Its own id with no `:`, for the reason a rollback's is.
+ */
+export const EDIT_PREFIX = 'edit-';
+
+export function editRunId(id: string): string {
+  return `${EDIT_PREFIX}${id}`;
+}
+
 /** The most checkpoints a project's history lists (D152). */
 export const MAX_CHECKPOINTS = 100;
 
@@ -70,11 +81,13 @@ export const MAX_CHECKPOINTS = 100;
  *   restore    a repair was given up and the first attempt put back
  *              (`runId:restore`)
  *   rollback   somebody restored it from the history (D152)
+ *   edit       files were written into it directly, with no build
+ *              (D190, `PUT /api/projects/:id/files`)
  *   copy       it came with the project, from a duplicate or a remix, and
  *              no run in this project ever accepted it
  */
 export type CheckpointKind =
-  'build' | 'repair' | 'restore' | 'rollback' | 'copy';
+  'build' | 'repair' | 'restore' | 'rollback' | 'edit' | 'copy';
 
 export interface Checkpoint {
   revision: string;
@@ -104,8 +117,25 @@ export type RollbackResult =
   /** The project was archived: nothing moved. */
   | { outcome: 'archived' };
 
+export type EditResult =
+  | { outcome: 'committed'; snapshot: ProjectSnapshot }
+  /** The project was deleted: nothing written. */
+  | { outcome: 'gone' }
+  /** The accepted revision was not `expectedBase`; it is `current`. */
+  | { outcome: 'stale'; current: string | null }
+  /** A build is running in the project: nothing moved. */
+  | { outcome: 'busy' }
+  /** The project was archived: nothing moved. */
+  | { outcome: 'archived' }
+  /**
+   * Another revision's files are stored under this one's name: nothing
+   * written, so the one copy of that revision is not overwritten.
+   */
+  | { outcome: 'collision' };
+
 function checkpointKind(runId: string): CheckpointKind {
   if (runId.startsWith(ROLLBACK_PREFIX)) return 'rollback';
+  if (runId.startsWith(EDIT_PREFIX)) return 'edit';
   if (runId.endsWith(':repair')) return 'repair';
   if (runId.endsWith(':restore')) return 'restore';
   return 'build';
@@ -789,6 +819,93 @@ export class D1GenerationStore implements GenerationStore {
         .bind(runId, projectId, revision),
     ]);
     if (moved?.meta.changes === 1) return { outcome: 'restored', snapshot };
+    const row = await this.#db
+      .prepare(
+        `SELECT accepted_revision FROM generation_projects WHERE id = ?1`,
+      )
+      .bind(projectId)
+      .first<Pick<ProjectRow, 'accepted_revision'>>();
+    const project = await this.#db
+      .prepare(`SELECT archived_at FROM projects WHERE id = ?1`)
+      .bind(projectId)
+      .first<{ archived_at: string | null }>();
+    if (!project) return { outcome: 'gone' };
+    const current = row?.accepted_revision ?? null;
+    if (current !== expectedBase) return { outcome: 'stale', current };
+    return { outcome: project.archived_at !== null ? 'archived' : 'busy' };
+  }
+
+  /**
+   * Make `snapshot`, files written into this project's accepted code with
+   * no build (D190), the accepted revision, if the accepted one is still
+   * `expectedBase`.
+   *
+   * `rollback`'s batch, with the same guards asked inside it: a stage row
+   * of its own, `accepted`, under `runId`, written only when the pointer
+   * moves, and neither while a build runs in the project or once it is
+   * archived or deleted. The one difference is that the files are new, so
+   * they are put in R2 first, as a promotion puts them, and the pointer
+   * never names content that is not there yet. A refused edit leaves that
+   * object behind under its own revision, unreferenced, as a refused
+   * promotion does.
+   *
+   * Revisions are named by their content (`revisionFor`), so one already
+   * stored under this name is these same files and is not written again,
+   * unless it holds something else, which is refused rather than written
+   * over.
+   */
+  async commitEdit(
+    projectId: string,
+    snapshot: ProjectSnapshot,
+    expectedBase: string | null,
+    runId: string = editRunId(crypto.randomUUID()),
+  ): Promise<EditResult> {
+    const stored = await readSnapshot(
+      this.#bucket,
+      projectId,
+      snapshot.revision,
+    );
+    if (!stored) {
+      await writeSnapshot(this.#bucket, projectId, snapshot);
+    } else if (
+      JSON.stringify(stored.files) !== JSON.stringify(snapshot.files)
+    ) {
+      return { outcome: 'collision' };
+    }
+
+    const now = new Date().toISOString();
+    // `rollback`'s test, word for word: no build running, and the project
+    // still there and not archived.
+    const idle = `NOT EXISTS (
+      SELECT 1 FROM generation_stages
+       WHERE project_id = ?2
+         AND state NOT IN ('accepted', 'failed', 'cancelled', 'idle')
+    ) AND EXISTS (
+      SELECT 1 FROM projects WHERE id = ?2 AND archived_at IS NULL
+    )`;
+    const [, moved] = await this.#db.batch([
+      this.#db
+        .prepare(
+          `INSERT INTO generation_stages
+             (run_id, project_id, base_revision, state, snapshot_revision,
+              created_at, updated_at)
+           SELECT ?1, ?2, ?3, 'accepted', ?4, ?5, ?5
+            WHERE EXISTS (
+                    SELECT 1 FROM generation_projects
+                     WHERE id = ?2 AND accepted_revision IS ?3
+                  ) AND ${idle}`,
+        )
+        .bind(runId, projectId, expectedBase, snapshot.revision, now),
+      this.#db
+        .prepare(
+          `UPDATE generation_projects
+              SET accepted_revision = ?4, updated_at = ?5
+            WHERE id = ?2 AND accepted_revision IS ?3 AND ${idle}`,
+        )
+        // ?1 is the row insert's run id, unused here, as in `rollback`.
+        .bind(null, projectId, expectedBase, snapshot.revision, now),
+    ]);
+    if (moved?.meta.changes === 1) return { outcome: 'committed', snapshot };
     const row = await this.#db
       .prepare(
         `SELECT accepted_revision FROM generation_projects WHERE id = ?1`,
