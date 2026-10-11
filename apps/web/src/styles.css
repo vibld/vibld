@@ -2100,6 +2100,12 @@ body {
   padding: 0.35rem 0.75rem;
 }
 
+.prompt__examples-label {
+  align-self: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 .prompt__toolbar {
   display: flex;
   flex-wrap: wrap;

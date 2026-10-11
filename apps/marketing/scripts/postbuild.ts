@@ -101,6 +101,7 @@ function sourcesFor(path: string): string[] {
     ],
     '/use-cases': ['use-cases.ts'],
     '/examples': ['examples.ts', '../../../examples/catalogue.json'],
+    '/showcase': ['../../../packages/ai/src/showcase.ts'],
     '/roadmap': ['roadmap.ts'],
   };
   // Every template page and the two galleries read the generated catalog.

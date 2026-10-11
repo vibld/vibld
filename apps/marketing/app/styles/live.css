@@ -241,7 +241,9 @@
 .lb-menu a:hover {
   background: var(--color-surface-strong);
 }
-@media (max-width: 1080px) {
+/* The header's links fit from about 1160px with Showcase in them; below
+   that they wrap, so the menu takes over with room to spare. */
+@media (max-width: 1180px) {
   .lb-nav__main {
     display: none;
   }

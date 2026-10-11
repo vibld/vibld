@@ -484,6 +484,12 @@ export const ROUTES: SiteRoute[] = [
       'Sites and apps vibld built, each shown exactly as generated from its prompt, with a live copy and the source to download, then the hand-built starter templates.',
   },
   {
+    path: '/showcase',
+    title: `Showcase prompts | ${SITE.name}`,
+    description:
+      'Prompts written to show off what vibld builds: 3D globes and orbs, living backgrounds and scroll-driven motion, each one click from the builder.',
+  },
+  {
     path: '/roadmap',
     title: `Roadmap | ${SITE.name}`,
     description:
@@ -525,6 +531,7 @@ export const PRODUCT_PAGES: { path: string; label: string }[] = [
   { path: '/templates', label: 'Templates' },
   { path: '/use-cases', label: 'Use cases' },
   { path: '/examples', label: 'Examples' },
+  { path: '/showcase', label: 'Showcase' },
   { path: '/pricing', label: 'Pricing' },
   { path: '/roadmap', label: 'Roadmap' },
 ];

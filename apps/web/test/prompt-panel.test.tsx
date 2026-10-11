@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
+import { SHOWCASE_PROMPTS } from '@vibld/ai/showcase';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { BuilderState } from '../src/generation/session.ts';
 import type { PlanMode } from '../src/generation/plan-builder.ts';
@@ -292,6 +293,23 @@ describe('the composer, as it is actually wired', () => {
 
     const started = await mount(builder({ transcript: TURN }));
     assert.equal(started.button(/Cybersecurity/), undefined);
+    started.unmount();
+  });
+
+  it('offers the showcase prompts until there is a conversation', async () => {
+    const exactly = (name: string) =>
+      new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+    const view = await mount(builder());
+    for (const entry of SHOWCASE_PROMPTS) {
+      assert.ok(view.button(exactly(entry.name)), `no ${entry.name}`);
+    }
+    const [first] = SHOWCASE_PROMPTS;
+    await view.press(exactly(first!.name));
+    assert.equal(view.prompt().value, first!.prompt);
+    view.unmount();
+
+    const started = await mount(builder({ transcript: TURN }));
+    assert.equal(started.button(exactly(first!.name)), undefined);
     started.unmount();
   });
 

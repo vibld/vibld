@@ -27,6 +27,7 @@
     "./screen-patterns": "./src/screen-patterns.ts",
     "./backdrops": "./src/backdrops.ts",
     "./scenes": "./src/scenes.ts",
+    "./showcase": "./src/showcase.ts",
     "./style-gallery": "./src/style-gallery.ts",
     "./style-gallery-index": "./src/style-gallery-index.ts"
   },

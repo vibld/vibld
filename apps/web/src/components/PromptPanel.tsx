@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { StyleColorEdits } from '@vibld/ai/style-gallery';
 import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import { MAX_REFERENCE_URL_CHARS } from '@vibld/ai/limits';
+import { SHOWCASE_PROMPTS } from '@vibld/ai/showcase';
 import { STYLE_PRESETS } from '@vibld/ai/style-presets';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { StyleDna } from '@vibld/ai/style-dna';
@@ -535,6 +536,27 @@ export function PromptPanel({
               disabled={disabled}
             >
               {example.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {started ? null : (
+        // Requests written to show off the 3D scenes, the animated
+        // backgrounds and motion (packages/ai/src/showcase.ts), the same
+        // ones vibld.com/showcase links here with.
+        <div className="prompt__examples" aria-label="Show off">
+          <span className="prompt__examples-label">Show off:</span>
+          {SHOWCASE_PROMPTS.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              className="chip"
+              title={`${entry.effect}: ${entry.summary}`}
+              onClick={() => setPrompt(entry.prompt)}
+              disabled={disabled}
+            >
+              {entry.name}
             </button>
           ))}
         </div>

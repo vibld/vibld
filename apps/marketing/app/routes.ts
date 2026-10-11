@@ -80,6 +80,7 @@ export default [
   ),
   route('inspiration', 'routes/inspiration.tsx'),
   route('examples', 'routes/examples.tsx'),
+  route('showcase', 'routes/showcase.tsx'),
   route('roadmap', 'routes/roadmap.tsx'),
   route('docs', 'routes/docs.index.tsx'),
   route('docs/getting-started', 'routes/docs.getting-started.tsx'),
