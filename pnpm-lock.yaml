@@ -255,6 +255,9 @@ importers:
 
   apps/publish:
     dependencies:
+      '@cloudflare/puppeteer':
+        specifier: 1.4.0
+        version: 1.4.0
       '@vibld/core':
         specifier: workspace:*
         version: link:../../packages/core

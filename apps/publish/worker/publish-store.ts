@@ -1092,6 +1092,23 @@ export class PublishStore {
   }
 
   /**
+   * Keep a page rendered for bots beside the revision it was drawn from
+   * (prerender.ts). One object, written after the revision is live, and
+   * not catalogued: the revision's row already names the prefix, so
+   * pruning and takedowns delete it with the rest. A write that lands
+   * while its revision is being collected leaves an object under a prefix
+   * nothing names, which is what `sweepOrphans` collects.
+   */
+  async putRender(
+    slug: string,
+    generation: string,
+    path: string,
+    html: string,
+  ): Promise<void> {
+    await this.#bucket.put(objectKey(slug, generation, path), html);
+  }
+
+  /**
    * The paths of every file in a revision, for the sitemap (`seo.ts`).
    * Paged, as `unpublish` pages, and bounded: a sitemap holds at most
    * 50,000 addresses, and a published site is far below that.

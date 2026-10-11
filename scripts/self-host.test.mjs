@@ -123,6 +123,11 @@ describe("a self-hosted copy's configuration (D115)", () => {
       web.ratelimits.map((r) => r.namespace_id),
       base.web.ratelimits.map((_, i) => String(5001 + i)),
     );
+    const publish = selfHostConfig('publish', base.publish, SETTINGS);
+    assert.deepEqual(
+      publish.ratelimits.map((r) => r.namespace_id),
+      base.publish.ratelimits.map((_, i) => String(5101 + i)),
+    );
     const { rateLimitNamespaceBase: _, ...unset } = SETTINGS;
     assert.throws(() => selfHostConfig('web', base.web, unset), /not usable/);
     assert.throws(
@@ -130,6 +135,16 @@ describe("a self-hosted copy's configuration (D115)", () => {
         selfHostConfig('web', base.web, {
           ...SETTINGS,
           rateLimitNamespaceBase: 1005,
+        }),
+      /one of vibld's own/,
+    );
+    // The publish block, 100 past the base, is checked against the
+    // builder's ids too.
+    assert.throws(
+      () =>
+        selfHostConfig('publish', base.publish, {
+          ...SETTINGS,
+          rateLimitNamespaceBase: 901,
         }),
       /one of vibld's own/,
     );

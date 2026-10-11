@@ -222,6 +222,38 @@ here with the slug, so a change shows at once without publishing again:
   still let in, or they would never see the `noindex`), and `/sitemap.xml`
   is a 404 unless the site ships its own.
 
+Known crawlers and link unfurlers get pages rendered by a browser (D204,
+`worker/prerender.ts`): search engines, the AI crawlers robots.txt
+welcomes, and the preview fetchers of the apps people paste links into,
+matched by User-Agent. People always get the site as it was built.
+
+- Only a page served with 200 that loads a script file is rendered; a page
+  without one already reads the same to a bot. Such a page answers with
+  `Vary: User-Agent`, and a rendered one also with `X-Vibld-Prerendered: 1`.
+- The render is Cloudflare Browser Rendering loading the page at the
+  address the bot asked for (the site's address here or its own domain),
+  waiting for its requests to settle, and
+  keeping the HTML it drew. Its request for the page itself carries
+  `X-Vibld-Render: 1` and is answered with the page as built, so the head
+  this Worker adds to the render takes its preview text from the title and
+  description the page's scripts wrote, and the owner's words go over
+  those as on any page.
+- It is kept beside the revision it was drawn from, in one of 64 slots
+  (`__vibld/prerender/<n>.txt`, reserved: a site's own file there is
+  dropped on publish and never served). Its name is the address asked for
+  (origin, path and query), the page's canonical address and the owner's
+  fields, so a new publish, a domain starting to serve or an edited title
+  each get a new render, and a new render takes its slot from whatever was
+  there, which bounds what one revision keeps. Pruning and takedowns
+  delete renders with their revision. A site that fetches live data shows
+  a bot what it showed when the page was rendered, until it is published
+  again.
+- Renders are limited to 6 a minute per site (`PRERENDER_SITE_BURST`,
+  counted in each Cloudflare location) and 30 a minute in all
+  (`RENDER_BUDGET`, one Durable Object that counts every location), since
+  browser time is billed. Over a limit, without a browser (under Docker), or when the page
+  does not load within 10 seconds, the bot gets the page as built.
+
 ## Why a separate package, not a folder in apps/web
 
 Same first reason apps/preview gives for the same question: a published

@@ -36,6 +36,35 @@
     "PUBLISH_HOSTNAME": "vibld-preview.dev",
   },
 
+  // Cloudflare Browser Rendering, for pages rendered for bots (D204,
+  // worker/prerender.ts). Nothing to provision; billed by browser time.
+  // Left out under Docker (scripts/docker-config.mjs), where bots get the
+  // site as built.
+  "browser": { "binding": "BROWSER" },
+
+  // Renders started for one site, a burst gate on browser time (D204). No
+  // resource is provisioned: namespace_id is an identifier chosen here and
+  // is account-global, so it continues after apps/web's 1001 to 1015. vibld
+  // keeps 1001 to 1099 (scripts/self-host.mjs refuses them for a copy).
+  // Keyed on the slug, so one site's crawl cannot take every render. A rate
+  // limit counts per Cloudflare location, so the cap on every site together
+  // is RENDER_BUDGET below instead.
+  "ratelimits": [
+    {
+      "name": "PRERENDER_SITE_BURST",
+      "namespace_id": "1016",
+      "simple": { "limit": 6, "period": 60 },
+    },
+  ],
+
+  // Renders started for every site together, 30 a minute, counted by one
+  // object wherever the request came in (worker/render-budget.ts). Created
+  // on first use; nothing to provision.
+  "durable_objects": {
+    "bindings": [{ "name": "RENDER_BUDGET", "class_name": "RenderBudget" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RenderBudget"] }],
+
   // The orphan sweep (internal issue 177), nightly. Offset from apps/web's own 09:17 run
   // so the two are not drawing on the same D1 database at the same minute.
   "triggers": { "crons": ["43 9 * * *"] },

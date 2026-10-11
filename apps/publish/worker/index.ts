@@ -25,6 +25,19 @@ import {
   sitemapXml,
 } from './seo.ts';
 import type { HeadOverrides } from './seo.ts';
+import {
+  RENDER_HEADER,
+  RENDER_PREFIX,
+  drawnByScripts,
+  isRenderBot,
+  launchBrowser,
+  keepRender,
+  keptRender,
+  renderPage,
+  renderSlot,
+} from './prerender.ts';
+import type { BrowserBinding } from './prerender.ts';
+import { RENDER_BUDGET_NAME } from './render-budget.ts';
 import { isPreviewShaped, isValidSlug } from './slug.ts';
 import type { PublishD1Database, PublishR2Bucket } from './types.ts';
 
@@ -42,7 +55,33 @@ export interface Env {
    * apps/preview forwards these hosts here over a service binding.
    */
   PUBLISH_HOSTNAME?: string;
+  /**
+   * Cloudflare Browser Rendering, for pages rendered for bots (D204,
+   * prerender.ts). Left out under Docker, where bots get the site as built.
+   */
+  BROWSER?: BrowserBinding;
+  /** Renders started for one site, keyed on its slug. */
+  PRERENDER_SITE_BURST?: RateLimit;
+  /**
+   * Renders started for every site together, counted in one place
+   * (render-budget.ts) because a rate limit counts per location.
+   */
+  RENDER_BUDGET?: RenderBudgetNamespace;
 }
+
+interface RenderBudgetNamespace {
+  idFromName(name: string): DurableObjectId;
+  get(id: DurableObjectId): { fetch(url: string): Promise<Response> };
+}
+
+interface RateLimit {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
+}
+
+/** Draws the page at a URL for a bot (`renderPage`), or none to render. */
+export type Render = (url: string) => Promise<string | undefined>;
+
+export { RenderBudget } from './render-budget.ts';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
@@ -153,7 +192,10 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
   // way, and it is now also what makes the hold unraceable: the request has
   // written nothing that anybody can see by the time it asks.
   const generation = crypto.randomUUID();
-  await store.putFiles(resolvedSlug, generation, withMediaManifest(files));
+  // Renders are kept in the revision's reserved corner (prerender.ts), so a
+  // site's own file there is dropped rather than overwritten later.
+  const own = files.filter((file) => !file.path.startsWith(RENDER_PREFIX));
+  await store.putFiles(resolvedSlug, generation, withMediaManifest(own));
   if (!(await store.promote(resolvedSlug, generation))) {
     // Something else got there first. The bytes are this request's own,
     // under a prefix nothing points at, so clearing them cannot touch what
@@ -371,6 +413,7 @@ async function handlePublished(
   slug: string,
   pathname: string,
   request: Request,
+  render: Render | undefined,
 ): Promise<Response> {
   const store = new PublishStore(env.DB, env.PROJECT_CONTENT);
   const resolved = await store.resolveSlug(slug);
@@ -384,6 +427,7 @@ async function handlePublished(
     resolved,
     pathname,
     request,
+    render,
   );
   // The owner turned indexing off (D202): every response says so, pages,
   // files and fallbacks alike, which is what search engines act on.
@@ -400,6 +444,7 @@ async function serveResolved(
   resolved: NonNullable<Awaited<ReturnType<PublishStore['resolveSlug']>>>,
   pathname: string,
   request: Request,
+  render: Render | undefined,
 ): Promise<Response> {
   const navigation = isNavigation(request.headers);
   // Where search engines should index the site (D194): the owner's own
@@ -424,22 +469,81 @@ async function serveResolved(
   };
   const overridesFor = (path: string): HeadOverrides =>
     path === 'index.html' || path === '__spa-fallback.html' ? home : image;
-  const page = (
+  // A known bot asking for a page its scripts draw gets it drawn (D204).
+  const bot =
+    render !== undefined &&
+    request.method === 'GET' &&
+    isRenderBot(request.headers.get('user-agent'));
+  // The render kept for this page, or a new one, or none: whatever goes
+  // wrong, the bot gets the page as built.
+  const rendered = async (canonical: string): Promise<string | undefined> => {
+    try {
+      // Rendered on the origin and with the query the bot asked for: a
+      // single-page app can draw `/product?id=42` differently from
+      // `/product`, and the owner's domain differently from this one. The
+      // path is the page's canonical one, so `/menu` and `/menu/` share.
+      const { origin, search } = new URL(request.url);
+      const asked = `${origin}${new URL(canonical).pathname}${search}`;
+      const { path, name } = await renderSlot([asked, canonical, seo]);
+      const kept = await store.getFile(slug, resolved.generation, path);
+      const hit = kept && keptRender(name, kept.content);
+      if (hit) return hit;
+      if (!(await renderAllowed(env, slug))) return undefined;
+      const html = await render!(asked);
+      if (html !== undefined) {
+        await store.putRender(
+          slug,
+          resolved.generation,
+          path,
+          keepRender(name, html),
+        );
+      }
+      return html;
+    } catch (error) {
+      console.error('publish: could not render for a bot', slug, error);
+      return undefined;
+    }
+  };
+  const page = async (
     content: string,
     path: string,
     canonical: string | undefined,
     status: number = 200,
-  ): Response => {
+  ): Promise<Response> => {
     const type = contentTypeFor(path);
-    const body =
-      canonical && type.startsWith('text/html')
-        ? injectHead(content, canonical, overridesFor(path))
-        : content;
-    return new Response(body, { status, headers: { 'content-type': type } });
+    // The renderer asking for the page itself gets it as built: the pass
+    // over its render adds the head from what the page's scripts drew.
+    if (
+      !canonical ||
+      !type.startsWith('text/html') ||
+      request.headers.has(RENDER_HEADER)
+    ) {
+      return new Response(content, {
+        status,
+        headers: { 'content-type': type },
+      });
+    }
+    // The page differs by User-Agent only where a render could be served.
+    const renderable =
+      render !== undefined && status === 200 && drawnByScripts(content);
+    const drawn = renderable && bot ? await rendered(canonical) : undefined;
+    // The render was drawn from the page as built (`RENDER_HEADER`), so
+    // its preview tags come from the title and description its scripts
+    // wrote, and the owner's words go over those as on any page.
+    const body = injectHead(drawn ?? content, canonical, overridesFor(path));
+    return new Response(body, {
+      status,
+      headers: {
+        'content-type': type,
+        ...(renderable ? { vary: 'user-agent' } : {}),
+        ...(drawn !== undefined ? { 'x-vibld-prerendered': '1' } : {}),
+      },
+    });
   };
 
   const candidates = candidatePaths(pathname);
   for (const [index, candidate] of candidates.entries()) {
+    if (candidate.startsWith(RENDER_PREFIX)) continue;
     const file = await store.getFile(slug, resolved.generation, candidate);
     if (!file) continue;
     // A page is canonical at its own shortest address (`pagePath`). The
@@ -586,14 +690,34 @@ export default {
    * header win once there is one.
    */
   async fetch(request: Request, env: Env): Promise<Response> {
-    return withDefaultHeaders(
-      await route(request, env),
-      PUBLISHED_SITE_HEADERS,
+    const browser = env.BROWSER;
+    return serve(
+      request,
+      env,
+      browser
+        ? (url) => renderPage(() => launchBrowser(browser), url)
+        : undefined,
     );
   },
 };
 
-async function route(request: Request, env: Env): Promise<Response> {
+/** `fetch`, with the renderer named, so tests can lend one. */
+export async function serve(
+  request: Request,
+  env: Env,
+  render: Render | undefined,
+): Promise<Response> {
+  return withDefaultHeaders(
+    await route(request, env, render),
+    PUBLISHED_SITE_HEADERS,
+  );
+}
+
+async function route(
+  request: Request,
+  env: Env,
+  render: Render | undefined,
+): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname.startsWith('/internal/')) {
     return handleInternal(request, env, url.pathname);
@@ -608,7 +732,39 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (!slug) {
     return json({ error: 'Not found.' }, 404);
   }
-  return handlePublished(env, slug, url.pathname, request);
+  return handlePublished(env, slug, url.pathname, request, render);
+}
+
+/**
+ * Whether another render may start: per site, so one site's crawl cannot
+ * use every browser, and in all, because browser time is billed. The
+ * site's limit counts per Cloudflare location and gives way when it cannot
+ * be asked; the budget for all of them is counted in one object
+ * (render-budget.ts) and refuses when it cannot be asked, since it is what
+ * bounds the bill. A refusal only costs the bot the plain page.
+ */
+async function renderAllowed(env: Env, slug: string): Promise<boolean> {
+  if (env.PRERENDER_SITE_BURST) {
+    try {
+      const { success } = await env.PRERENDER_SITE_BURST.limit({
+        key: `prerender:${slug}`,
+      });
+      if (!success) return false;
+    } catch (error) {
+      console.error('publish: render limiter unavailable', error);
+    }
+  }
+  if (!env.RENDER_BUDGET) return true;
+  try {
+    const budget = env.RENDER_BUDGET.get(
+      env.RENDER_BUDGET.idFromName(RENDER_BUDGET_NAME),
+    );
+    const answer = await budget.fetch('https://render-budget/take');
+    return (await answer.text()) === 'yes';
+  } catch (error) {
+    console.error('publish: render budget unavailable', error);
+    return false;
+  }
 }
 
 /**

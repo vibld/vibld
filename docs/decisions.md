@@ -524,7 +524,8 @@ paying accounts until midnight UTC.
   own domain once it serves, with no redirect (D202, D203). Then the
   owner's own title, description and preview image, and the indexing
   opt-out, under "Search and link previews" in the Ship menu
-  (`0056_project_seo.sql`). Next: prerendering for bots (D204).
+  (`0056_project_seo.sql`). Then prerendering for bots (D204,
+  `apps/publish/worker/prerender.ts`).
 - **D195. Cookieless analytics for published sites: backlog (Chris,
   2026-10-10).**
 - **D196. Invite-only publishing: backlog (Chris, 2026-10-10).**

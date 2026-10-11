@@ -38,6 +38,8 @@
  *     "rateLimitNamespaceBase": 5001           // required: rate-limit namespace
  *                                              // ids are account-wide, so a
  *                                              // copy beside vibld needs its own
+ *                                              // (the builder's from it, the
+ *                                              // published sites' from it + 100)
  *   }
  *
  * `auth` is how people sign in to the copy. `owner` is one password, set
@@ -248,9 +250,17 @@ export function selfHostConfig(app, base, settings) {
     workflow.name = names.workflow;
   }
   const ownIds = new Set((base.ratelimits ?? []).map((l) => l.namespace_id));
+  // vibld's own block across every app (apps/web and apps/publish), not just
+  // this one's: a publish id shifted onto one of the builder's would share
+  // its counters.
+  const isVibldId = (id) =>
+    ownIds.has(id) || (Number(id) >= 1001 && Number(id) <= 1099);
+  // Each app's limits from its own block past the base, so the builder's and
+  // the published sites' never share an id.
+  const offset = app === 'publish' ? 100 : 0;
   (config.ratelimits ?? []).forEach((limit, index) => {
-    limit.namespace_id = String(s.rateLimitNamespaceBase + index);
-    if (ownIds.has(limit.namespace_id)) {
+    limit.namespace_id = String(s.rateLimitNamespaceBase + offset + index);
+    if (isVibldId(limit.namespace_id)) {
       throw new Error(
         `${app}: rate-limit namespace ${limit.namespace_id} is one of vibld's own; choose a "rateLimitNamespaceBase" past them`,
       );

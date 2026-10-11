@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@cloudflare/puppeteer": "1.4.0",
     "@vibld/core": "workspace:*",
     "@vibld/security-headers": "workspace:*"
   },
