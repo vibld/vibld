@@ -1,0 +1,25 @@
+{
+  "name": "vibld",
+  "description": "The vibld plugin: vibld's MCP server and the skills that go with it.",
+  "owner": {
+    "name": "vibld",
+    "email": "hello@vibld.com"
+  },
+  "plugins": [
+    {
+      "name": "vibld",
+      "displayName": "vibld",
+      "source": "./plugins/vibld",
+      "description": "Build and edit vibld websites and web apps from your coding agent: start a build, follow it, read and change the code, type-check it and see it in a browser.",
+      "author": {
+        "name": "vibld",
+        "email": "hello@vibld.com",
+        "url": "https://vibld.com"
+      },
+      "homepage": "https://vibld.com",
+      "repository": "https://github.com/vibld/vibld",
+      "license": "Apache-2.0",
+      "keywords": ["vibld", "mcp", "websites", "web apps", "react", "tailwind"]
+    }
+  ]
+}

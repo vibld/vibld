@@ -1,0 +1,17 @@
+{
+  "name": "vibld",
+  "owner": {
+    "name": "vibld",
+    "email": "hello@vibld.com"
+  },
+  "metadata": {
+    "description": "The vibld plugin for Cursor: vibld's MCP server and the skills that go with it."
+  },
+  "plugins": [
+    {
+      "name": "vibld",
+      "source": "./plugins/vibld",
+      "description": "Build and edit vibld websites and web apps from your coding agent: start a build, follow it, read and change the code, type-check it and see it in a browser."
+    }
+  ]
+}

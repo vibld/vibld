@@ -1,0 +1,16 @@
+{
+  "name": "vibld",
+  "displayName": "vibld",
+  "version": "0.1.0",
+  "description": "Build and edit vibld websites and web apps from your coding agent: start a build, follow it, read and change the code, type-check it and see it in a browser.",
+  "icon": "./assets/vibld.png",
+  "author": {
+    "name": "vibld",
+    "email": "hello@vibld.com",
+    "url": "https://vibld.com"
+  },
+  "homepage": "https://vibld.com",
+  "repository": "https://github.com/vibld/vibld",
+  "license": "Apache-2.0",
+  "keywords": ["vibld", "mcp", "websites", "web apps", "react", "tailwind"]
+}

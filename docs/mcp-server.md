@@ -72,6 +72,9 @@ number of calls set by the plan (D201).
   project, as a restore is. The project it leaves is held to the limits a
   build's base is (50 files, 160,000 characters), so it can still be built
   on.
+- **Plugin:** `plugins/vibld` packages this server with two skills for
+  Claude Code, Codex and Cursor, and the repository is their marketplace
+  (D207). Install steps are in `plugins/vibld/README.md`.
 - **Server Card:** `https://vibld.com/.well-known/mcp/server-card.json`
   (SEP-1649), a static file in `apps/marketing/public`.
 

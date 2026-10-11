@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "vibld": {
+      "type": "http",
+      "url": "https://app.vibld.com/mcp",
+      "description": "vibld: build and edit websites and web apps"
+    }
+  }
+}

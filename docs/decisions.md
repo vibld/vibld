@@ -587,6 +587,55 @@ paying accounts until midnight UTC.
   raised the build's fixed-prompt reservation to 57,500 characters; a
   Free account on the default model still needs $0.88 set aside.
 
+### Turbofy teardown, 2026-10-11
+
+From a public-sources analysis of turbofy.com, a hosted business-app
+platform built mostly from coding agents through its plugin. One card per
+candidate; Chris answered every one "Build next" (2026-10-11, 21:06Z to
+21:07Z), against the backlog recommendation for D210, D211, D214, D215 and
+D216. Built one pull request at a time, in the order D207, D212, D213, D208,
+D215, D214, D209, D210, D211, D216.
+
+- **D207. A vibld plugin for Claude Code, Codex and Cursor (Chris,
+  2026-10-11: "Build next").** This repository is the marketplace:
+  `.claude-plugin/`, `.agents/plugins/` and `.cursor-plugin/` at the root
+  list one plugin, `plugins/vibld`, which carries the existing
+  `https://app.vibld.com/mcp` server and two skills, `vibld-build` and
+  `vibld-edit`, that teach an outside agent vibld's workflow and rules
+  (DESIGN.md, the stack, portability, checkpoints, no keys in source). No
+  server change. `apps/web/test/agent-plugin.test.ts` keeps the manifests,
+  the server URL and the skills' tool names in step.
+- **D208. A prompt box on vibld.com's home page (Chris, 2026-10-11: "Build
+  next").** What a visitor types survives sign-in and opens in the builder,
+  ready to send.
+- **D209. Text editing without a model run (Chris, 2026-10-11: "Build
+  next").** Click text in the preview and type; the edit is written to the
+  source and checkpointed at no credit cost. Builds on D188's source
+  mapping. Overlaps the content form editor card (D218), unanswered when
+  this was logged.
+- **D210. Multi-language generated sites (Chris, 2026-10-11: "Build
+  next").** Per-locale routes, translated copy, `hreflang` and a language
+  switcher, as plain code in the project.
+- **D211. Content collections with a page per record (Chris, 2026-10-11:
+  "Build next").** Markdown or JSON in the repository, one template page
+  for every item, readable slugs, and a redirect kept when a slug changes.
+- **D212. A dry run for MCP writes (Chris, 2026-10-11: "Build next").**
+  `write_files` with `dryRun` returns the diff and the type check without
+  creating a checkpoint.
+- **D213. Block hardcoded secrets in generated code (Chris, 2026-10-11:
+  "Build next").** A design check fails a build that puts a key-shaped
+  string in source instead of an environment variable.
+- **D214. Comparison pages on vibld.com (Chris, 2026-10-11: "Build
+  next").** vibld against other builders, facts only, each with a public
+  source.
+- **D215. A data portability page (Chris, 2026-10-11: "Build next").** What
+  a vibld project exports, in which formats, and how. It describes the
+  exports and makes no claim about which law applies.
+- **D216. Automations for generated apps (Chris, 2026-10-11: "Build
+  next").** Triggers, schedules and AI steps next to the app's data. Needs
+  the generated-app backend (M4, D197) first; its scope goes to Chris
+  before it is built.
+
 ### Checkpoint history, 2026-10-03
 
 ROADMAP M2 asks for "a history view that lists every accepted checkpoint and

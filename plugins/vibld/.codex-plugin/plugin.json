@@ -1,0 +1,30 @@
+{
+  "name": "vibld",
+  "version": "0.1.0",
+  "description": "Build and edit vibld websites and web apps from your coding agent: start a build, follow it, read and change the code, type-check it and see it in a browser.",
+  "author": {
+    "name": "vibld",
+    "email": "hello@vibld.com",
+    "url": "https://vibld.com"
+  },
+  "license": "Apache-2.0",
+  "keywords": ["vibld", "mcp", "websites", "web apps", "react", "tailwind"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "vibld",
+    "shortDescription": "Build and edit vibld sites and apps from a conversation.",
+    "longDescription": "Adds vibld's MCP server (https://app.vibld.com/mcp) and skills for building a project and editing its code. The code stays a plain Vite, React, TypeScript and Tailwind project you can export. Documentation is at https://vibld.com/docs.",
+    "developerName": "vibld",
+    "category": "Developer Tools",
+    "capabilities": ["MCP", "Skills"],
+    "defaultPrompt": [
+      "Build me a landing page for a bakery with vibld.",
+      "Show me my vibld projects.",
+      "Change the hero headline on my vibld site."
+    ],
+    "brandColor": "#FF4A1C",
+    "composerIcon": "./assets/vibld.svg",
+    "logo": "./assets/vibld.svg"
+  }
+}

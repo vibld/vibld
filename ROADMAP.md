@@ -76,13 +76,13 @@ The capabilities generated projects most often need follow on the same rules, ea
 - Payments in generated apps, starting with Stripe Checkout
 - Content collections, such as a blog, that someone who does not write code can edit
 
-Before the first integration: secure key entry, where the owner pastes a third-party key through a one-time link and the model sees only its variable's name (D193). The built-in backend stays as planned here (D197).
+Before the first integration: secure key entry, where the owner pastes a third-party key through a one-time link and the model sees only its variable's name (D193). The built-in backend stays as planned here (D197). Chosen to build (2026-10-11): content collections with a page per record, kept in the repository (D211), multi-language sites (D210), and automations next to the app's data once the backend exists (D216).
 
 ## M5: Visual iteration
 
 Element selection, source mapping, text/style changes and responsive inspection. Changes continue to modify portable source code and use the validated patch workflow.
 
-Status: shipped: Select and Annotate on the live preview, located to a file and line and sent as part of the message (D188), and Desktop, Tablet and Phone widths (D192). Not built: direct text and style edits.
+Status: shipped: Select and Annotate on the live preview, located to a file and line and sent as part of the message (D188), and Desktop, Tablet and Phone widths (D192). Not built: direct text and style edits. Next: text editing without a model run (D209).
 
 ## M6: Start from anything
 
@@ -98,6 +98,7 @@ More ways to begin than a sentence. Each produces the same conventional project 
 - Bring your own model API key in the hosted product, for cost control. A self-hosted copy already runs on its own provider keys (L45); the hosted product holds no user model keys until a credential vault exists (L31)
 - Comments on shared previews, the first step toward working as a team
 - A command-line tool that pulls a project into a local editor and pushes changes back as a checkpoint
+- A vibld plugin for Claude Code, Codex and Cursor, so a person's own coding agent builds and edits vibld projects (D207), with a dry run for its writes (D212)
 
 ## Later: Broader use cases and managed teams
 
