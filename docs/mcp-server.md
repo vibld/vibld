@@ -37,9 +37,15 @@ number of calls set by the plan (D201).
   before the call is counted or anything is read, so the client signs the
   person in again asking for both. Its JSON-RPC error says to connect vibld
   again and approve editing, for a client that does not step up. The 401
-  that starts a connection asks for `build` alone, so connecting keeps
-  working on a Clerk instance where `edit` has not been created yet; the
-  protected resource metadata lists both in `scopes_supported`.
+  that starts a connection asks for `build edit`, since some clients
+  (claude.ai) ask for what it names and never follow the step-up, which
+  left every editing tool refused. So the Clerk instance needs both scopes
+  created (a Dashboard step, noted in `scripts/configure-accounts.mjs`),
+  and every client registered before `edit` existed given it too, since
+  Clerk answers a client asking for more than it registered with
+  `invalid_scope` (`configure-accounts` does this on `apply`). The person
+  still approves each scope. The protected resource metadata lists both in
+  `scopes_supported`.
 - **One door per token:** a Clerk session token does not open `/mcp`, and
   an OAuth token does not open the builder's `/api/*`. The builder's routes
   now refuse any Clerk-signed token without a session id (`principal.ts`),

@@ -312,6 +312,22 @@ export function clerkOAuthChanges(current) {
 }
 
 /**
+ * The scopes an OAuth client registered before `edit` existed should have
+ * now, or undefined when it needs nothing. A client asking for more scopes
+ * than it registered with gets `invalid_scope` from Clerk, and the MCP
+ * sign-in challenge names `build edit`, so a client that has `build`
+ * without `edit` could not sign in again at all. Clients without `build`
+ * (some other app's) are left alone. Clerk keeps scopes space-delimited.
+ */
+export function widenedClientScopes(scopes) {
+  const have = String(scopes ?? '')
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!have.includes('build') || have.includes('edit')) return undefined;
+  return [...have, 'edit'].join(' ');
+}
+
+/**
  * Stripe's form encoding: nested objects as `a[b][c]`, arrays as `a[]`.
  * Returned as pairs so a test can read them without a URLSearchParams.
  */
@@ -833,6 +849,55 @@ async function configureClerkOAuth(key, apply, report) {
   );
 }
 
+/** Gives every client that has `build` the `edit` scope as well (D190). */
+async function widenClerkOAuthClients(key, apply, report) {
+  report.line('### Clerk OAuth clients');
+  let widened = 0;
+  let checked = 0;
+  let registered = 0;
+  for (let offset = 0; ; offset += 100) {
+    const page = await clerk(
+      key,
+      'GET',
+      `/oauth_applications?limit=100&offset=${offset}`,
+    );
+    if (page.status !== 200) {
+      report.fail(
+        `The Clerk OAuth clients could not be listed: ${clerkError(page)}`,
+      );
+      return;
+    }
+    const clients = page.json?.data ?? [];
+    for (const client of clients) {
+      checked += 1;
+      if (client.dynamically_registered) registered += 1;
+      const scopes = widenedClientScopes(client.scopes);
+      if (!scopes) continue;
+      widened += 1;
+      const name = `${client.name ?? client.id} (${client.id})`;
+      if (!apply) {
+        report.line(`- Would give ${name} the scopes \`${scopes}\`.`);
+        continue;
+      }
+      const updated = await clerk(
+        key,
+        'PATCH',
+        `/oauth_applications/${client.id}`,
+        { scopes },
+      );
+      if (updated.status >= 200 && updated.status < 300) {
+        report.line(`- Gave ${name} the scopes \`${scopes}\`.`);
+      } else {
+        report.fail(`${name} was not given \`edit\`: ${clerkError(updated)}`);
+      }
+    }
+    if (clients.length < 100) break;
+  }
+  report.line(
+    `- ${checked} client(s), ${registered} dynamically registered; ${widened} had \`build\` without \`edit\`.`,
+  );
+}
+
 async function main() {
   const mode = process.env.CONFIGURE_MODE === 'apply' ? 'apply' : 'inspect';
   const lines = [`## Configure accounts (${mode})`];
@@ -860,6 +925,11 @@ async function main() {
       report,
     );
     await configureClerkOAuth(
+      process.env.CLERK_SECRET_KEY,
+      mode === 'apply',
+      report,
+    );
+    await widenClerkOAuthClients(
       process.env.CLERK_SECRET_KEY,
       mode === 'apply',
       report,

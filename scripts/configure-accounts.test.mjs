@@ -14,6 +14,7 @@ import {
   RETENTION_COUPON,
   WEBHOOK_URL,
   clerkOAuthChanges,
+  widenedClientScopes,
   formPairs,
   missingWebhookEvents,
   plannedPriceMoves,
@@ -385,4 +386,14 @@ test('clerkOAuthChanges turns on CIMD and DCR (D185)', () => {
         CLERK_OAUTH_SETTINGS.dynamic_client_allowed_scopes,
     },
   );
+});
+
+test('widenedClientScopes adds edit to a client that has build alone', () => {
+  assert.equal(
+    widenedClientScopes('openid profile email build offline_access'),
+    'openid profile email build offline_access edit',
+  );
+  assert.equal(widenedClientScopes('openid build edit'), undefined);
+  assert.equal(widenedClientScopes('openid profile email'), undefined);
+  assert.equal(widenedClientScopes(undefined), undefined);
 });

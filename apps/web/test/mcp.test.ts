@@ -383,7 +383,7 @@ describe('the MCP token check', () => {
     assert.equal(response.status, 403);
     assert.equal(
       response.headers.get('WWW-Authenticate'),
-      `Bearer error="insufficient_scope", resource_metadata="https://app.vibld.com${MCP_METADATA_PATH}", scope="build"`,
+      `Bearer error="insufficient_scope", resource_metadata="https://app.vibld.com${MCP_METADATA_PATH}", scope="build edit"`,
     );
   });
 
@@ -668,7 +668,7 @@ describe('the MCP protocol', () => {
     assert.equal(response.status, 401);
     assert.equal(
       response.headers.get('WWW-Authenticate'),
-      `Bearer resource_metadata="https://app.vibld.com${MCP_METADATA_PATH}", scope="build"`,
+      `Bearer resource_metadata="https://app.vibld.com${MCP_METADATA_PATH}", scope="build edit"`,
     );
     assert.deepEqual(
       protectedResourceMetadata(

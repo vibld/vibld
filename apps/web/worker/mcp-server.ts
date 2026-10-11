@@ -1926,9 +1926,13 @@ export function mcpUnauthorized(
   appOrigin: string,
   reason: 'missing' | 'invalid' | 'insufficient_scope',
 ): Response {
-  // RFC 6750 section 3, with the RFC 9728 pointer and the scope to ask for.
+  // RFC 6750 section 3, with the RFC 9728 pointer and the scopes to ask
+  // for. Both: clients ask for what this names and keep that token, and
+  // some (claude.ai) never follow `mcpStepUp`'s 403, so naming `build`
+  // alone left every editing tool refused for good. The person still
+  // approves each scope on the consent screen.
   const metadata = `resource_metadata="${appOrigin}${MCP_METADATA_PATH}"`;
-  const scope = `scope="${MCP_SCOPE}"`;
+  const scope = `scope="${MCP_SCOPE} ${EDIT_SCOPE}"`;
   const [status, challenge, error] =
     reason === 'missing'
       ? [
