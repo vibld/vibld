@@ -79,8 +79,8 @@ number of calls set by the plan (D201).
   against, and is refused (`checkpoint-moved`, with the current revision)
   if the project has moved on, while a build runs, and in an archived
   project, as a restore is. The project it leaves is held to the limits a
-  build's base is (50 files, 160,000 characters), so it can still be built
-  on.
+  build's base is (50 files of its own, not counting the ones Vibld writes,
+  and 160,000 characters), so it can still be built on.
 - **Dry runs (D212).** `write_files` with `dryRun: true` sends the same
   `PUT` with `dryRun: true`, which runs every check above and writes
   nothing: no revision, no checkpoint. It answers with the draft and the

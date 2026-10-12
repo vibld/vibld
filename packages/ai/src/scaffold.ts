@@ -1,6 +1,7 @@
 import type { ProjectFile } from '@vibld/core';
 
 import {
+  BACKDROPS,
   backdropFiles,
   importSpecifiers,
   isBackdropPath,
@@ -8,7 +9,11 @@ import {
 } from './backdrops.ts';
 import { isScenePath, sceneFiles } from './scenes.ts';
 import { STYLE_TOKENS_MARKER, STYLE_TOKENS_PATH } from './style-gallery.ts';
-import { isUiTemplatePath, uiComponentFiles } from './ui-components.ts';
+import {
+  isUiTemplatePath,
+  UI_COMPONENTS,
+  uiComponentFiles,
+} from './ui-components.ts';
 import {
   OPTIONAL_PACKAGES,
   STACK_PACKAGES,
@@ -99,6 +104,37 @@ export function ownedTemplatePaths(files: readonly ProjectFile[]): string[] {
     )
     .map((file) => file.path);
 }
+
+/**
+ * Whether `file` is one Vibld wrote: a scaffold file, a gallery style's
+ * tokens carrying `STYLE_TOKENS_MARKER` (an unmarked file there is the
+ * project's own, as `withStyleTokens` keeps it), or a background, scene or
+ * component carrying `VIBLD_MARK`. These
+ * do not count toward the files a project may hold (D236): the model does
+ * not pay to write them, and a project holds a small, fixed set of them at
+ * most (`MAX_VIBLD_FILES`).
+ */
+export function isVibldFile(file: ProjectFile): boolean {
+  return (
+    isScaffoldPath(file.path) ||
+    (file.path === STYLE_TOKENS_PATH &&
+      file.content.includes(STYLE_TOKENS_MARKER)) ||
+    (isEffectOrComponentPath(file.path) && isVibldWritten(file.content))
+  );
+}
+
+/** The files of a project that count toward its limit (D236). */
+export function projectFileCount(files: readonly ProjectFile[]): number {
+  return files.filter((file) => !isVibldFile(file)).length;
+}
+
+/**
+ * The most files `isVibldFile` can match in one project, one per reserved
+ * path: the scaffold, the style tokens, every background, the stage and
+ * every component. What a project may hold past its own limit.
+ */
+export const MAX_VIBLD_FILES =
+  SCAFFOLD_PATHS.length + 1 + BACKDROPS.length + 1 + UI_COMPONENTS.length;
 
 /** A package beyond the stack, as an outline declares it. */
 export interface ExtraDependency {

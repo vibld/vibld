@@ -45,9 +45,10 @@ import type {
  * same project arriving by a different route. apps/web checks them first;
  * they are repeated here because this is where a path becomes a file on a
  * filesystem, and `preview-live-update.test.ts` in apps/web keeps the two
- * equal.
+ * equal. apps/web counts only a project's own 50 files; this bound is that
+ * plus the 29 Vibld may write on top (`MAX_VIBLD_FILES`, D236).
  */
-export const MAX_UPDATE_FILES = 50;
+export const MAX_UPDATE_FILES = 79;
 export const MAX_UPDATE_PATH_CHARS = 256;
 export const MAX_UPDATE_TOTAL_PATH_CHARS = 8000;
 export const MAX_UPDATE_CONTENT_CHARS = 160_000;

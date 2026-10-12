@@ -66,9 +66,10 @@ import type { ScriptedBuild, ScriptedFile } from '../src/scripted-client.ts';
 import {
   SCAFFOLD_PATHS,
   isScaffoldPath,
+  projectFileCount,
   scaffoldFiles,
 } from '../src/scaffold.ts';
-import { UI_COMPONENTS } from '../src/ui-components.ts';
+import { UI_COMPONENTS, uiPath } from '../src/ui-components.ts';
 import { SPEC } from './fixtures/design-spec.ts';
 
 const MODEL = 'claude-opus-5-5';
@@ -1304,6 +1305,64 @@ describe('a follow-up, as a patch', () => {
       'export const Globe = () => <div>blue globe</div>;',
     );
     assert.equal(byPath.get(backdropPath(aurora)), aurora.source);
+  });
+
+  it("counts only the project's own files toward the limit (D236)", async () => {
+    // Every component Vibld writes, and own files up to one short of the
+    // limit: the plan adds one more, which fits.
+    const components = UI_COMPONENTS.map((component) => ({
+      path: uiPath(component),
+      content: component.source,
+    }));
+    const own = MAX_PLANNED_FILES - 1 - projectFileCount(base.files);
+    const full = {
+      ...base,
+      files: [
+        ...base.files,
+        ...components,
+        ...Array.from({ length: own }, (_, index) => ({
+          path: `src/components/C${index}.tsx`,
+          content: `export const C${index} = () => null;`,
+        })),
+      ],
+    };
+    assert.equal(projectFileCount(full.files), MAX_PLANNED_FILES - 1);
+    assert.ok(full.files.length > MAX_PLANNED_FILES);
+    const added = {
+      summary: 'Added a footer.',
+      files: [
+        {
+          path: 'src/components/Footer.tsx',
+          content: 'export const Footer = () => null;',
+          size: 'small' as const,
+        },
+      ],
+    };
+    const plan = await new BoundedPlanProvider(
+      createScriptedBuildClient(added),
+      { model: MODEL },
+    ).generate({ prompt: 'Add a footer', base: full });
+    assert.ok(
+      plan.files.some((item) => item.path === 'src/components/Footer.tsx'),
+    );
+
+    // A project's own file at a component path is its own, and counts.
+    const owned = {
+      ...full,
+      files: full.files.map((item) =>
+        item.path === 'src/components/ui/button.tsx'
+          ? { path: item.path, content: 'export const Button = () => null;' }
+          : item,
+      ),
+    };
+    await assert.rejects(
+      new BoundedPlanProvider(createScriptedBuildClient(added), {
+        model: MODEL,
+      }).generate({ prompt: 'Add a footer', base: owned }),
+      (error: unknown) =>
+        error instanceof BoundedBuildError &&
+        error.stop === 'validation-failed',
+    );
   });
 
   it('declares a package the change imports, and otherwise keeps package.json as it was', async () => {

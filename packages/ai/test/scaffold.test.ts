@@ -12,8 +12,11 @@ import {
   TSCONFIG,
   UTILS_TS,
   VITE_CONFIG,
+  MAX_VIBLD_FILES,
   extraDependencies,
   importedPackages,
+  isVibldFile,
+  projectFileCount,
   indexHtml,
   retitledIndexHtml,
   isSimpleRange,
@@ -26,7 +29,10 @@ import {
   withStyleTokensImport,
   withoutStyleTokensImport,
 } from '../src/scaffold.ts';
+import { BACKDROPS, backdropPath } from '../src/backdrops.ts';
+import { STAGE_PATH } from '../src/scenes.ts';
 import { OPTIONAL_PACKAGES, stackDependencies } from '../src/stack.ts';
+import { UI_COMPONENTS, uiPath } from '../src/ui-components.ts';
 import {
   GROUP_SYSTEM_PROMPT,
   OUTLINE_SYSTEM_PROMPT,
@@ -625,5 +631,72 @@ ${STYLE_TOKENS_IMPORT}
     );
     assert.equal(files.has(STYLE_TOKENS_PATH), false);
     assert.equal(files.get('src/styles.css'), STYLES.content);
+  });
+});
+
+describe("Vibld's own files and the file limit (D236)", () => {
+  const button = UI_COMPONENTS.find(
+    (component) => component.name === 'button',
+  )!;
+  const aurora = BACKDROPS[0]!;
+
+  it('are the scaffold, the style tokens, and marked backgrounds, stage and components', () => {
+    for (const path of SCAFFOLD_PATHS) {
+      assert.equal(isVibldFile({ path, content: '' }), true, path);
+    }
+    assert.equal(
+      isVibldFile({
+        path: STYLE_TOKENS_PATH,
+        content: `/* Amberbrae: ${STYLE_TOKENS_MARKER}. */`,
+      }),
+      true,
+    );
+    assert.equal(
+      isVibldFile({ path: uiPath(button), content: button.source }),
+      true,
+    );
+    assert.equal(
+      isVibldFile({ path: backdropPath(aurora), content: aurora.source }),
+      true,
+    );
+    // The same paths without the mark are the project's own.
+    assert.equal(
+      isVibldFile({ path: STYLE_TOKENS_PATH, content: '@theme { --x: 1; }' }),
+      false,
+    );
+    assert.equal(
+      isVibldFile({
+        path: uiPath(button),
+        content: 'export const Button = 1;',
+      }),
+      false,
+    );
+    assert.equal(
+      isVibldFile({ path: 'src/App.tsx', content: button.source }),
+      false,
+    );
+    assert.equal(
+      projectFileCount([
+        { path: 'package.json', content: '{}' },
+        { path: uiPath(button), content: button.source },
+        { path: 'src/App.tsx', content: '' },
+      ]),
+      1,
+    );
+  });
+
+  it('number at most one per reserved path', () => {
+    assert.equal(
+      MAX_VIBLD_FILES,
+      SCAFFOLD_PATHS.length + 1 + BACKDROPS.length + 1 + UI_COMPONENTS.length,
+    );
+    const paths = new Set([
+      ...SCAFFOLD_PATHS,
+      STYLE_TOKENS_PATH,
+      ...BACKDROPS.map(backdropPath),
+      STAGE_PATH,
+      ...UI_COMPONENTS.map(uiPath),
+    ]);
+    assert.equal(paths.size, MAX_VIBLD_FILES);
   });
 });

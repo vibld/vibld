@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ProjectSnapshot } from '@vibld/core';
+import { UI_COMPONENTS, uiPath } from '@vibld/ai/ui-components';
 import { deriveBrief } from '../src/generation/brief.ts';
 import { buildProjectFiles } from '../src/generation/plan-builder.ts';
 import {
@@ -67,6 +68,26 @@ describe('staged project validation', () => {
     );
     assert.ok(
       oversized.errors.some((error) => error.includes('above the limit')),
+    );
+  });
+
+  it("counts only the project's own files toward the limit (D236)", () => {
+    const own = Array.from({ length: DEFAULT_LIMITS.maxFiles }, (_, index) => ({
+      path: `src/File${index}.tsx`,
+      content: '',
+    }));
+    const components = UI_COMPONENTS.map((component) => ({
+      path: uiPath(component),
+      content: component.source,
+    }));
+    const limit = (files: ProjectSnapshot['files']) =>
+      validateSnapshot(snapshot(files)).errors.filter((error) =>
+        error.includes('files of its own'),
+      );
+    assert.deepEqual(limit([...own, ...components]), []);
+    assert.equal(
+      limit([...own, { path: 'src/One.tsx', content: '' }]).length,
+      1,
     );
   });
 

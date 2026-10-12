@@ -218,7 +218,7 @@ describe('where an update may write', () => {
       path: `src/f${i}.ts`,
       content: '',
     }));
-    assert.match(filesProblem(many) ?? '', /at most 50 files/);
+    assert.match(filesProblem(many) ?? '', /at most 79 files/);
     assert.match(
       filesProblem([
         { path: 'src/big.ts', content: 'x'.repeat(MAX_UPDATE_CONTENT_CHARS) },

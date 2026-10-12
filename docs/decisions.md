@@ -729,6 +729,17 @@ Tessryx and Turbofy reviews; the scope is in the project's
 - **D235. An automation's AI steps use the owner's own model key, entered
   through D193 (Chris, 2026-10-11, 22:17Z).** No vibld credit is billed
   for them.
+- **D236. Vibld's own files do not count toward a project's file limit
+  (Chris, 2026-10-12: "Exclude them").** The scaffold files, the gallery
+  style's tokens, and the backgrounds, stage and components that carry
+  "Written by Vibld" are left out of the count (`isVibldFile` and
+  `projectFileCount` in `packages/ai/src/scaffold.ts`). The build's check
+  after the outline, the staged-project validator (60) and the preview,
+  publish and edit guard (50) all count the same way, so a plan the check
+  passes is not refused after the build is paid for. A project's own file
+  at one of those paths still counts. There are at most 29 of Vibld's
+  (`MAX_VIBLD_FILES`), which bounds the list the guard reads and the
+  preview service's own limit (79).
 
 M4's order of work follows from these: D193 secure key entry first, then
 one complete flow on the owner's Supabase (migrations, environment setup,

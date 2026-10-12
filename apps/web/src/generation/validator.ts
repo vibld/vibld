@@ -1,5 +1,6 @@
 import type { ProjectSnapshot, ValidationResult, Validator } from '@vibld/core';
 import { findContrastFailures } from '@vibld/ai/contrast';
+import { projectFileCount } from '@vibld/ai/scaffold';
 
 export interface ValidationLimits {
   maxFiles: number;
@@ -83,9 +84,12 @@ export function validateSnapshot(
   if (snapshot.files.length === 0) {
     errors.push('The staged project contains no files');
   }
-  if (snapshot.files.length > limits.maxFiles) {
+  // Only the project's own files count: the ones Vibld writes (the scaffold,
+  // backgrounds, the stage, components) are a fixed set on top (D236).
+  const own = projectFileCount(snapshot.files);
+  if (own > limits.maxFiles) {
     errors.push(
-      `The staged project has ${snapshot.files.length} files, above the limit of ${limits.maxFiles}`,
+      `The staged project has ${own} files of its own, above the limit of ${limits.maxFiles}`,
     );
   }
 

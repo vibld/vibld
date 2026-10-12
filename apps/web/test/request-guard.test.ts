@@ -20,6 +20,8 @@ import {
 } from '../worker/request-guard.ts';
 import { MAX_BRIEF_CHARS } from '../src/templates/template-brief.ts';
 import { MAX_CHOSEN_MOCKUP_CHARS } from '@vibld/ai/limits';
+import { MAX_VIBLD_FILES } from '@vibld/ai';
+import { UI_COMPONENTS, uiPath } from '@vibld/ai/ui-components';
 
 const SELF = 'https://vibld-web-preview.example.workers.dev';
 
@@ -164,6 +166,38 @@ describe('generation request validation', () => {
     const result = parsePreviewRequest({ files });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.status, 413);
+  });
+
+  it("counts only the project's own files, not Vibld's (D236)", () => {
+    const own = Array.from({ length: DEFAULT_LIMITS.maxFiles }, (_, index) => ({
+      path: `src/File${index}.tsx`,
+      content: '',
+    }));
+    const components = UI_COMPONENTS.map((component) => ({
+      path: uiPath(component),
+      content: component.source,
+    }));
+    assert.equal(
+      parsePreviewRequest({ files: [...own, ...components] }).ok,
+      true,
+    );
+
+    // A project's own file at a component path counts.
+    const unmarked = parsePreviewRequest({
+      files: [...own, { path: uiPath(UI_COMPONENTS[0]!), content: '' }],
+    });
+    assert.equal(unmarked.ok, false);
+    if (!unmarked.ok) assert.equal(unmarked.status, 413);
+
+    // And no list is read past the most Vibld could add.
+    const many = parsePreviewRequest({
+      files: Array.from(
+        { length: DEFAULT_LIMITS.maxFiles + MAX_VIBLD_FILES + 1 },
+        () => ({ path: 'package.json', content: '' }),
+      ),
+    });
+    assert.equal(many.ok, false);
+    if (!many.ok) assert.equal(many.status, 413);
   });
 
   it('caps a single path length', () => {

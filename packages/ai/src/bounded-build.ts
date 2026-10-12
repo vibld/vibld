@@ -242,7 +242,9 @@ export const GROUP_CONTEXT_MAX_CHARS = 60_000;
  * The most files a planned project may hold, which is the builder's own
  * validation limit (`apps/web/src/generation/validator.ts`,
  * `DEFAULT_LIMITS.maxFiles`). Checked after the outline, so a plan that
- * could never be accepted is refused before its files are paid for.
+ * could never be accepted is refused before its files are paid for. Both
+ * count only the project's own files, not the ones Vibld writes (D236), so
+ * the count here is the count there.
  */
 export const MAX_PLANNED_FILES = 60;
 
@@ -1753,7 +1755,12 @@ export async function runBoundedBuild(
       owned: outlined.value.ownedPaths,
     },
   );
-  const fileCount = plan.kept.length + plan.manifest.length;
+  // Vibld's own files do not count (D236): the scaffold, and the kept
+  // backgrounds, stage and components that are not the project's own.
+  const owned = new Set(outlined.value.ownedPaths ?? []);
+  const fileCount =
+    plan.kept.filter((path) => !isTemplatedPath(path, owned)).length +
+    plan.manifest.length;
   if (fileCount > MAX_PLANNED_FILES) {
     return failed(
       'validation-failed',

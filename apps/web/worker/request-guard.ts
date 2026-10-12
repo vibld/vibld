@@ -12,7 +12,13 @@ import {
   MAX_PROMPT_CHARS,
   MAX_REFERENCE_URL_CHARS,
 } from '@vibld/ai/limits';
-import { canonicalModelId, findModel, isKnownModel } from '@vibld/ai';
+import {
+  canonicalModelId,
+  findModel,
+  isKnownModel,
+  MAX_VIBLD_FILES,
+  projectFileCount,
+} from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 import { isStyleColorEdits, isStyleGalleryId } from '@vibld/ai/style-gallery';
 import type { StyleColorEdits } from '@vibld/ai/style-gallery';
@@ -220,14 +226,20 @@ export function pathProblem(path: string): string | undefined {
  * what is, in both cases, "how big a project can this deployment afford to
  * hand to a model or a sandbox". An edit (`PUT /api/projects/:id/files`,
  * D190) holds the project it would leave to the same rules, so the code it
- * accepts can still be previewed and built on.
+ * accepts can still be previewed and built on. The file count is of the
+ * project's own files: the ones Vibld writes are on top (D236).
  */
 export function parseProjectFiles(
   entries: unknown[],
   limits: GuardLimits,
 ): GuardResult<{ path: string; content: string }[]> {
-  if (entries.length > limits.maxFiles) {
-    return fail(413, `A project may contain at most ${limits.maxFiles} files.`);
+  // The files Vibld writes do not count (D236), and there are at most
+  // MAX_VIBLD_FILES of them, so this bounds the work before it starts.
+  if (entries.length > limits.maxFiles + MAX_VIBLD_FILES) {
+    return fail(
+      413,
+      `A project may contain at most ${limits.maxFiles} files, not counting the ones Vibld writes.`,
+    );
   }
 
   const files: { path: string; content: string }[] = [];
@@ -264,6 +276,12 @@ export function parseProjectFiles(
       );
     }
     files.push({ path, content });
+  }
+  if (projectFileCount(files) > limits.maxFiles) {
+    return fail(
+      413,
+      `A project may contain at most ${limits.maxFiles} files, not counting the ones Vibld writes.`,
+    );
   }
   return { ok: true, value: files };
 }

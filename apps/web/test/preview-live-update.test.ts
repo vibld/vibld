@@ -5,6 +5,7 @@ import {
   startPreview,
   updatePreview,
 } from '../worker/preview-client.ts';
+import { MAX_VIBLD_FILES } from '@vibld/ai';
 import type { ServiceBinding } from '../worker/preview-client.ts';
 import {
   DEFAULT_LIMITS,
@@ -337,7 +338,7 @@ describe("the preview service's bounds and this Worker's", () => {
   // allowed to send would be refused in the sandbox and turn every
   // follow-up into a restart, with nothing but this test to say why.
   it('agree on how big a previewed project may be', () => {
-    assert.equal(MAX_UPDATE_FILES, DEFAULT_LIMITS.maxFiles);
+    assert.equal(MAX_UPDATE_FILES, DEFAULT_LIMITS.maxFiles + MAX_VIBLD_FILES);
     assert.equal(MAX_UPDATE_PATH_CHARS, DEFAULT_LIMITS.maxPathChars);
     assert.equal(MAX_UPDATE_TOTAL_PATH_CHARS, DEFAULT_LIMITS.maxTotalPathChars);
     assert.equal(MAX_UPDATE_CONTENT_CHARS, DEFAULT_LIMITS.maxTotalContentChars);

@@ -1628,10 +1628,11 @@ describe('editing files with no build (D190)', () => {
     const w = world();
     const project = await built(w);
     const path = `/api/projects/${project.id}/files`;
-    // Two files already, so 49 more is 51.
+    // One file of its own already (index.html is Vibld's and does not
+    // count, D236), so 50 more is 51.
     const many = await w.call(ALICE, 'PUT', path, {
       base: 'r1',
-      files: Array.from({ length: 49 }, (_, i) => ({
+      files: Array.from({ length: 50 }, (_, i) => ({
         path: `src/f${i}.ts`,
         content: '',
       })),
