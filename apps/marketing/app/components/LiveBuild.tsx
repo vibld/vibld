@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from 'react';
+import { MAX_PROMPT_CHARS } from '@vibld/ai/limits';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
 import {
@@ -30,6 +31,8 @@ import { DEMO_SITES, DEMO_SITE_IDS, siteForRequest } from '../demo-sites.ts';
 import type { DemoSiteId } from '../demo-sites.ts';
 import { lookById, specLook } from '../looks.ts';
 import type { Look } from '../looks.ts';
+import { SITE } from '../site.ts';
+import { builderUrlFor } from '../builder-link.ts';
 import { SiteMiniature } from './SiteMiniature.tsx';
 import type { MiniatureRegion } from './SiteMiniature.tsx';
 
@@ -534,6 +537,11 @@ export function AskForm() {
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (value.trim() === '') return;
+    window.location.assign(builderUrlFor(value));
+  };
+
+  const watch = () => {
     const request = value.replace(/\s+/g, ' ').trim().slice(0, 240);
     build(request ? siteForRequest(request) : 'pottery', request || undefined);
   };
@@ -546,21 +554,32 @@ export function AskForm() {
   };
 
   return (
-    <form className="lb-ask" action="#builder" onSubmit={submit}>
+    <form className="lb-ask" action={SITE.appUrl} onSubmit={submit}>
       <label htmlFor={inputId}>What do you want to build?</label>
       <div className="lb-ask__row">
         <textarea
           id={inputId}
           rows={2}
+          required
+          maxLength={MAX_PROMPT_CHARS}
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={onKeyDown}
           placeholder="A site for my Saturday wheel-throwing classes, where people pick a two-hour slot."
         />
-        <button className="button lb-ask__go" type="submit">
-          Watch it build
-          <Arrow />
-        </button>
+        <div className="lb-ask__actions">
+          <button className="button lb-ask__go" type="submit">
+            Build it
+            <Arrow />
+          </button>
+          <button
+            className="button button--secondary lb-ask__watch"
+            type="button"
+            onClick={watch}
+          >
+            Watch a demo
+          </button>
+        </div>
       </div>
       <div
         className="lb-sugg"

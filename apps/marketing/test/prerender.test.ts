@@ -742,6 +742,16 @@ describe('the Live Build home page, at rest', () => {
     assert.ok(html.includes('Replay the demonstration'));
     assert.match(html, /aria-live="polite"/);
   });
+
+  it('has a prompt box that opens the real builder (D208)', () => {
+    const html = read('/');
+    assert.match(
+      html,
+      new RegExp(`<form class="lb-ask" action="${SITE.appUrl}"`),
+    );
+    assert.ok(html.includes('Build it'));
+    assert.ok(html.includes('Watch a demo'));
+  });
 });
 
 describe('the way in, now the beta is open', () => {

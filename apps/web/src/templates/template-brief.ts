@@ -8,6 +8,12 @@
  * and the composer opens with that brief in it, ready to send or edit, and
  * with the text of each chosen screen pattern after it (D110).
  *
+ * vibld.com's home page sends what a visitor typed the same way (D208),
+ *
+ *   https://app.vibld.com/#prompt=<what they typed, encoded>
+ *
+ * with no template: it opens in the composer, ready to send.
+ *
  * The fragment, because it is never sent to a server: the brief is several
  * kilobytes, and none of it is the Worker's business until somebody sends
  * it. It is read once, on the first load, before the sign-in screen can
@@ -27,7 +33,8 @@ export const TEMPLATE_BRIEF_KEY = 'vibld.template-brief';
 export const MAX_BRIEF_CHARS = MAX_PROMPT_CHARS;
 
 export interface TemplateBrief {
-  template: string;
+  /** The template it came from, or null for a prompt typed on vibld.com. */
+  template: string | null;
   brief: string;
   /** Screen pattern ids to add to the brief (D110), in the order chosen. */
   screens: string[];
@@ -65,7 +72,12 @@ export function briefStorage(): BriefStorage | null {
 /** The brief a fragment carries, or null when it carries none worth using. */
 export function readTemplateBrief(hash: string): TemplateBrief | null {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
-  const template = params.get('template') ?? '';
+  const template = params.get('template');
+  if (template === null) {
+    const prompt = (params.get('prompt') ?? '').trim();
+    if (prompt.length === 0 || prompt.length > MAX_BRIEF_CHARS) return null;
+    return { template: null, brief: prompt, screens: [] };
+  }
   const brief = (params.get('brief') ?? '').trim();
   if (!ID.test(template)) return null;
   if (brief.length === 0 || brief.length > MAX_BRIEF_CHARS) return null;
@@ -102,7 +114,7 @@ export function takeTemplateBrief(
     storage.removeItem(TEMPLATE_BRIEF_KEY);
     if (raw === null) return null;
     const parsed = JSON.parse(raw) as Partial<TemplateBrief>;
-    return typeof parsed.template === 'string' &&
+    return (typeof parsed.template === 'string' || parsed.template === null) &&
       typeof parsed.brief === 'string' &&
       parsed.brief.length <= MAX_BRIEF_CHARS
       ? {

@@ -121,11 +121,9 @@ function Hero() {
           </p>
           <AskForm />
           <p className="lb-ask__note">
-            A demonstration drawn in this page. It does not call a model.{' '}
-            <a className="lb-link" href={SITE.signUpUrl}>
-              Sign up
-            </a>{' '}
-            to use the real thing.
+            Build it opens the builder with what you typed, ready to send once
+            you sign in. Watch a demo plays a build drawn in this page. It does
+            not call a model.
           </p>
         </div>
         <BuilderWindow />

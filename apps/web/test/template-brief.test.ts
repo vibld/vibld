@@ -118,3 +118,55 @@ describe('a template brief from vibld.com (D106)', () => {
     assert.equal(storage.map.size, 0);
   });
 });
+
+describe("a prompt typed on vibld.com's home page (D208)", () => {
+  const promptHash = (prompt: string) =>
+    `#${new URLSearchParams({ prompt }).toString()}`;
+
+  it('reads the prompt, with no template and no screens', () => {
+    assert.deepEqual(
+      readTemplateBrief(promptHash('  A site for my pottery classes.\n')),
+      { template: null, brief: 'A site for my pottery classes.', screens: [] },
+    );
+  });
+
+  it('ignores an empty or oversized prompt', () => {
+    assert.equal(readTemplateBrief(promptHash(' \n ')), null);
+    assert.equal(
+      readTemplateBrief(promptHash('x'.repeat(MAX_BRIEF_CHARS + 1))),
+      null,
+    );
+  });
+
+  it('reads a template link as one, even with a prompt beside it', () => {
+    const hash = `#${new URLSearchParams({
+      template: 'loanlight',
+      brief: 'Build it.',
+      prompt: 'Something else.',
+    }).toString()}`;
+    assert.equal(readTemplateBrief(hash)?.brief, 'Build it.');
+  });
+
+  it('keeps it through sign-in and hands it to the composer once', () => {
+    const storage = memory();
+    const replaced: string[] = [];
+    captureTemplateBrief(
+      { hash: promptHash('A bakery site.'), pathname: '/', search: '' },
+      { replaceState: (_s, _t, url) => void replaced.push(String(url)) },
+      storage,
+    );
+    assert.deepEqual(replaced, ['/']);
+    assert.deepEqual(takeTemplateBrief(storage), {
+      template: null,
+      brief: 'A bakery site.',
+      screens: [],
+    });
+    assert.equal(takeTemplateBrief(storage), null);
+  });
+
+  it('drops a kept value with no template field at all', () => {
+    const storage = memory();
+    storage.setItem(TEMPLATE_BRIEF_KEY, JSON.stringify({ brief: 'x' }));
+    assert.equal(takeTemplateBrief(storage), null);
+  });
+});

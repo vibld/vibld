@@ -691,8 +691,11 @@
 .lb-ask textarea::placeholder {
   color: var(--color-ink-muted);
 }
-.lb-ask__go {
+.lb-ask__actions {
+  display: flex;
   flex: none;
+  flex-direction: column;
+  gap: 8px;
 }
 .lb-sugg {
   display: flex;
@@ -752,6 +755,13 @@
   .lb-ask__row {
     flex-direction: column;
     align-items: stretch;
+  }
+  .lb-ask__actions {
+    flex-direction: row;
+  }
+  .lb-ask__actions .button {
+    flex: 1;
+    justify-content: center;
   }
 }
 
