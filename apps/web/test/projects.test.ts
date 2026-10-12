@@ -8,6 +8,7 @@ import { handleProjects } from '../worker/project-handlers.ts';
 import type { ProjectsDeps } from '../worker/project-handlers.ts';
 import { ProjectStore, resolveRunProject } from '../worker/project-store.ts';
 import { D1GenerationStore } from '../worker/generation-store.ts';
+import { recordPublish } from '../worker/publish-history.ts';
 import { ACTIVE_PROJECT_LIMIT } from '../worker/entitlement.ts';
 import type { Tier } from '../worker/entitlement.ts';
 import type { PrincipalGranted } from '../worker/principal.ts';
@@ -1742,5 +1743,103 @@ describe('editing files with no build (D190)', () => {
     );
     assert.deepEqual([one!.status, two!.status].sort(), [200, 409]);
     assert.equal(await edits(w), 1);
+  });
+});
+
+describe("a project's publish history (D219)", () => {
+  it('lists what went out, newest first, and which of it can go out again', async () => {
+    const w = world();
+    const project = await create(w, ALICE);
+    await build(w, project.id, 'r1');
+    await build(w, project.id, 'r2');
+    const now = new Date('2026-10-11T12:00:00.000Z');
+    await recordPublish(w.db, {
+      projectId: project.id,
+      slug: 'bakery',
+      revision: 'r1',
+      generation: null,
+      now,
+    });
+    await recordPublish(w.db, {
+      projectId: project.id,
+      slug: 'bakery',
+      revision: 'r2',
+      generation: 'g2',
+      now,
+    });
+    // A checkpoint the history no longer holds stays on the record.
+    await recordPublish(w.db, {
+      projectId: project.id,
+      slug: 'bakery',
+      revision: 'r0',
+      generation: null,
+      now,
+    });
+
+    // The site serves r2's publish. The newest row (r0) is not what is
+    // up, so it is not the one called live (D219).
+    await w.db
+      .prepare(
+        `INSERT INTO published_projects
+           (slug, project_id, user_id, created_at, updated_at, generation)
+         VALUES ('bakery', ?1, ?2, ?3, ?3, 'g2')`,
+      )
+      .bind(project.id, ALICE, now.toISOString())
+      .run();
+
+    const listed = await w.call(
+      ALICE,
+      'GET',
+      `/api/projects/${project.id}/publishes`,
+    );
+    assert.equal(listed.status, 200, JSON.stringify(listed.body));
+    assert.deepEqual(
+      listed.body.publishes.map((entry: any) => [
+        entry.revision,
+        entry.available,
+        entry.live,
+      ]),
+      [
+        ['r0', false, false],
+        ['r2', true, true],
+        ['r1', true, false],
+      ],
+    );
+    assert.equal('generation' in listed.body.publishes[0], false);
+    assert.equal(listed.body.publishes[0].slug, 'bakery');
+    assert.equal(listed.body.publishes[0].publishedAt, now.toISOString());
+  });
+
+  it("answers 404 on somebody else's project, and forgets it with the project", async () => {
+    const w = world();
+    const project = await create(w, ALICE);
+    await recordPublish(w.db, {
+      projectId: project.id,
+      slug: 'bakery',
+      revision: 'r1',
+      generation: null,
+      now: new Date(),
+    });
+    const peeked = await w.call(
+      BOB,
+      'GET',
+      `/api/projects/${project.id}/publishes`,
+    );
+    assert.equal(peeked.status, 404);
+
+    const deleted = await w.call(
+      ALICE,
+      'DELETE',
+      `/api/projects/${project.id}`,
+    );
+    assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+    assert.equal(
+      await count(
+        w.db,
+        'SELECT COUNT(*) AS n FROM site_publishes WHERE project_id = ?',
+        project.id,
+      ),
+      0,
+    );
   });
 });

@@ -817,3 +817,287 @@ describe('the publish button, per project', () => {
     view.unmount();
   });
 });
+
+describe('putting an earlier publish back (D219)', () => {
+  const site = {
+    slug: 'bakery',
+    state: 'live' as const,
+    url: 'https://bakery.vibld-preview.dev/',
+  };
+  const history = {
+    publishes: [
+      {
+        revision: 'r3',
+        slug: 'bakery',
+        publishedAt: '2026-10-11T12:00:00.000Z',
+        available: true,
+        live: true,
+      },
+      {
+        revision: 'r2',
+        slug: 'bakery',
+        publishedAt: '2026-10-10T12:00:00.000Z',
+        available: true,
+        live: false,
+      },
+      {
+        revision: 'r1',
+        slug: 'bakery',
+        publishedAt: '2026-10-09T12:00:00.000Z',
+        available: false,
+        live: false,
+      },
+    ],
+  };
+
+  function answering(calls: () => Call[]) {
+    return () => {
+      const last = calls().at(-1)!;
+      if (last.url.endsWith('/publishes')) return reply(history);
+      if (last.url === '/api/publish') {
+        return reply({ slug: 'bakery', url: site.url, skipped: [] });
+      }
+      return reply({});
+    };
+  }
+
+  function buttonNamed(container: HTMLElement, name: RegExp) {
+    return [...container.querySelectorAll('button')].find((button) =>
+      name.test(button.textContent ?? ''),
+    );
+  }
+
+  it('asks for the history only when it is opened', async () => {
+    let all: Call[] = [];
+    all = serving(answering(() => all));
+    const view = await mount(
+      <PublishButton
+        snapshot={snapshot('r4')}
+        projectId="project-7"
+        site={site}
+      />,
+    );
+    assert.equal(
+      all.some((call) => call.url.endsWith('/publishes')),
+      false,
+      'the history was read before anyone asked for it',
+    );
+    await press(
+      buttonNamed(view.container, /Published versions/),
+      'history toggle',
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.ok(
+      all.some((call) => call.url === '/api/projects/project-7/publishes'),
+    );
+    const text = view.container.textContent ?? '';
+    assert.match(text, /Live now/);
+    assert.match(text, /No longer stored/);
+    view.unmount();
+  });
+
+  it('raises the decision first, then sends the revision and no files', async () => {
+    let all: Call[] = [];
+    all = serving(answering(() => all));
+    const publishes = () => all.filter((call) => call.url === '/api/publish');
+    const view = await mount(
+      <PublishButton
+        snapshot={snapshot('r4')}
+        projectId="project-7"
+        site={site}
+      />,
+    );
+    await press(
+      buttonNamed(view.container, /Published versions/),
+      'history toggle',
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await press(buttonNamed(view.container, /Put this back/), 'put back');
+    assert.equal(publishes().length, 0, 'published on the first press');
+    assert.match(panelOf(view.container)?.textContent ?? '', /r2/);
+    assert.match(
+      panelOf(view.container)?.textContent ?? '',
+      /replacing what is live now/,
+    );
+
+    await view.confirm();
+    assert.deepEqual(publishes()[0]?.body, {
+      slug: 'bakery',
+      projectId: 'project-7',
+      revision: 'r2',
+    });
+    view.unmount();
+  });
+
+  it('leaves a site that is down as down when a put-back is declined', async () => {
+    let all: Call[] = [];
+    all = serving(answering(() => all));
+    const view = await mount(
+      <PublishButton
+        snapshot={snapshot('r4')}
+        projectId="project-7"
+        site={{ ...site, state: 'down' }}
+      />,
+    );
+    await press(
+      buttonNamed(view.container, /Published versions/),
+      'history toggle',
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await press(buttonNamed(view.container, /Put this back/), 'put back');
+    assert.doesNotMatch(
+      panelOf(view.container)?.textContent ?? '',
+      /replacing what is live now/,
+      'a site that is down was said to be live',
+    );
+    await view.cancel();
+
+    assert.equal(view.label(), 'Publish again');
+    assert.equal(
+      view.takeDownButton(),
+      undefined,
+      'it offered to take down a site that is already down',
+    );
+    assert.doesNotMatch(view.container.textContent ?? '', /Live now/);
+    assert.equal(
+      all.some((call) => call.url === '/api/publish'),
+      false,
+      'declining published',
+    );
+    view.unmount();
+  });
+
+  it('leaves a site that is down as down when a put-back fails', async () => {
+    let all: Call[] = [];
+    all = serving(() => {
+      const last = all.at(-1)!;
+      if (last.url.endsWith('/publishes')) return reply(history);
+      return reply({ error: 'No.' }, 500);
+    });
+    const view = await mount(
+      <PublishButton
+        snapshot={snapshot('r4')}
+        projectId="project-7"
+        site={{ ...site, state: 'down' }}
+      />,
+    );
+    await press(
+      buttonNamed(view.container, /Published versions/),
+      'history toggle',
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await press(buttonNamed(view.container, /Put this back/), 'put back');
+    await view.confirm();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.match(view.container.textContent ?? '', /No\./, 'never failed');
+
+    assert.equal(
+      view.takeDownButton(),
+      undefined,
+      'a failed put-back offered to take down a site that is down',
+    );
+    assert.doesNotMatch(view.container.textContent ?? '', /Live now/);
+    view.unmount();
+  });
+
+  it('calls nothing live that the server does not say is serving', async () => {
+    // A publish whose row was not written leaves the newest row naming
+    // files that are no longer up.
+    const unrecorded = {
+      publishes: history.publishes.map((entry) => ({ ...entry, live: false })),
+    };
+    serving(() => reply(unrecorded));
+    const view = await mount(
+      <PublishButton
+        snapshot={snapshot('r4')}
+        projectId="project-7"
+        site={site}
+      />,
+    );
+    await press(
+      buttonNamed(view.container, /Published versions/),
+      'history toggle',
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const text = view.container.textContent ?? '';
+    assert.doesNotMatch(text, /Live now/);
+    assert.equal(
+      [...view.container.querySelectorAll('button')].filter((button) =>
+        /Put this back/.test(button.textContent ?? ''),
+      ).length,
+      2,
+    );
+    view.unmount();
+  });
+
+  it('keeps a way to take the site down when a put-back from down is abandoned in flight', async () => {
+    let all: Call[] = [];
+    const late = held(() =>
+      reply({ slug: 'bakery', url: site.url, skipped: [] }),
+    );
+    all = serving(() => {
+      const last = all.at(-1)!;
+      if (last.url.endsWith('/publishes')) return reply(history);
+      return late.answer();
+    });
+    const view = await mount(
+      <PublishButton
+        snapshot={snapshot('r4')}
+        projectId="project-7"
+        site={{ ...site, state: 'down' }}
+      />,
+    );
+    await press(
+      buttonNamed(view.container, /Published versions/),
+      'history toggle',
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await press(buttonNamed(view.container, /Put this back/), 'put back');
+    await view.confirm();
+    await view.render(
+      <PublishButton
+        snapshot={snapshot('r5')}
+        projectId="project-7"
+        site={{ ...site, state: 'down' }}
+      />,
+    );
+    await late.land();
+
+    assert.ok(
+      view.takeDownButton(),
+      'a publish that may have landed left no way to take the site down',
+    );
+    view.unmount();
+  });
+
+  it('names the checkpoint on an ordinary publish, so it is recorded', async () => {
+    let all: Call[] = [];
+    all = serving(answering(() => all));
+    const view = await mount(
+      <PublishButton
+        snapshot={snapshot('r4')}
+        projectId="project-7"
+        site={site}
+      />,
+    );
+    await view.click();
+    const sent = all.find((call) => call.url === '/api/publish');
+    assert.equal(sent?.body?.revision, 'r4');
+    assert.ok(Array.isArray(sent?.body?.files));
+    view.unmount();
+  });
+});

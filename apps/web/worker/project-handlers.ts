@@ -17,6 +17,7 @@ import {
   PROJECT_CHECKPOINTS_ROUTE,
   PROJECT_DUPLICATE_ROUTE,
   PROJECT_FILES_ROUTE,
+  PROJECT_PUBLISHES_ROUTE,
   PROJECT_ITEM_ROUTE,
   PROJECT_RESTORE_ROUTE,
   PROJECT_SHARE_ROUTE,
@@ -24,6 +25,7 @@ import {
   routeKeyFor,
 } from './access-gate.ts';
 import { D1GenerationStore } from './generation-store.ts';
+import { listPublishes, servingGeneration } from './publish-history.ts';
 import type { Tier } from './entitlement.ts';
 import { planOf, projectLimitOf } from './spendable.ts';
 import type { PrincipalDenied, PrincipalGranted } from './principal.ts';
@@ -76,6 +78,9 @@ import { newShareToken, shareUrl } from './share-link.ts';
  *                                          (D190); with dryRun, checked
  *                                          and answered, never accepted
  *                                          (D212)
+ *     GET    /api/projects/:id/publishes   which checkpoints its site went
+ *                                          out at, newest first, and whether
+ *                                          each can still be put back (D219)
  *
  * Every route that names a project answers 404 for one that is not the
  * caller's, never 403: "that exists, and it is not yours" is a fact about
@@ -538,6 +543,7 @@ const ALLOWED: Record<string, readonly string[]> = {
   [PROJECT_CHECKPOINTS_ROUTE]: ['GET'],
   [PROJECT_RESTORE_ROUTE]: ['POST'],
   [PROJECT_FILES_ROUTE]: ['GET', 'PUT'],
+  [PROJECT_PUBLISHES_ROUTE]: ['GET'],
 };
 
 /**
@@ -802,6 +808,28 @@ export async function handleProjects(
       env.PROJECT_CONTENT,
     ).listCheckpoints(project.id);
     return json(history);
+  }
+
+  if (route === PROJECT_PUBLISHES_ROUTE) {
+    const [publishes, history, serving] = await Promise.all([
+      listPublishes(db, project.id),
+      new D1GenerationStore(db, env.PROJECT_CONTENT).listCheckpoints(
+        project.id,
+      ),
+      servingGeneration(db, project.id),
+    ]);
+    // A checkpoint pruned from the history is still listed, so the record
+    // of what went out stays whole, but it cannot be published again.
+    const held = new Set(history.checkpoints.map((entry) => entry.revision));
+    return json({
+      publishes: publishes.map(({ generation, ...entry }) => ({
+        ...entry,
+        available: held.has(entry.revision),
+        // Live only on positive evidence: this row's publish is the
+        // revision being served. Never inferred from being newest.
+        live: serving !== null && generation === serving,
+      })),
+    });
   }
 
   if (route === PROJECT_RESTORE_ROUTE) {

@@ -339,7 +339,7 @@ const SAVE_ATTEMPTS = 3;
 /**
  * The rows one project has, in the order they are deleted: its run
  * history, its runs' stages, its accepted pointer, its GitHub repository
- * binding (D72), and last the row that says whose it is, so a failure part
+ * binding (D72), its site's publish history (D219), and last the row that says whose it is, so a failure part
  * way through leaves a project that still has an owner and can be deleted
  * again.
  *
@@ -356,6 +356,7 @@ export const PROJECT_ROW_DELETIONS: readonly string[] = [
   `DELETE FROM generation_stages WHERE project_id = ?1`,
   `DELETE FROM generation_projects WHERE id = ?1`,
   `DELETE FROM github_project_bindings WHERE project_id = ?1`,
+  `DELETE FROM site_publishes WHERE project_id = ?1`,
   `DELETE FROM projects WHERE id = ?1`,
 ];
 

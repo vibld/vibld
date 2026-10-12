@@ -152,7 +152,13 @@ export async function buildProject(
 }
 
 export type PublishResult =
-  | { ok: true; slug: string; url: string }
+  | {
+      ok: true;
+      slug: string;
+      url: string;
+      /** The revision this publish put up; null from an older service. */
+      generation: string | null;
+    }
   | { ok: false; error: string; status: number };
 
 export async function publishProject(
@@ -185,6 +191,7 @@ export async function publishProject(
   const record = (body ?? {}) as {
     slug?: unknown;
     url?: unknown;
+    generation?: unknown;
     error?: unknown;
   };
   if (
@@ -192,7 +199,13 @@ export async function publishProject(
     typeof record.slug === 'string' &&
     typeof record.url === 'string'
   ) {
-    return { ok: true, slug: record.slug, url: record.url };
+    return {
+      ok: true,
+      slug: record.slug,
+      url: record.url,
+      generation:
+        typeof record.generation === 'string' ? record.generation : null,
+    };
   }
   return {
     ok: false,

@@ -4361,6 +4361,100 @@ export const OPENAPI = {
         },
       },
     },
+    '/api/projects/{id}/publishes': {
+      parameters: [
+        {
+          name: 'id',
+          in: 'path',
+          required: true,
+          description:
+            'The project id. An id that does not match the pattern, or names a project the caller does not own, is answered 404 (never 403).',
+          schema: {
+            type: 'string',
+            pattern: '^[A-Za-z0-9_-]{1,128}$',
+          },
+        },
+      ],
+      get: {
+        operationId: 'listSitePublishes',
+        summary:
+          "List which checkpoints a project's site was published at, newest first (D219).",
+        tags: ['Projects'],
+        security: [
+          {
+            clerk: [],
+          },
+        ],
+        parameters: [],
+        responses: {
+          '200': {
+            description:
+              'The publish history (at most 50 entries). `available` says whether the checkpoint is still in the project history, so `POST /api/publish` with that `revision` can put it back.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SitePublishHistory',
+                },
+              },
+            },
+          },
+          '401': {
+            description:
+              'No usable identity: the request carries none of the sign-in its `security` names. The body also carries `reason: "not-signed-in"`.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '403': {
+            description:
+              'Refused: the session token failed verification (`reason: "not-signed-in"`), the account is banned (`reason: "account-banned"`), the account is scheduled for deletion (`reason: "deletion-scheduled"`, with `purgeAfter`), or sign-in is not configured on this deployment (`reason: "not-configured"`).',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '404': {
+            description: "The project does not exist or is not the caller's.",
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '405': {
+            description:
+              'Method not allowed. The error text names the accepted methods (GET).',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+          '503': {
+            description:
+              'Projects are not configured for this deployment (no D1 or R2 binding), or the account could not be checked right now.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/Error',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     '/api/projects/{id}/domain': {
       parameters: [
         {
@@ -9367,7 +9461,9 @@ export const OPENAPI = {
       },
       PublishRequest: {
         type: 'object',
-        required: ['files'],
+        description:
+          'Either `files`, or a `revision` alone to put that checkpoint back on the web (D219): its files are then read from the project history, never from the request.',
+        anyOf: [{ required: ['files'] }, { required: ['revision'] }],
         properties: {
           files: {
             type: 'array',
@@ -9388,6 +9484,12 @@ export const OPENAPI = {
             type: ['string', 'null'],
             pattern: '^[A-Za-z0-9_-]{1,128}$',
           },
+          revision: {
+            type: 'string',
+            pattern: '^[A-Za-z0-9_-]{1,64}$',
+            description:
+              'The checkpoint these files are, recorded in the publish history when the project history holds it. Alone, the checkpoint to publish again; 404 when the history no longer holds it.',
+          },
         },
       },
       PublishResult: {
@@ -9407,6 +9509,42 @@ export const OPENAPI = {
               type: 'string',
             },
             description: 'Reported by the build service.',
+          },
+          revision: {
+            type: ['string', 'null'],
+            description:
+              'The checkpoint recorded in the publish history, or null when none was.',
+          },
+        },
+      },
+      SitePublishHistory: {
+        type: 'object',
+        required: ['publishes'],
+        properties: {
+          publishes: {
+            type: 'array',
+            maxItems: 50,
+            items: {
+              type: 'object',
+              required: [
+                'revision',
+                'slug',
+                'publishedAt',
+                'available',
+                'live',
+              ],
+              properties: {
+                revision: { type: 'string' },
+                slug: { type: 'string' },
+                publishedAt: { type: 'string', format: 'date-time' },
+                available: { type: 'boolean' },
+                live: {
+                  type: 'boolean',
+                  description:
+                    'Whether this publish is the one the site is serving now.',
+                },
+              },
+            },
           },
         },
       },

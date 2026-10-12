@@ -1762,6 +1762,36 @@ describe('the routes', () => {
   });
 });
 
+describe('the project rows a purge without R2 deletes', () => {
+  it("takes every owned project's publish history with it (D219)", async () => {
+    // With no bucket the `snapshots` step returns at once, and these
+    // statements are what is left to delete each project's rows.
+    const w = world();
+    const at = '2026-10-11T00:00:00.000Z';
+    await exec(
+      w.db,
+      `INSERT INTO projects (id, user_id, name, created_at, updated_at, last_opened_at)
+       VALUES ('proj_owned', ?1, 'Owned', ?2, ?2, ?2)`,
+      USER,
+      at,
+    );
+    for (const project of [USER, 'proj_owned']) {
+      await exec(
+        w.db,
+        `INSERT INTO site_publishes (project_id, slug, revision, published_at)
+         VALUES (?1, 'bakery', 'r1', ?2)`,
+        project,
+        at,
+      );
+    }
+    await w.deps.store.deleteProjectRows(USER);
+    assert.equal(
+      await count(w.db, `SELECT COUNT(*) AS n FROM site_publishes`),
+      0,
+    );
+  });
+});
+
 describe('the purge budget', () => {
   it('counts one query per kept billing table', () => {
     // Re-keying is one UPDATE per table, and the nightly share is sized

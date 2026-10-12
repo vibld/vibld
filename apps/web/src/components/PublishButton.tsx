@@ -6,6 +6,8 @@ import {
 } from '../generation/publish-client.ts';
 import { createStatusGate } from '../github/panel-view.ts';
 import { CustomDomain } from './CustomDomain.tsx';
+import { PublishHistory } from './PublishHistory.tsx';
+import type { SitePublish } from '../generation/publish-client.ts';
 import type { ProjectSite } from '../projects/projects-client.ts';
 
 /**
@@ -31,11 +33,22 @@ type Decision =
        * carrying the work closes that window without a second rule to keep
        * in step with the first: there is no reading of "current" left to go
        * stale.
+       *
+       * Null for a rollback (D219): the server reads the checkpoint back
+       * from the project's history, so nothing of the code is sent.
        */
-      files: ProjectFile[];
+      files: ProjectFile[] | null;
+      /** When the checkpoint being put back first went out, for a rollback. */
+      rollbackOf?: string;
       /** Whether this name already has something live under it. */
       replacing: boolean;
       publishedSlug?: string;
+      /**
+       * Raised while the site was taken down. Every way out of the decision
+       * short of a publish that lands goes back to taken down, so a cancel
+       * or a failure never relabels a site that is off the web as live.
+       */
+      takenDown?: boolean;
     }
   | { act: 'takedown'; slug: string };
 
@@ -73,7 +86,13 @@ type PublishState =
    * page load has no slug lookup, so a transient error or a rate limit was
    * enough to leave somebody's site live with no control that reaches it.
    */
-  | { phase: 'failed'; error: string; publishedSlug?: string };
+  | {
+      phase: 'failed';
+      error: string;
+      publishedSlug?: string;
+      /** The name is ours, and nothing is up under it (see `Decision`). */
+      takenDown?: boolean;
+    };
 
 /**
  * Put the project on the web, and take it off again (ADR-0010,
@@ -107,6 +126,28 @@ type PublishState =
  * server projects) neither is passed, and the Worker reads the request as
  * it always did.
  */
+/** What a publish decision carries over into its wait or its failure. */
+function nameFields(decision: Extract<Decision, { act: 'publish' }>): {
+  publishedSlug?: string;
+  takenDown?: boolean;
+} {
+  if (decision.publishedSlug === undefined) return {};
+  return decision.takenDown
+    ? { publishedSlug: decision.publishedSlug, takenDown: true }
+    : { publishedSlug: decision.publishedSlug };
+}
+
+/** Where a decision that was not carried out leaves the button. */
+function restingFrom(decision: Decision): PublishState {
+  if (decision.act === 'takedown') {
+    return { phase: 'idle', publishedSlug: decision.slug };
+  }
+  if (decision.publishedSlug === undefined) return { phase: 'idle' };
+  return decision.takenDown
+    ? { phase: 'taken-down', slug: decision.publishedSlug }
+    : { phase: 'idle', publishedSlug: decision.publishedSlug };
+}
+
 export function PublishButton({
   snapshot,
   projectId = null,
@@ -119,6 +160,8 @@ export function PublishButton({
   const [state, setState] = useState<PublishState>(() => initialState(site));
   const [slugInput, setSlugInput] = useState('');
   const publishes = useRef(createStatusGate());
+  /** Moves on after each publish here, so an open history shows it. */
+  const [published, setPublished] = useState(0);
 
   const knownSlug =
     state.phase === 'published' ||
@@ -132,7 +175,8 @@ export function PublishButton({
   const live =
     knownSlug !== undefined &&
     state.phase !== 'taken-down' &&
-    state.phase !== 'held';
+    state.phase !== 'held' &&
+    !(state.phase === 'failed' && state.takenDown === true);
 
   // What is live is the checkpoint that was published, and a later one has
   // not been. Leaving "Live at ..." up beside a project that has moved on
@@ -158,6 +202,10 @@ export function PublishButton({
       if (previous.phase === 'published') {
         return { phase: 'idle', publishedSlug: previous.slug };
       }
+      // Not back to taken down, even when the publish was raised from there:
+      // nothing cancels the request, so it may still land and put the site
+      // up. Keeping the name with "Take it down" beside it is the side that
+      // never leaves a live site without a control that reaches it.
       if (previous.phase === 'publishing') {
         return { phase: 'idle', publishedSlug: previous.publishedSlug };
       }
@@ -170,13 +218,7 @@ export function PublishButton({
       // rather than carried over to something nobody was shown. A takedown
       // goes with it: it was raised beside a sentence that is now gone.
       if (previous.phase === 'confirming') {
-        const held =
-          previous.decision.act === 'publish'
-            ? previous.decision.publishedSlug
-            : previous.decision.slug;
-        return held === undefined
-          ? { phase: 'idle' }
-          : { phase: 'idle', publishedSlug: held };
+        return restingFrom(previous.decision);
       }
       // `taken-down` deliberately survives. A new checkpoint does not put a
       // site back on the web, and saying so is the point of that state.
@@ -184,10 +226,12 @@ export function PublishButton({
     });
   }, [snapshot.revision]);
 
-  function idleWith(slug: string | undefined): PublishState {
-    return slug === undefined
-      ? { phase: 'idle' }
-      : { phase: 'idle', publishedSlug: slug };
+  /** Fields a publish decision passes on when it was raised over a name. */
+  function heldName(): { publishedSlug?: string; takenDown?: boolean } {
+    if (knownSlug === undefined) return {};
+    return state.phase === 'taken-down'
+      ? { publishedSlug: knownSlug, takenDown: true }
+      : { publishedSlug: knownSlug };
   }
 
   /** First press: raise the decision. Nothing has left the browser yet. */
@@ -205,7 +249,24 @@ export function PublishButton({
         revision: snapshot.revision,
         files: snapshot.files,
         replacing: live,
-        ...(knownSlug === undefined ? {} : { publishedSlug: knownSlug }),
+        ...heldName(),
+      },
+    });
+  }
+
+  /** First press of a rollback (D219): an earlier publish, put back. */
+  function askToRollBack(entry: SitePublish) {
+    const slug = knownSlug ?? entry.slug;
+    setState({
+      phase: 'confirming',
+      decision: {
+        act: 'publish',
+        slug,
+        revision: entry.revision,
+        files: null,
+        rollbackOf: entry.publishedAt,
+        replacing: live,
+        ...heldName(),
       },
     });
   }
@@ -264,8 +325,12 @@ export function PublishButton({
         undefined,
         undefined,
         projectId,
+        // Which checkpoint went out, for the history (D219). Only with a
+        // project, which is the only place that history is kept.
+        projectId ? decision.revision : null,
       );
       if (!current()) return;
+      if (result.ok) setPublished((count) => count + 1);
       setState(
         result.ok
           ? {
@@ -274,13 +339,7 @@ export function PublishButton({
               url: result.url,
               skipped: result.skipped,
             }
-          : decision.publishedSlug === undefined
-            ? { phase: 'failed', error: result.error }
-            : {
-                phase: 'failed',
-                error: result.error,
-                publishedSlug: decision.publishedSlug,
-              },
+          : { phase: 'failed', error: result.error, ...nameFields(decision) },
       );
     } catch (error) {
       if (!current()) return;
@@ -290,21 +349,14 @@ export function PublishButton({
           error instanceof Error
             ? error.message
             : 'The project could not be published.',
-        ...(decision.publishedSlug === undefined
-          ? {}
-          : { publishedSlug: decision.publishedSlug }),
+        ...nameFields(decision),
       });
     }
   }
 
   if (state.phase === 'confirming') {
     const { decision } = state;
-    const withdraw = () =>
-      setState(
-        idleWith(
-          decision.act === 'publish' ? decision.publishedSlug : decision.slug,
-        ),
-      );
+    const withdraw = () => setState(restingFrom(decision));
     return (
       <div
         className="publish-button publish-confirm"
@@ -317,6 +369,14 @@ export function PublishButton({
               Take <strong>{decision.slug}</strong> off the web. The address
               stops working. The name stays yours, and publishing again puts it
               back.
+            </>
+          ) : decision.rollbackOf !== undefined ? (
+            <>
+              Put checkpoint <code>{decision.revision}</code>, first published{' '}
+              {new Date(decision.rollbackOf).toLocaleString()}, back at{' '}
+              <strong>{decision.slug}</strong>
+              {decision.replacing ? ', replacing what is live now' : ''}. Your
+              current work stays as it is. Anyone with the address can read it.
             </>
           ) : (
             <>
@@ -334,7 +394,9 @@ export function PublishButton({
         >
           {decision.act === 'takedown'
             ? `Take down ${decision.slug}`
-            : `${decision.replacing ? 'Replace' : 'Publish'} ${decision.slug}`}
+            : decision.rollbackOf !== undefined
+              ? `Put back ${decision.revision}`
+              : `${decision.replacing ? 'Replace' : 'Publish'} ${decision.slug}`}
         </button>
         <button type="button" className="chip" onClick={withdraw}>
           Cancel
@@ -419,6 +481,16 @@ export function PublishButton({
         <p className="pane-note pane-note--error" role="alert">
           {state.error}
         </p>
+      ) : null}
+      {/* Earlier publishes, to put one back (D219). */}
+      {projectId && knownSlug ? (
+        <PublishHistory
+          projectId={projectId}
+          live={live}
+          version={published}
+          disabled={busy}
+          onPick={askToRollBack}
+        />
       ) : null}
       {/* The site's own domain (D189), while there is a live site. */}
       {live && projectId ? <CustomDomain projectId={projectId} /> : null}

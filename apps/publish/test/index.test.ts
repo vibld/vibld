@@ -1019,10 +1019,23 @@ describe('apps/publish Worker: taking a site down', () => {
       env,
     );
     assert.equal(again.status, 200);
-    assert.deepEqual(await again.json(), {
-      slug: 'acme',
-      url: 'https://acme.vibld-preview.dev/',
-    });
+    const body = (await again.json()) as Record<string, unknown>;
+    assert.equal(typeof body.generation, 'string');
+    assert.deepEqual(
+      { slug: body.slug, url: body.url },
+      { slug: 'acme', url: 'https://acme.vibld-preview.dev/' },
+    );
+    // The revision it names is the one now serving (D219).
+    assert.equal(
+      (
+        await env.DB.prepare(
+          'SELECT generation FROM published_projects WHERE slug = ?1',
+        )
+          .bind('acme')
+          .first<{ generation: string }>()
+      )?.generation,
+      body.generation,
+    );
 
     const site = await worker.fetch(
       publicRequest('acme.vibld-preview.dev'),

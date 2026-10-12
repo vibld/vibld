@@ -233,6 +233,9 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
   return json({
     slug: resolvedSlug,
     url: `${subdomainOrigin(resolvedSlug, hostname)}/`,
+    // Which revision this request put up, so apps/web can tell later
+    // whether it is still the one being served (D219).
+    generation,
   });
 }
 

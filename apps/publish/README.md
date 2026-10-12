@@ -175,6 +175,12 @@ gone.
 **Why three.** More than one so there is something to go back to, and not
 everything because R2 is not free and nobody is reading the eleventh.
 
+**Putting an earlier publish back is not done here.** The builder's
+"Published versions" list (D219) is kept by `apps/web` (`site_publishes`),
+and putting one back is an ordinary publish of that checkpoint, rebuilt from
+the project's history. The retained revisions here are this service's own
+safety net, not that list.
+
 **A takedown removes all of them.** Retention is for getting back to a
 revision of a site you still have. An owner saying the work should not be
 here is a different request, and leaving two older copies behind would be

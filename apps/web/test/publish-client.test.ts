@@ -146,6 +146,24 @@ describe('buildProject', () => {
 });
 
 describe('publishProject', () => {
+  it('passes on the generation the publish put up (D219)', async () => {
+    const { binding } = fakeBinding(() =>
+      jsonResponse({
+        slug: 'acme',
+        url: 'https://acme.vibld-preview.dev/',
+        generation: 'g-1',
+      }),
+    );
+    const result = await publishProject(
+      { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 's' },
+      'user_abc',
+      'user_abc',
+      'acme',
+      [],
+    );
+    assert.equal(result.ok && result.generation, 'g-1');
+  });
+
   it('posts userId, projectId, slug and files to the publish endpoint', async () => {
     const { binding, calls } = fakeBinding(() =>
       jsonResponse({
@@ -160,10 +178,12 @@ describe('publishProject', () => {
       'acme',
       [{ path: 'index.html', content: 'hi' }],
     );
+    // A service from before D219 names no generation.
     assert.deepEqual(result, {
       ok: true,
       slug: 'acme',
       url: 'https://acme.vibld-preview.dev/',
+      generation: null,
     });
     const request = calls[0]!;
     assert.equal(new URL(request.url).pathname, '/internal/publish');

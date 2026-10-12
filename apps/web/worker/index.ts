@@ -28,6 +28,7 @@ import {
   handleOpenAiAppsChallenge,
 } from './openai-apps.ts';
 import type { OpenAiAppsEnv } from './openai-apps.ts';
+import { recordPublish, resolvePublishSource } from './publish-history.ts';
 import type { McpCaller } from './mcp-auth.ts';
 import {
   MCP_METADATA_PATH,
@@ -2905,10 +2906,11 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
     return json({ error: 'Body must be valid JSON.' }, 400);
   }
 
-  const parsed = parsePreviewRequest(body);
-  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return json({ error: 'Body must be a JSON object.' }, 400);
+  }
 
-  const { slug } = (body ?? {}) as { slug?: unknown };
+  const { slug } = body as { slug?: unknown };
   if (slug !== undefined && (typeof slug !== 'string' || slug.length === 0)) {
     return json({ error: '"slug" must be a non-empty string.' }, 400);
   }
@@ -2920,6 +2922,19 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
     allowArchived: false,
   });
   if (!site.ok) return json({ error: site.error }, site.status);
+
+  // The builder's files, or with only a `revision` an earlier checkpoint
+  // read back from the project's history (D219, a rollback).
+  const source = await resolvePublishSource(
+    body as Record<string, unknown>,
+    site.projectId,
+    env.DB && env.PROJECT_CONTENT
+      ? new D1GenerationStore(env.DB, env.PROJECT_CONTENT)
+      : null,
+    (value) => parsePreviewRequest(value),
+  );
+  if (!source.ok) return json({ error: source.error }, source.status);
+  const parsed = { value: source.files };
 
   // Asked again while the workspace is busy, on the same budget the
   // repair's rebuild uses (internal PR 196 review). A verification build returns as
@@ -2969,10 +2984,26 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
   if (!published.ok) {
     return json({ error: published.error }, published.status);
   }
+  // The history a rollback picks from (D219). The site is already up, so a
+  // failure here costs the list one entry and is not the publish's failure.
+  if (source.revision !== null && env.DB) {
+    try {
+      await recordPublish(env.DB, {
+        projectId: site.projectId,
+        slug: published.slug,
+        revision: source.revision,
+        generation: published.generation,
+        now: new Date(),
+      });
+    } catch (error) {
+      console.error('publish history not recorded', error);
+    }
+  }
   return json({
     slug: published.slug,
     url: published.url,
     skipped: built.skipped,
+    revision: source.revision,
   });
 }
 
@@ -4476,6 +4507,9 @@ async function route(
     return handleProjects(request, env, projectDeps);
   }
   if (pathname === '/api/projects/:id/files') {
+    return handleProjects(request, env, projectDeps);
+  }
+  if (pathname === '/api/projects/:id/publishes') {
     return handleProjects(request, env, projectDeps);
   }
   if (pathname === '/api/projects/:id/domain') {

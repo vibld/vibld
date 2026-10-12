@@ -518,6 +518,8 @@ export class AccountDeletionStore {
       `DELETE FROM generation_stages
         WHERE project_id = ?1 OR project_id IN (${owned})`,
       `DELETE FROM generation_projects WHERE id = ?1 OR id IN (${owned})`,
+      `DELETE FROM site_publishes
+        WHERE project_id = ?1 OR project_id IN (${owned})`,
       `DELETE FROM project_media WHERE user_id = ?1`,
       `DELETE FROM projects WHERE user_id = ?1`,
     ]) {
@@ -526,7 +528,7 @@ export class AccountDeletionStore {
   }
 
   /** Statements `deleteProjectRows` makes, for the nightly allowance. */
-  static readonly PROJECT_ROW_QUERIES = 5;
+  static readonly PROJECT_ROW_QUERIES = 6;
 
   /**
    * Everything else keyed to the person that is not kept: the GitHub

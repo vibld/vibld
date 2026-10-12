@@ -619,7 +619,15 @@ paying accounts until midnight UTC.
   the file and checkpoints, with no model run. Built on the text-editing
   write path from the Turbofy review.
 - **D219. Rolling a published site back to an earlier published version:
-  build next.**
+  build next.** Each publish records which checkpoint went out
+  (`site_publishes`, migration 0057, newest 50 per project). The builder's
+  Ship panel lists them under "Published versions", and "Put this back"
+  raises the usual two-press decision, then publishes that checkpoint again.
+  The Worker reads the checkpoint's files from the project's history itself
+  (a `revision` with no `files` on `/api/publish`), builds and publishes them
+  as any publish; the project's current work is untouched. A checkpoint
+  pruned from the history stays listed as "No longer stored" and cannot go
+  out again. `apps/publish` is unchanged.
 - **D220. "Add to Claude" and a ChatGPT directory listing: build next.**
   A link that opens Claude's connector dialog with vibld's MCP server
   filled in, on vibld.com (`/docs/assistants`) and in the builder's

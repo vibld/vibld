@@ -41,16 +41,22 @@ async function errorMessage(response: Response): Promise<string> {
  * projects (the in-browser fake) has none to name, and the Worker then
  * reads the request as an older builder's.
  *
+ * `revision` names the checkpoint the files are, so the Worker can record
+ * which one went out (D219). With `files` null it is a rollback: the
+ * Worker reads that checkpoint back from the project's history and
+ * publishes it, and nothing of the code is sent.
+ *
  * Always the direct result of something the caller just clicked, so this
  * throws on failure rather than swallowing it, the same as
  * `startSandboxPreview`.
  */
 export async function publishProject(
-  files: ProjectFile[],
+  files: ProjectFile[] | null,
   slug: string | undefined,
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
   projectId: string | null = null,
+  revision: string | null = null,
 ): Promise<PublishResult> {
   const response = await fetchImpl('/api/publish', {
     method: 'POST',
@@ -59,9 +65,10 @@ export async function publishProject(
       ...(await authHeaders(getToken)),
     },
     body: JSON.stringify({
-      files,
+      ...(files ? { files } : {}),
       ...(slug ? { slug } : {}),
       ...(projectId ? { projectId } : {}),
+      ...(revision ? { revision } : {}),
     }),
   });
   if (!response.ok) {
@@ -143,4 +150,49 @@ export async function unpublishProject(
       error: 'The publish service returned an unreadable response.',
     };
   }
+}
+
+/** One publish of a project's site, as `/api/projects/:id/publishes` lists it. */
+export interface SitePublish {
+  revision: string;
+  slug: string;
+  publishedAt: string;
+  /** Whether the project's history still holds it, so it can go out again. */
+  available: boolean;
+  /** Whether this is the publish the site is serving now. */
+  live: boolean;
+}
+
+/**
+ * Which checkpoints this project's site went out at, newest first (D219).
+ * Throws on failure, like the rest of this module's reads: the caller shows
+ * the message.
+ */
+export async function listSitePublishes(
+  projectId: string,
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<SitePublish[]> {
+  const response = await fetchImpl(
+    `/api/projects/${encodeURIComponent(projectId)}/publishes`,
+    { headers: await authHeaders(getToken) },
+  );
+  if (!response.ok) throw new Error(await errorMessage(response));
+  const body = (await response.json().catch(() => null)) as {
+    publishes?: unknown;
+  } | null;
+  if (!body || !Array.isArray(body.publishes)) {
+    throw new Error('The publish history could not be read.');
+  }
+  return body.publishes
+    .filter(
+      (entry): entry is SitePublish =>
+        typeof entry === 'object' &&
+        entry !== null &&
+        typeof (entry as SitePublish).revision === 'string' &&
+        typeof (entry as SitePublish).slug === 'string' &&
+        typeof (entry as SitePublish).publishedAt === 'string' &&
+        typeof (entry as SitePublish).available === 'boolean',
+    )
+    .map((entry) => ({ ...entry, live: entry.live === true }));
 }

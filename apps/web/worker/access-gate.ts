@@ -243,6 +243,10 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   '/api/projects/:id/checkpoints': "a read of the caller's own project history",
   '/api/projects/:id/checkpoints/restore':
     "putting back code the caller's own project already had",
+  // Which checkpoints the project's site has been published at (D219), for
+  // the same reason: a read of what the account made. Putting one of them
+  // back on the web is `/api/publish`, which stays gated.
+  '/api/projects/:id/publishes': "a read of the caller's own publish history",
   // A shared project, as the stranger its owner sent the link to sees it:
   // its name and its accepted code, read-only. Not gated, and not
   // authenticated either, which makes it the third entry here that
@@ -411,6 +415,8 @@ export const PROJECT_CHECKPOINTS_ROUTE = '/api/projects/:id/checkpoints';
 export const PROJECT_RESTORE_ROUTE = '/api/projects/:id/checkpoints/restore';
 /** A project's files: one checkpoint's, and editing them (D190). */
 export const PROJECT_FILES_ROUTE = '/api/projects/:id/files';
+/** Which checkpoints a project's site went out at (D219). */
+export const PROJECT_PUBLISHES_ROUTE = '/api/projects/:id/publishes';
 /** A published site's own domain (D189, `domain-handlers.ts`). */
 export const PROJECT_DOMAIN_ROUTE = '/api/projects/:id/domain';
 /**
@@ -429,6 +435,7 @@ const PROJECT_SHARE = /^\/api\/projects\/([^/]+)\/share$/;
 const PROJECT_CHECKPOINTS = /^\/api\/projects\/([^/]+)\/checkpoints$/;
 const PROJECT_RESTORE = /^\/api\/projects\/([^/]+)\/checkpoints\/restore$/;
 const PROJECT_FILES = /^\/api\/projects\/([^/]+)\/files$/;
+const PROJECT_PUBLISHES = /^\/api\/projects\/([^/]+)\/publishes$/;
 const PROJECT_DOMAIN = /^\/api\/projects\/([^/]+)\/domain$/;
 const SHARE_VIEW = /^\/api\/share\/([^/]+)$/;
 const SHARE_PREVIEW = /^\/api\/share\/([^/]+)\/preview$/;
@@ -441,6 +448,7 @@ export function routeKeyFor(pathname: string): string {
   if (PROJECT_CHECKPOINTS.test(pathname)) return PROJECT_CHECKPOINTS_ROUTE;
   if (PROJECT_RESTORE.test(pathname)) return PROJECT_RESTORE_ROUTE;
   if (PROJECT_FILES.test(pathname)) return PROJECT_FILES_ROUTE;
+  if (PROJECT_PUBLISHES.test(pathname)) return PROJECT_PUBLISHES_ROUTE;
   if (PROJECT_DOMAIN.test(pathname)) return PROJECT_DOMAIN_ROUTE;
   if (PROJECT_ITEM.test(pathname)) return PROJECT_ITEM_ROUTE;
   if (SHARE_PREVIEW.test(pathname)) return SHARE_PREVIEW_ROUTE;
@@ -467,6 +475,7 @@ export function projectIdInPath(pathname: string): string | null {
       PROJECT_CHECKPOINTS.exec(pathname) ??
       PROJECT_RESTORE.exec(pathname) ??
       PROJECT_FILES.exec(pathname) ??
+      PROJECT_PUBLISHES.exec(pathname) ??
       PROJECT_DOMAIN.exec(pathname) ??
       PROJECT_ITEM.exec(pathname),
   );
