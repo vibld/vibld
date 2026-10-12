@@ -5,6 +5,7 @@ import { blockTracker, compareLayers, oklchToRgb } from './contrast.ts';
 import { DESIGN_MD_PATH, readDesignSpec } from './design-spec.ts';
 import type { DesignSpec, MotionEntry } from './design-spec.ts';
 import { motionCoverage } from './motion-syntax.ts';
+import { findSecrets } from './secrets.ts';
 import type { MotionBindings } from './motion-syntax.ts';
 import { dialectOf, expressionEnds, scriptSyntax } from './script-syntax.ts';
 import { stockCredit, uncreditedStockPhotos } from './stock-photos.ts';
@@ -10161,6 +10162,18 @@ export function checkDesign(
   );
   findings.push(
     ...canvasFindings(clean.filter((file) => !vibldWritten.has(file.path))),
+  );
+  // Read from the files as written, comments and all (D213). DESIGN.md is a
+  // warning, not an error: a repair keeps the spec it was held to
+  // (`keepingRecordOf` in repair.ts), so it could not remove the key there.
+  // First in the list, so a repair prompt capped at MAX_FINDINGS_IN_PROMPT
+  // always names the key to remove.
+  findings.unshift(
+    ...findSecrets(files).map((secret): DesignFinding => ({
+      severity: secret.path === DESIGN_MD_PATH ? 'warning' : 'error',
+      check: 'secret',
+      detail: `${secret.path} contains ${secret.kind}. A key in the code is published with the site, its export and any GitHub copy. Delete it from every file. Never write a secret key into the project: where a feature needs one, read it from an environment variable on a server (not a VITE_ variable, which is bundled into the page) and say in the README that the owner must set it.`,
+    })),
   );
   if (options.mediaPaths) {
     findings.push(
